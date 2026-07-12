@@ -61,6 +61,18 @@ plc-gateway
 Aktualny bootstrap wypisuje status aplikacji w JSON i konfiguruje podstawowe
 logowanie. Nie uruchamia jeszcze workerow, API administracyjnego ani driverow.
 
+## Modele domenowe
+
+Podstawowe modele domenowe znajduja sie w src/plc_gateway/domain/.
+
+Warstwa domenowa nie importuje FastAPI, SQLAlchemy ani bibliotek protokolow.
+Obejmuje konfiguracje polaczen, grup i tagow, typowane wartosci tagow, wyniki
+odczytow, wykonania pollingu, status komponentow runtime oraz jawna hierarchie
+wyjatkow.
+
+Wszystkie timestampy przekazywane do modeli runtime musza byc timezone-aware i
+sa normalizowane do UTC.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:
@@ -128,3 +140,5 @@ Repozytorium nie moze zawierac:
 - adresow produkcyjnych,
 - zrzutow firmowych konfiguracji,
 - kodu pochodzacego z innych zamknietych projektow.
+
+

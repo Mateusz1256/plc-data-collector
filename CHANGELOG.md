@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 Wszystkie istotne zmiany w projekcie beda dokumentowane w tym pliku.
 
@@ -15,6 +15,7 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 - Minimal command entry point exposing application status and version.
 - Pytest, pytest-asyncio, ruff, and mypy configuration.
 - GitHub Actions workflow for tests, linting, formatting check, and type check.
+- Core framework-independent domain models, enums, and exceptions.
 
 ### Changed
 
@@ -25,3 +26,4 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 ### Fixed
 
 ### Security
+

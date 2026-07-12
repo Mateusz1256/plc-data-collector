@@ -1,5 +1,7 @@
 # Task 01: Modele domenowe
 
+Status: done
+
 ## Cel
 
 Zdefiniować stabilne modele domenowe niezależne od FastAPI, SQLAlchemy i bibliotek protokołów.
@@ -54,3 +56,4 @@ Wyjątki:
 ```text
 feat(domain): add core communication and runtime models
 ```
+
