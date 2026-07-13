@@ -8,9 +8,17 @@ from plc_gateway.persistence.repositories import (
     RuntimeStatusRepository,
 )
 from plc_gateway.persistence.schema import metadata
+from plc_gateway.persistence.writer import (
+    DatabaseWriter,
+    DatabaseWriterMetrics,
+    DatabaseWriterShutdown,
+)
 
 __all__ = [
     "ConfigurationRepository",
+    "DatabaseWriter",
+    "DatabaseWriterMetrics",
+    "DatabaseWriterShutdown",
     "ReadingRepository",
     "RuntimeStatusRepository",
     "TagReadingRecord",

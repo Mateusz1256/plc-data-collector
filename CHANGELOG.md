@@ -30,6 +30,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   occupancy metrics, consumer acknowledgement, and explicit shutdown outcomes.
 - SQLAlchemy/Alembic relational persistence schema and repositories for
   configuration, poll executions, tag readings, and runtime component status.
+- Batched database writer that consumes the bounded reading queue, flushes by
+  size or interval, retries storage failures, and records writer metrics.
 
 ### Changed
 

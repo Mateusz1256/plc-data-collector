@@ -1,5 +1,7 @@
 # Task 09: Batch database writer
 
+Status: done
+
 ## Cel
 
 Dodać niezależny konsument kolejki zapisujący rekordy batchami.

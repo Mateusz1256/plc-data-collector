@@ -307,6 +307,26 @@ Zasady:
 - JSON jest uzywany tylko dla danych specyficznych dla protokolu
   (`protocol_options`) oraz metadanych tagow.
 
+## Database writer
+
+`DatabaseWriter` w `plc_gateway.persistence` jest niezaleznym konsumentem
+`ReadingQueue`. Zbiera `WorkerPollResult` do batchy i zapisuje je przez
+`ReadingRepository`.
+
+Zachowanie:
+
+- flush nastepuje po osiagnieciu `batch_size` albo po `flush_interval_s`,
+- zapis repozytorium jest uruchamiany poza event loopem przez `asyncio.to_thread`
+  i ograniczony `storage_timeout_s`,
+- caly batch jest zapisywany transakcyjnie przez `save_poll_results()`,
+- retry ponawia ten sam batch; `event_id` odczytow jest deterministyczny
+  (`execution_id:index`), wiec ponowienie nie tworzy duplikatow,
+- po sukcesie writer wywoluje `task_done()` dla elementow pobranych z kolejki,
+- po wyczerpaniu retry batch jest oznaczony w metrykach jako failed, zeby
+  shutdown nie ukrywal utraty danych,
+- `shutdown(timeout_s)` prosi writer o zatrzymanie i probuje oproznic kolejke w
+  zadanym limicie.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

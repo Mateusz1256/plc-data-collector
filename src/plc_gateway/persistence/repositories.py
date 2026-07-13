@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Connection, Engine, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.engine import CursorResult
 
 from plc_gateway.domain import (
     ConnectionConfig,
@@ -24,6 +25,7 @@ from plc_gateway.persistence.schema import (
     tag_readings,
     tags,
 )
+from plc_gateway.runtime import WorkerPollResult
 
 
 class ConfigurationRepository:
@@ -121,47 +123,34 @@ class ReadingRepository:
     def save_poll_execution(self, execution: PollExecution) -> None:
         """Persist one poll execution idempotently by execution_id."""
         with self._engine.begin() as connection:
-            statement = sqlite_insert(poll_executions).values(
-                execution_id=execution.execution_id,
-                connection_id=execution.connection_id,
-                tag_group_id=execution.tag_group_id,
-                status=execution.status.value,
-                started_at=execution.started_at,
-                finished_at=execution.finished_at,
-                requested_tags=execution.requested_tags,
-                successful_tags=execution.successful_tags,
-                failed_tags=execution.failed_tags,
-                error_message=execution.error_message,
-            )
-            connection.execute(
-                statement.on_conflict_do_update(
-                    index_elements=[poll_executions.c.execution_id],
-                    set_={
-                        "status": statement.excluded.status,
-                        "finished_at": statement.excluded.finished_at,
-                        "requested_tags": statement.excluded.requested_tags,
-                        "successful_tags": statement.excluded.successful_tags,
-                        "failed_tags": statement.excluded.failed_tags,
-                        "error_message": statement.excluded.error_message,
-                    },
-                )
-            )
+            _save_poll_execution(connection, execution)
 
     def save_tag_readings(self, records: Iterable[TagReadingRecord]) -> int:
         """Persist tag readings, ignoring duplicate event IDs."""
         inserted = 0
         with self._engine.begin() as connection:
             for record in records:
-                statement = sqlite_insert(tag_readings).values(
-                    **_reading_values(record),
-                )
-                result = connection.execute(
-                    statement.on_conflict_do_nothing(
-                        index_elements=[tag_readings.c.event_id],
-                    )
-                )
+                result = _save_tag_reading(connection, record)
                 inserted += result.rowcount or 0
         return inserted
+
+    def save_poll_results(self, poll_results: Iterable[WorkerPollResult]) -> int:
+        """Persist poll executions and readings in one transaction."""
+        inserted_readings = 0
+        with self._engine.begin() as connection:
+            for poll_result in poll_results:
+                _save_poll_execution(connection, poll_result.execution)
+                for index, result in enumerate(poll_result.results):
+                    record = TagReadingRecord(
+                        event_id=_event_id(poll_result.execution.execution_id, index),
+                        connection_id=poll_result.execution.connection_id,
+                        tag_group_id=poll_result.execution.tag_group_id,
+                        result=result,
+                    )
+                    inserted_readings += (
+                        _save_tag_reading(connection, record).rowcount or 0
+                    )
+        return inserted_readings
 
     def count_tag_readings(self) -> int:
         """Return the number of persisted tag readings."""
@@ -233,6 +222,52 @@ def _reading_values(record: TagReadingRecord) -> dict[str, object]:
     if value is not None:
         values.update(_tag_value_columns(value))
     return values
+
+
+def _save_poll_execution(connection: Connection, execution: PollExecution) -> None:
+    statement = sqlite_insert(poll_executions).values(
+        execution_id=execution.execution_id,
+        connection_id=execution.connection_id,
+        tag_group_id=execution.tag_group_id,
+        status=execution.status.value,
+        started_at=execution.started_at,
+        finished_at=execution.finished_at,
+        requested_tags=execution.requested_tags,
+        successful_tags=execution.successful_tags,
+        failed_tags=execution.failed_tags,
+        error_message=execution.error_message,
+    )
+    connection.execute(
+        statement.on_conflict_do_update(
+            index_elements=[poll_executions.c.execution_id],
+            set_={
+                "status": statement.excluded.status,
+                "finished_at": statement.excluded.finished_at,
+                "requested_tags": statement.excluded.requested_tags,
+                "successful_tags": statement.excluded.successful_tags,
+                "failed_tags": statement.excluded.failed_tags,
+                "error_message": statement.excluded.error_message,
+            },
+        )
+    )
+
+
+def _save_tag_reading(
+    connection: Connection,
+    record: TagReadingRecord,
+) -> CursorResult[object]:
+    statement = sqlite_insert(tag_readings).values(
+        **_reading_values(record),
+    )
+    return connection.execute(
+        statement.on_conflict_do_nothing(
+            index_elements=[tag_readings.c.event_id],
+        )
+    )
+
+
+def _event_id(execution_id: str, result_index: int) -> str:
+    return f"{execution_id}:{result_index}"
 
 
 def _tag_value_columns(value: TagValue) -> dict[str, object]:
