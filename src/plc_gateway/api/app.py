@@ -55,6 +55,7 @@ def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
             "worker_metrics": _encode(runtime_state.worker_metrics),
             "queue": _encode(runtime_state.queue_metrics),
             "writer": _encode(runtime_state.writer_metrics),
+            "spool": _encode(runtime_state.spool_metrics),
         }
 
     @app.get("/api/runtime/workers")

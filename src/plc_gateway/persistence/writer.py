@@ -6,8 +6,10 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
+from plc_gateway.persistence.spool import SpoolEntry
 from plc_gateway.runtime import ReadingQueue, RetryPolicy, WorkerPollResult
 from plc_gateway.runtime.retry import run_with_retry
 
@@ -19,6 +21,31 @@ class PollResultRepository(Protocol):
 
     def save_poll_results(self, poll_results: list[WorkerPollResult]) -> int:
         """Persist a batch of poll results and return inserted reading count."""
+        ...
+
+
+class PollResultSpool(Protocol):
+    """Durable spool contract required by the database writer."""
+
+    def append(self, poll_results: list[WorkerPollResult]) -> int:
+        """Persist poll results for later replay."""
+        ...
+
+    def fetch_due(
+        self,
+        *,
+        limit: int,
+        now: datetime | None = None,
+    ) -> list[SpoolEntry]:
+        """Return due spool entries."""
+        ...
+
+    def mark_replayed(self, execution_ids: list[str]) -> int:
+        """Delete entries confirmed in the main database."""
+        ...
+
+    def mark_failed(self, execution_ids: list[str], *, retry_delay_s: float) -> int:
+        """Record failed replay attempts and schedule another attempt."""
         ...
 
 
@@ -34,6 +61,10 @@ class DatabaseWriterMetrics:
     inserted_readings: int
     retry_attempts: int
     pending_batch_size: int
+    spooled_poll_results: int = 0
+    spool_replayed_poll_results: int = 0
+    spool_failed_replays: int = 0
+    spool_full_failures: int = 0
     last_error: str | None = None
 
 
@@ -60,6 +91,10 @@ class DatabaseWriter:
         max_retries: int = 2,
         retry_delay_s: float = 0.1,
         retry_policy: RetryPolicy | None = None,
+        spool: PollResultSpool | None = None,
+        spool_replay_batch_size: int | None = None,
+        spool_retry_delay_s: float = 1.0,
+        spool_timeout_s: float | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
         logger: logging.Logger | None = None,
     ) -> None:
@@ -74,6 +109,12 @@ class DatabaseWriter:
             raise ValueError("max_retries must be non-negative.")
         if retry_delay_s < 0:
             raise ValueError("retry_delay_s must be non-negative.")
+        if spool_replay_batch_size is not None and spool_replay_batch_size <= 0:
+            raise ValueError("spool_replay_batch_size must be positive.")
+        if spool_retry_delay_s < 0:
+            raise ValueError("spool_retry_delay_s must be non-negative.")
+        if spool_timeout_s is not None and spool_timeout_s <= 0:
+            raise ValueError("spool_timeout_s must be positive.")
 
         self._queue = queue
         self._repository = repository
@@ -84,6 +125,10 @@ class DatabaseWriter:
             max_retries=max_retries,
             retry_delay_s=retry_delay_s,
         )
+        self._spool = spool
+        self._spool_replay_batch_size = spool_replay_batch_size or batch_size
+        self._spool_retry_delay_s = spool_retry_delay_s
+        self._spool_timeout_s = spool_timeout_s or storage_timeout_s
         self._sleep = asyncio.sleep if sleep is None else sleep
         self._logger = LOGGER if logger is None else logger
         self._stop_requested = asyncio.Event()
@@ -97,6 +142,10 @@ class DatabaseWriter:
         self._failed_poll_results = 0
         self._inserted_readings = 0
         self._retry_attempts = 0
+        self._spooled_poll_results = 0
+        self._spool_replayed_poll_results = 0
+        self._spool_failed_replays = 0
+        self._spool_full_failures = 0
         self._last_error: str | None = None
 
     async def run(self) -> None:
@@ -152,6 +201,10 @@ class DatabaseWriter:
             inserted_readings=self._inserted_readings,
             retry_attempts=self._retry_attempts,
             pending_batch_size=len(self._pending_batch),
+            spooled_poll_results=self._spooled_poll_results,
+            spool_replayed_poll_results=self._spool_replayed_poll_results,
+            spool_failed_replays=self._spool_failed_replays,
+            spool_full_failures=self._spool_full_failures,
             last_error=self._last_error,
         )
 
@@ -163,6 +216,9 @@ class DatabaseWriter:
         )
 
     async def _consume_or_flush(self) -> None:
+        if not self._pending_batch and await self._replay_spool_once():
+            return
+
         if len(self._pending_batch) >= self._batch_size:
             await self._flush_pending()
             return
@@ -200,6 +256,26 @@ class DatabaseWriter:
             return
 
         batch = list(self._pending_batch)
+        persisted = await self._persist_batch(batch)
+        if persisted:
+            self._successful_batches += 1
+            self._successful_poll_results += len(batch)
+            self._last_error = None
+            self._ack_batch(len(batch))
+            return
+
+        spooled = await self._spool_batch(batch)
+        if spooled:
+            self._failed_batches += 1
+            self._failed_poll_results += len(batch)
+            self._ack_batch(len(batch))
+            return
+
+        self._failed_batches += 1
+        self._failed_poll_results += len(batch)
+        self._ack_batch(len(batch))
+
+    async def _persist_batch(self, batch: list[WorkerPollResult]) -> bool:
         correlation_id = _batch_correlation_id(batch)
         try:
             inserted, _ = await run_with_retry(
@@ -214,17 +290,71 @@ class DatabaseWriter:
             )
         except Exception as error:
             self._last_error = str(error) or error.__class__.__name__
-            self._failed_batches += 1
-            self._failed_poll_results += len(batch)
-            self._ack_batch(len(batch))
-            return
+            return False
 
-        self._successful_batches += 1
-        self._successful_poll_results += len(batch)
         self._inserted_readings += inserted
-        self._last_error = None
-        self._ack_batch(len(batch))
-        return
+        return True
+
+    async def _spool_batch(self, batch: list[WorkerPollResult]) -> bool:
+        if self._spool is None:
+            return False
+        try:
+            inserted = await asyncio.wait_for(
+                asyncio.to_thread(self._spool.append, batch),
+                timeout=self._spool_timeout_s,
+            )
+        except Exception as error:
+            self._last_error = str(error) or error.__class__.__name__
+            self._spool_full_failures += 1
+            return False
+        self._spooled_poll_results += inserted
+        return True
+
+    async def _replay_spool_once(self) -> bool:
+        if self._spool is None:
+            return False
+        try:
+            entries = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._spool.fetch_due,
+                    limit=self._spool_replay_batch_size,
+                ),
+                timeout=self._spool_timeout_s,
+            )
+        except Exception as error:
+            self._last_error = str(error) or error.__class__.__name__
+            return False
+        if not entries:
+            return False
+
+        poll_results = [_entry_poll_result(entry) for entry in entries]
+        execution_ids = [_entry_execution_id(entry) for entry in entries]
+        if await self._persist_batch(poll_results):
+            try:
+                await asyncio.wait_for(
+                    asyncio.to_thread(self._spool.mark_replayed, execution_ids),
+                    timeout=self._spool_timeout_s,
+                )
+            except Exception as error:
+                self._last_error = str(error) or error.__class__.__name__
+            else:
+                self._spool_replayed_poll_results += len(poll_results)
+            return True
+
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._spool.mark_failed,
+                    execution_ids,
+                    retry_delay_s=self._spool_retry_delay_s,
+                ),
+                timeout=self._spool_timeout_s,
+            )
+        except Exception as error:
+            self._last_error = str(error) or error.__class__.__name__
+            return True
+        self._spool_failed_replays += len(poll_results)
+        return True
 
     async def _save_batch(self, batch: list[WorkerPollResult]) -> int:
         return await asyncio.wait_for(
@@ -265,3 +395,17 @@ def _batch_correlation_id(batch: list[WorkerPollResult]) -> str:
     if not batch:
         return "database-batch:empty"
     return f"database-batch:{batch[0].execution.execution_id}"
+
+
+def _entry_poll_result(entry: object) -> WorkerPollResult:
+    poll_result = getattr(entry, "poll_result", None)
+    if not isinstance(poll_result, WorkerPollResult):
+        raise TypeError("Spool entry must expose a WorkerPollResult poll_result.")
+    return poll_result
+
+
+def _entry_execution_id(entry: object) -> str:
+    execution_id = getattr(entry, "execution_id", None)
+    if not isinstance(execution_id, str):
+        raise TypeError("Spool entry must expose a string execution_id.")
+    return execution_id

@@ -38,6 +38,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   classification, structured correlation logs, and runtime worker metrics.
 - Asynchronous OPC UA driver with batch reads, source timestamps, quality
   mapping, timeout handling, reconnect support, and marked integration tests.
+- Durable SQLite offline spool with bounded capacity, retry scheduling,
+  restart recovery, and database writer replay support.
 
 ### Changed
 

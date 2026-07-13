@@ -1,5 +1,7 @@
 # Task 13: Trwały spool awaryjny
 
+Status: done
+
 ## Cel
 
 Zapewnić przetrwanie odczytów podczas niedostępności głównej bazy.

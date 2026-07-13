@@ -367,8 +367,32 @@ Zachowanie:
 - po sukcesie writer wywoluje `task_done()` dla elementow pobranych z kolejki,
 - po wyczerpaniu retry batch jest oznaczony w metrykach jako failed, zeby
   shutdown nie ukrywal utraty danych,
+- opcjonalny `DurableSqliteSpool` zapisuje batch do lokalnego SQLite po
+  wyczerpaniu retry glownej bazy i dopiero wtedy potwierdza elementy kolejki,
 - `shutdown(timeout_s)` prosi writer o zatrzymanie i probuje oproznic kolejke w
   zadanym limicie.
+
+## Durable disk spool
+
+`DurableSqliteSpool` w `plc_gateway.persistence` jest lokalnym, ograniczonym
+spool'em awaryjnym dla `WorkerPollResult`. Sluzy do przetrwania okresowej
+niedostepnosci glownej bazy bez trzymania odczytow tylko w pamieci.
+
+Zachowanie:
+
+- przechowuje dane w lokalnym SQLite i odtwarza je po restarcie procesu,
+- `execution_id` pollingu jest unikalnym identyfikatorem wpisu w spoolu,
+- payload zawiera `PollExecution` oraz wyniki tagow, a zapis do glownej bazy
+  nadal uzywa deterministycznych `event_id` w formacie `execution_id:index`,
+- wpis ma `retry_count`, `next_retry_at` i `created_at`,
+- replay odbywa sie batchami przez `DatabaseWriter`,
+- wpis jest usuwany ze spoola dopiero po potwierdzonym zapisie w glownej bazie,
+- gdy replay nadal sie nie powiedzie, `retry_count` rosnie, a `next_retry_at`
+  przesuwa kolejna probe,
+- `max_items` ogranicza rozmiar spoola; przekroczenie limitu jest widoczne w
+  `SpoolMetrics.full` i `rejected_items`,
+- metryki writera pokazuja liczbe spooled poll results, replayow, nieudanych
+  replayow i awarii pelnego spoola.
 
 ## Health i runtime API
 
@@ -391,7 +415,7 @@ Endpointy:
 - `GET /health/ready` - readiness krytycznych zaleznosci: konfiguracja,
   storage i bledy krytyczne,
 - `GET /api/runtime/components` - komponenty runtime oraz metryki workerow,
-  kolejki i writera,
+  kolejki, writera i spoola,
 - `GET /api/runtime/workers` - obserwowalny stan workerow oraz ich metryki,
 - `GET /api/about` - wersja aplikacji i placeholder licencji.
 

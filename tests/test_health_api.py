@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from plc_gateway.api import RuntimeApiState, create_api_app
 from plc_gateway.domain import RuntimeComponentStatus, WorkerState
-from plc_gateway.persistence import DatabaseWriterMetrics
+from plc_gateway.persistence import DatabaseWriterMetrics, SpoolMetrics
 from plc_gateway.runtime import ReadingQueueMetrics, WorkerRuntimeMetrics
 
 
@@ -123,6 +123,14 @@ def test_runtime_components_returns_status_and_metrics_without_secrets() -> None
                     retry_attempts=1,
                     pending_batch_size=0,
                 ),
+                spool_metrics=SpoolMetrics(
+                    max_items=100,
+                    stored_items=2,
+                    full=False,
+                    rejected_items=0,
+                    replayed_items=1,
+                    failed_replays=0,
+                ),
             )
         )
     )
@@ -135,6 +143,7 @@ def test_runtime_components_returns_status_and_metrics_without_secrets() -> None
     assert payload["worker_metrics"][0]["connect_retry_attempts"] == 1
     assert payload["queue"]["size"] == 2
     assert payload["writer"]["successful_batches"] == 3
+    assert payload["spool"]["stored_items"] == 2
     assert "secret" not in str(payload).lower()
 
 

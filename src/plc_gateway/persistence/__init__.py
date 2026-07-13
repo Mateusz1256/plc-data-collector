@@ -8,6 +8,7 @@ from plc_gateway.persistence.repositories import (
     RuntimeStatusRepository,
 )
 from plc_gateway.persistence.schema import metadata
+from plc_gateway.persistence.spool import DurableSqliteSpool, SpoolEntry, SpoolMetrics
 from plc_gateway.persistence.writer import (
     DatabaseWriter,
     DatabaseWriterMetrics,
@@ -19,8 +20,11 @@ __all__ = [
     "DatabaseWriter",
     "DatabaseWriterMetrics",
     "DatabaseWriterShutdown",
+    "DurableSqliteSpool",
     "ReadingRepository",
     "RuntimeStatusRepository",
+    "SpoolEntry",
+    "SpoolMetrics",
     "TagReadingRecord",
     "create_sqlite_engine",
     "initialize_schema",

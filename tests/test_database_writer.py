@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from plc_gateway.domain import (
 from plc_gateway.persistence import (
     ConfigurationRepository,
     DatabaseWriter,
+    DurableSqliteSpool,
     ReadingRepository,
     create_sqlite_engine,
     initialize_schema,
@@ -31,13 +33,21 @@ from plc_gateway.runtime import ReadingQueue, WorkerPollResult
 class FakeRepository:
     """Configurable repository for writer tests."""
 
-    def __init__(self, *, failures_before_success: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        failures_before_success: int = 0,
+        always_fail: bool = False,
+    ) -> None:
         """Create a fake repository."""
         self.failures_before_success = failures_before_success
+        self.always_fail = always_fail
         self.batches: list[list[WorkerPollResult]] = []
 
     def save_poll_results(self, poll_results: list[WorkerPollResult]) -> int:
         """Record a batch or raise a configured storage failure."""
+        if self.always_fail:
+            raise StorageError("storage failed", code="fake_storage_failed")
         if self.failures_before_success > 0:
             self.failures_before_success -= 1
             raise StorageError("storage failed", code="fake_storage_failed")
@@ -90,6 +100,20 @@ async def start_writer(writer: DatabaseWriter) -> asyncio.Task[None]:
     task = asyncio.create_task(writer.run())
     await asyncio.sleep(0)
     return task
+
+
+async def wait_until(
+    condition: Callable[[], bool],
+    *,
+    timeout_s: float = 1.0,
+) -> None:
+    """Wait until a zero-argument predicate returns true."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("condition was not reached before timeout")
 
 
 @pytest.mark.asyncio
@@ -229,6 +253,147 @@ async def test_database_writer_retry_does_not_duplicate_event_ids(
 
     assert real_repository.count_poll_executions() == 1
     assert real_repository.count_tag_readings() == 1
+
+
+@pytest.mark.asyncio
+async def test_database_writer_spools_after_database_failure(
+    tmp_path: Path,
+) -> None:
+    queue = make_queue()
+    repository = FakeRepository(always_fail=True)
+    spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
+    writer = DatabaseWriter(
+        queue,
+        repository,
+        batch_size=1,
+        flush_interval_s=1,
+        storage_timeout_s=1,
+        max_retries=0,
+        spool=spool,
+        spool_timeout_s=1,
+    )
+    task = await start_writer(writer)
+
+    await queue.put(make_poll_result("poll-1"))
+    await queue.join()
+    await writer.shutdown(timeout_s=1)
+    await task
+
+    assert spool.count() == 1
+    metrics = writer.metrics()
+    assert metrics.spooled_poll_results == 1
+    assert metrics.failed_batches == 1
+
+
+@pytest.mark.asyncio
+async def test_database_writer_replays_spool_after_database_recovers(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    engine = create_sqlite_engine(f"sqlite:///{database_path}")
+    initialize_schema(engine)
+    seed_configuration(engine)
+    repository = ReadingRepository(engine)
+    spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
+    spool.append([make_poll_result("poll-1")])
+    writer = DatabaseWriter(
+        make_queue(),
+        repository,
+        batch_size=1,
+        flush_interval_s=0.01,
+        storage_timeout_s=1,
+        max_retries=0,
+        spool=spool,
+        spool_timeout_s=1,
+    )
+    task = await start_writer(writer)
+
+    await wait_until(lambda: spool.count() == 0)
+    await writer.shutdown(timeout_s=1)
+    await task
+
+    assert repository.count_poll_executions() == 1
+    assert repository.count_tag_readings() == 1
+    assert writer.metrics().spool_replayed_poll_results == 1
+
+
+@pytest.mark.asyncio
+async def test_database_writer_spool_replay_does_not_duplicate_event_ids(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    engine = create_sqlite_engine(f"sqlite:///{database_path}")
+    initialize_schema(engine)
+    seed_configuration(engine)
+    real_repository = ReadingRepository(engine)
+    spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
+    failing_repository = PersistThenFailOnceRepository(real_repository)
+    queue = make_queue()
+    first_writer = DatabaseWriter(
+        queue,
+        failing_repository,
+        batch_size=1,
+        flush_interval_s=1,
+        storage_timeout_s=1,
+        max_retries=0,
+        spool=spool,
+        spool_timeout_s=1,
+    )
+    first_task = await start_writer(first_writer)
+
+    await queue.put(make_poll_result("poll-1"))
+    await queue.join()
+    await first_writer.shutdown(timeout_s=1)
+    await first_task
+
+    replay_writer = DatabaseWriter(
+        make_queue(),
+        real_repository,
+        batch_size=1,
+        flush_interval_s=0.01,
+        storage_timeout_s=1,
+        max_retries=0,
+        spool=spool,
+        spool_timeout_s=1,
+    )
+    replay_task = await start_writer(replay_writer)
+
+    await wait_until(lambda: spool.count() == 0)
+    await replay_writer.shutdown(timeout_s=1)
+    await replay_task
+
+    assert real_repository.count_poll_executions() == 1
+    assert real_repository.count_tag_readings() == 1
+
+
+@pytest.mark.asyncio
+async def test_database_writer_schedules_failed_spool_replay(
+    tmp_path: Path,
+) -> None:
+    repository = FakeRepository(always_fail=True)
+    spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
+    spool.append([make_poll_result("poll-1")])
+    writer = DatabaseWriter(
+        make_queue(),
+        repository,
+        batch_size=1,
+        flush_interval_s=0.01,
+        storage_timeout_s=1,
+        max_retries=0,
+        spool=spool,
+        spool_retry_delay_s=60,
+        spool_timeout_s=1,
+    )
+    task = await start_writer(writer)
+
+    await wait_until(lambda: writer.metrics().spool_failed_replays == 1)
+    await writer.shutdown(timeout_s=1)
+    await task
+
+    assert spool.fetch_due(limit=10, now=timestamp()) == []
+    metrics = writer.metrics()
+    assert metrics.spool_failed_replays == 1
+    assert metrics.last_error == "storage failed"
 
 
 @pytest.mark.asyncio

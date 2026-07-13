@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from plc_gateway.domain import RuntimeComponentStatus
-from plc_gateway.persistence import DatabaseWriterMetrics
+from plc_gateway.persistence import DatabaseWriterMetrics, SpoolMetrics
 from plc_gateway.runtime import ReadingQueueMetrics, WorkerRuntimeMetrics
 
 
@@ -20,6 +20,7 @@ class RuntimeApiState:
     worker_metrics: tuple[WorkerRuntimeMetrics, ...] = ()
     queue_metrics: ReadingQueueMetrics | None = None
     writer_metrics: DatabaseWriterMetrics | None = None
+    spool_metrics: SpoolMetrics | None = None
     critical_errors: tuple[str, ...] = field(default_factory=tuple)
 
     @property
