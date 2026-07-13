@@ -239,16 +239,23 @@ Nie wspoldzieli klienta protokolu z innymi workerami.
 Lifecycle:
 
 - `connect()` ustawia stan `starting`, laczy driver i przechodzi do `running`,
-- blad polaczenia ustawia `failed`, ale ten sam worker moze ponowic
-  `connect()`, jezeli driver jest gotowy do reconnect,
+- transient blad polaczenia jest ponawiany przez exponential backoff z jitterem
+  i maksymalnym delayem; bledy konfiguracji oraz bledy permanentne nie sa
+  retryowane w petli,
 - `poll_group()` buduje `TagRequest` z tagow grupy i zwraca `WorkerPollResult`
   zawierajacy `PollExecution` oraz wyniki tagow,
+- kazdy reconnect i poll dostaje correlation ID widoczne w logach
+  strukturalnych i metrykach workera,
+- transient blad batch read moze zostac ponowiony w ramach tej samej operacji
+  pollingu,
 - czesciowe bledy tagow daja status `partial_failure` i stan workera
   `degraded`,
 - awaria batch read jest izolowana do wynikow blednych dla tagow z tej grupy i
   nie zatrzymuje innych workerow,
 - `health_check()` aktualizuje obserwowalny stan workera,
 - `heartbeat()` odswieza timestamp statusu,
+- `metrics()` zwraca liczniki connectow, retry, polli, tagow i ostatnie
+  correlation IDs,
 - anulowanie `connect()`, `poll_group()` lub `health_check()` wykonuje
   best-effort `disconnect()` i propaguje `asyncio.CancelledError`.
 
@@ -319,8 +326,9 @@ Zachowanie:
 - zapis repozytorium jest uruchamiany poza event loopem przez `asyncio.to_thread`
   i ograniczony `storage_timeout_s`,
 - caly batch jest zapisywany transakcyjnie przez `save_poll_results()`,
-- retry ponawia ten sam batch; `event_id` odczytow jest deterministyczny
-  (`execution_id:index`), wiec ponowienie nie tworzy duplikatow,
+- retry uzywa wspolnej polityki exponential backoff; ponawia ten sam batch, a
+  `event_id` odczytow jest deterministyczny (`execution_id:index`), wiec
+  ponowienie nie tworzy duplikatow,
 - po sukcesie writer wywoluje `task_done()` dla elementow pobranych z kolejki,
 - po wyczerpaniu retry batch jest oznaczony w metrykach jako failed, zeby
   shutdown nie ukrywal utraty danych,
@@ -347,9 +355,9 @@ Endpointy:
 - `GET /health/live` - liveness procesu, niezalezny od pojedynczego PLC,
 - `GET /health/ready` - readiness krytycznych zaleznosci: konfiguracja,
   storage i bledy krytyczne,
-- `GET /api/runtime/components` - komponenty runtime oraz metryki kolejki i
-  writera,
-- `GET /api/runtime/workers` - obserwowalny stan workerow,
+- `GET /api/runtime/components` - komponenty runtime oraz metryki workerow,
+  kolejki i writera,
+- `GET /api/runtime/workers` - obserwowalny stan workerow oraz ich metryki,
 - `GET /api/about` - wersja aplikacji i placeholder licencji.
 
 Awaria pojedynczego workera oznacza tryb zdegradowany, ale nie blokuje

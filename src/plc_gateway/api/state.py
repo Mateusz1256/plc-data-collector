@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from plc_gateway.domain import RuntimeComponentStatus
 from plc_gateway.persistence import DatabaseWriterMetrics
-from plc_gateway.runtime import ReadingQueueMetrics
+from plc_gateway.runtime import ReadingQueueMetrics, WorkerRuntimeMetrics
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +17,7 @@ class RuntimeApiState:
     storage_available: bool = True
     components: tuple[RuntimeComponentStatus, ...] = ()
     workers: tuple[RuntimeComponentStatus, ...] = ()
+    worker_metrics: tuple[WorkerRuntimeMetrics, ...] = ()
     queue_metrics: ReadingQueueMetrics | None = None
     writer_metrics: DatabaseWriterMetrics | None = None
     critical_errors: tuple[str, ...] = field(default_factory=tuple)

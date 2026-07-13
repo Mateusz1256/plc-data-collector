@@ -1,5 +1,7 @@
 # Task 11: Retry, logging i observability
 
+Status: done
+
 ## Cel
 
 Dodać spójne mechanizmy retry i logowania strukturalnego.

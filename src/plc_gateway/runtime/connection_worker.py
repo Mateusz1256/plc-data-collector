@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -18,10 +19,26 @@ from plc_gateway.domain import (
     TagGroupConfig,
     TagRequest,
     TagResult,
-    TransientCommunicationError,
     WorkerState,
 )
 from plc_gateway.protocols import CommunicationDriver, DriverRegistry
+from plc_gateway.runtime.retry import RetryPolicy, run_with_retry
+
+LOGGER = logging.getLogger(__name__)
+Sleeper = Callable[[float], Awaitable[None]]
+RandomFloat = Callable[[], float]
+DEFAULT_CONNECT_RETRY_POLICY = RetryPolicy(
+    max_attempts=3,
+    initial_delay_s=0.1,
+    max_delay_s=2.0,
+    jitter_ratio=0.2,
+)
+DEFAULT_POLL_RETRY_POLICY = RetryPolicy(
+    max_attempts=2,
+    initial_delay_s=0.05,
+    max_delay_s=1.0,
+    jitter_ratio=0.2,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +47,26 @@ class WorkerPollResult:
 
     execution: PollExecution
     results: tuple[TagResult, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerRuntimeMetrics:
+    """Observable connection worker counters."""
+
+    component_id: str
+    connect_attempts: int
+    connect_successes: int
+    connect_failures: int
+    connect_retry_attempts: int
+    poll_attempts: int
+    poll_successes: int
+    poll_failures: int
+    poll_retry_attempts: int
+    tag_successes: int
+    tag_failures: int
+    last_poll_correlation_id: str | None = None
+    last_reconnect_correlation_id: str | None = None
+    last_error: str | None = None
 
 
 class ConnectionWorker:
@@ -41,16 +78,39 @@ class ConnectionWorker:
         registry: DriverRegistry,
         *,
         clock: Callable[[], datetime] | None = None,
+        connect_retry_policy: RetryPolicy = DEFAULT_CONNECT_RETRY_POLICY,
+        poll_retry_policy: RetryPolicy = DEFAULT_POLL_RETRY_POLICY,
+        retry_sleep: Sleeper | None = None,
+        jitter: RandomFloat | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         """Create a worker and its single owned driver instance."""
         self.connection = connection
         self._driver = registry.create_driver(connection)
         self._clock = _utc_now if clock is None else clock
+        self._connect_retry_policy = connect_retry_policy
+        self._poll_retry_policy = poll_retry_policy
+        self._retry_sleep = retry_sleep
+        self._jitter = jitter
+        self._logger = LOGGER if logger is None else logger
         self._state = WorkerState.STOPPED
         self._message: str | None = None
         self._error_code: str | None = None
         self._error_message: str | None = None
         self._heartbeat_at: datetime | None = None
+        self._connect_attempts = 0
+        self._connect_successes = 0
+        self._connect_failures = 0
+        self._connect_retry_attempts = 0
+        self._poll_attempts = 0
+        self._poll_successes = 0
+        self._poll_failures = 0
+        self._poll_retry_attempts = 0
+        self._tag_successes = 0
+        self._tag_failures = 0
+        self._last_poll_correlation_id: str | None = None
+        self._last_reconnect_correlation_id: str | None = None
+        self._last_error: str | None = None
 
     @property
     def driver(self) -> CommunicationDriver:
@@ -68,6 +128,25 @@ class ConnectionWorker:
             error_message=self._error_message,
         )
 
+    def metrics(self) -> WorkerRuntimeMetrics:
+        """Return observable worker runtime metrics."""
+        return WorkerRuntimeMetrics(
+            component_id=self.component_id,
+            connect_attempts=self._connect_attempts,
+            connect_successes=self._connect_successes,
+            connect_failures=self._connect_failures,
+            connect_retry_attempts=self._connect_retry_attempts,
+            poll_attempts=self._poll_attempts,
+            poll_successes=self._poll_successes,
+            poll_failures=self._poll_failures,
+            poll_retry_attempts=self._poll_retry_attempts,
+            tag_successes=self._tag_successes,
+            tag_failures=self._tag_failures,
+            last_poll_correlation_id=self._last_poll_correlation_id,
+            last_reconnect_correlation_id=self._last_reconnect_correlation_id,
+            last_error=self._last_error,
+        )
+
     @property
     def component_id(self) -> str:
         """Return stable runtime component identifier."""
@@ -75,16 +154,61 @@ class ConnectionWorker:
 
     async def connect(self) -> None:
         """Connect the owned driver and update worker state."""
+        correlation_id = str(uuid4())
+        self._last_reconnect_correlation_id = correlation_id
         self._set_state(WorkerState.STARTING, message="Connecting.")
+        self._logger.info(
+            "worker_connect_started",
+            extra={
+                "operation": "connect",
+                "correlation_id": correlation_id,
+                "component_id": self.component_id,
+                "connection_id": self.connection.id,
+                "protocol": self.connection.protocol,
+            },
+        )
         try:
-            await self._driver.connect()
+            await run_with_retry(
+                self._connect_once,
+                self._connect_retry_policy,
+                operation_name="connect",
+                correlation_id=correlation_id,
+                component_id=self.component_id,
+                logger=self._logger,
+                sleep=self._retry_sleep,
+                random_float=self._jitter,
+                on_retry=self._record_connect_retry,
+            )
         except asyncio.CancelledError:
             await self._disconnect_after_cancellation()
             raise
         except Exception as error:
+            self._connect_failures += 1
             self._record_failure(error, state=WorkerState.FAILED)
+            self._logger.warning(
+                "worker_connect_failed",
+                extra={
+                    "operation": "connect",
+                    "correlation_id": correlation_id,
+                    "component_id": self.component_id,
+                    "connection_id": self.connection.id,
+                    "protocol": self.connection.protocol,
+                    "error_code": _error_code(error),
+                },
+            )
             raise
+        self._connect_successes += 1
         self._set_state(WorkerState.RUNNING, message="Connected.")
+        self._logger.info(
+            "worker_connect_succeeded",
+            extra={
+                "operation": "connect",
+                "correlation_id": correlation_id,
+                "component_id": self.component_id,
+                "connection_id": self.connection.id,
+                "protocol": self.connection.protocol,
+            },
+        )
 
     async def disconnect(self) -> None:
         """Disconnect the owned driver and mark the worker stopped."""
@@ -108,12 +232,36 @@ class ConnectionWorker:
         self._validate_poll_inputs(group, tags)
         started_at = self._now()
         execution_id = str(uuid4())
+        self._last_poll_correlation_id = execution_id
+        self._poll_attempts += 1
         requests = tuple(
             _tag_request_from_config(tag, group.timeout_ms) for tag in tags
         )
+        self._logger.info(
+            "worker_poll_started",
+            extra={
+                "operation": "poll_group",
+                "correlation_id": execution_id,
+                "component_id": self.component_id,
+                "connection_id": self.connection.id,
+                "tag_group_id": group.id,
+                "requested_tags": len(tags),
+            },
+        )
 
         try:
-            results = tuple(await self._driver.read(requests))
+            read_results, _ = await run_with_retry(
+                lambda: self._driver.read(requests),
+                self._poll_retry_policy,
+                operation_name="poll_group",
+                correlation_id=execution_id,
+                component_id=self.component_id,
+                logger=self._logger,
+                sleep=self._retry_sleep,
+                random_float=self._jitter,
+                on_retry=self._record_poll_retry,
+            )
+            results = tuple(read_results)
         except asyncio.CancelledError:
             await self._disconnect_after_cancellation()
             raise
@@ -134,12 +282,26 @@ class ConnectionWorker:
             failed_tags=sum(not result.is_success for result in results),
             error_message=_poll_error_message(results),
         )
+        self._record_poll_metrics(execution)
         if execution.status is PollStatus.SUCCESS:
             self._set_state(WorkerState.RUNNING, message="Poll succeeded.")
         elif execution.status is PollStatus.PARTIAL_FAILURE:
             self._set_state(WorkerState.DEGRADED, message="Poll partially failed.")
         else:
             self._set_state(WorkerState.DEGRADED, message="Poll failed.")
+        self._logger.info(
+            "worker_poll_finished",
+            extra={
+                "operation": "poll_group",
+                "correlation_id": execution_id,
+                "component_id": self.component_id,
+                "connection_id": self.connection.id,
+                "tag_group_id": group.id,
+                "poll_status": execution.status.value,
+                "successful_tags": execution.successful_tags,
+                "failed_tags": execution.failed_tags,
+            },
+        )
         return WorkerPollResult(execution=execution, results=results)
 
     async def health_check(self) -> RuntimeComponentStatus:
@@ -197,12 +359,42 @@ class ConnectionWorker:
             self._set_state(WorkerState.STOPPED, message="Cancelled.")
 
     def _record_failure(self, error: Exception, *, state: WorkerState) -> None:
+        self._last_error = str(error) or error.__class__.__name__
         self._set_state(
             state,
             message="Worker operation failed.",
             error_code=_error_code(error),
             error_message=str(error),
         )
+
+    async def _connect_once(self) -> None:
+        self._connect_attempts += 1
+        await self._driver.connect()
+
+    def _record_connect_retry(
+        self,
+        _error: Exception,
+        _delay_s: float,
+        _retry_number: int,
+    ) -> None:
+        self._connect_retry_attempts += 1
+
+    def _record_poll_retry(
+        self,
+        _error: Exception,
+        _delay_s: float,
+        _retry_number: int,
+    ) -> None:
+        self._poll_retry_attempts += 1
+
+    def _record_poll_metrics(self, execution: PollExecution) -> None:
+        if execution.status is PollStatus.SUCCESS:
+            self._poll_successes += 1
+        else:
+            self._poll_failures += 1
+        self._tag_successes += execution.successful_tags
+        self._tag_failures += execution.failed_tags
+        self._last_error = execution.error_message
 
     def _set_state(
         self,
@@ -263,8 +455,9 @@ def _poll_error_message(results: tuple[TagResult, ...]) -> str | None:
 
 
 def _error_code(error: Exception) -> str:
-    if isinstance(error, TransientCommunicationError) and error.code is not None:
-        return error.code
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        return code
     return error.__class__.__name__
 
 

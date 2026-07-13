@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from plc_gateway.runtime import ReadingQueue, WorkerPollResult
+from plc_gateway.runtime import ReadingQueue, RetryPolicy, WorkerPollResult
+from plc_gateway.runtime.retry import run_with_retry
+
+LOGGER = logging.getLogger(__name__)
 
 
 class PollResultRepository(Protocol):
@@ -55,7 +59,9 @@ class DatabaseWriter:
         storage_timeout_s: float,
         max_retries: int = 2,
         retry_delay_s: float = 0.1,
+        retry_policy: RetryPolicy | None = None,
         sleep: Callable[[float], Awaitable[None]] | None = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         """Create a database writer."""
         if batch_size <= 0:
@@ -74,9 +80,12 @@ class DatabaseWriter:
         self._batch_size = batch_size
         self._flush_interval_s = flush_interval_s
         self._storage_timeout_s = storage_timeout_s
-        self._max_retries = max_retries
-        self._retry_delay_s = retry_delay_s
+        self._retry_policy = retry_policy or _retry_policy_from_legacy_settings(
+            max_retries=max_retries,
+            retry_delay_s=retry_delay_s,
+        )
         self._sleep = asyncio.sleep if sleep is None else sleep
+        self._logger = LOGGER if logger is None else logger
         self._stop_requested = asyncio.Event()
         self._stopped = asyncio.Event()
         self._stopped.set()
@@ -191,31 +200,68 @@ class DatabaseWriter:
             return
 
         batch = list(self._pending_batch)
-        for attempt in range(self._max_retries + 1):
-            try:
-                inserted = await asyncio.wait_for(
-                    asyncio.to_thread(self._repository.save_poll_results, batch),
-                    timeout=self._storage_timeout_s,
-                )
-            except Exception as error:
-                self._last_error = str(error) or error.__class__.__name__
-                if attempt < self._max_retries:
-                    self._retry_attempts += 1
-                    await self._sleep(self._retry_delay_s)
-                    continue
-                self._failed_batches += 1
-                self._failed_poll_results += len(batch)
-                self._ack_batch(len(batch))
-                return
-
-            self._successful_batches += 1
-            self._successful_poll_results += len(batch)
-            self._inserted_readings += inserted
-            self._last_error = None
+        correlation_id = _batch_correlation_id(batch)
+        try:
+            inserted, _ = await run_with_retry(
+                lambda: self._save_batch(batch),
+                self._retry_policy,
+                operation_name="database_batch_write",
+                correlation_id=correlation_id,
+                component_id="database-writer",
+                logger=self._logger,
+                sleep=self._sleep,
+                on_retry=self._record_retry,
+            )
+        except Exception as error:
+            self._last_error = str(error) or error.__class__.__name__
+            self._failed_batches += 1
+            self._failed_poll_results += len(batch)
             self._ack_batch(len(batch))
             return
+
+        self._successful_batches += 1
+        self._successful_poll_results += len(batch)
+        self._inserted_readings += inserted
+        self._last_error = None
+        self._ack_batch(len(batch))
+        return
+
+    async def _save_batch(self, batch: list[WorkerPollResult]) -> int:
+        return await asyncio.wait_for(
+            asyncio.to_thread(self._repository.save_poll_results, batch),
+            timeout=self._storage_timeout_s,
+        )
+
+    def _record_retry(
+        self,
+        _error: Exception,
+        _delay_s: float,
+        _retry_number: int,
+    ) -> None:
+        self._retry_attempts += 1
 
     def _ack_batch(self, count: int) -> None:
         del self._pending_batch[:count]
         for _ in range(count):
             self._queue.task_done()
+
+
+def _retry_policy_from_legacy_settings(
+    *,
+    max_retries: int,
+    retry_delay_s: float,
+) -> RetryPolicy:
+    retry_delays = max(max_retries, 1)
+    max_delay_s = retry_delay_s * 2 ** (retry_delays - 1)
+    return RetryPolicy(
+        max_attempts=max_retries + 1,
+        initial_delay_s=retry_delay_s,
+        max_delay_s=max_delay_s,
+        jitter_ratio=0.2 if retry_delay_s > 0 else 0,
+    )
+
+
+def _batch_correlation_id(batch: list[WorkerPollResult]) -> str:
+    if not batch:
+        return "database-batch:empty"
+    return f"database-batch:{batch[0].execution.execution_id}"

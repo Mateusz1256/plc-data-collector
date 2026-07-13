@@ -34,6 +34,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   size or interval, retries storage failures, and records writer metrics.
 - Read-only FastAPI health and runtime status endpoints with localhost default
   API serving support.
+- Shared retry policy with capped exponential backoff, jitter, error
+  classification, structured correlation logs, and runtime worker metrics.
 
 ### Changed
 

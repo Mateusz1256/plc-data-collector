@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import ClassVar
@@ -8,7 +9,9 @@ from typing import ClassVar
 import pytest
 
 from plc_gateway.domain import (
+    ConfigurationError,
     ConnectionConfig,
+    PermanentProtocolError,
     PollStatus,
     TagConfig,
     TagGroupConfig,
@@ -48,6 +51,15 @@ class FakeWorkerDriver:
         connect_failures = connection.protocol_options.get("connect_failures", 0)
         assert isinstance(connect_failures, int)
         self.connect_failures_remaining = connect_failures
+        self.connect_configuration_failure = bool(
+            connection.protocol_options.get("connect_configuration_failure", False)
+        )
+        self.connect_permanent_failure = bool(
+            connection.protocol_options.get("connect_permanent_failure", False)
+        )
+        read_failures = connection.protocol_options.get("read_failures", 0)
+        assert isinstance(read_failures, int)
+        self.read_failures_remaining = read_failures
         self.read_failure = bool(connection.protocol_options.get("read_failure", False))
         self.cancel_on_read = bool(
             connection.protocol_options.get("cancel_on_read", False)
@@ -61,6 +73,16 @@ class FakeWorkerDriver:
 
     async def connect(self) -> None:
         """Connect or raise a configured transient failure."""
+        if self.connect_configuration_failure:
+            raise ConfigurationError(
+                "invalid connection",
+                code="fake_invalid_connection",
+            )
+        if self.connect_permanent_failure:
+            raise PermanentProtocolError(
+                "permanent connect failure",
+                code="fake_permanent_connect_failure",
+            )
         if self.connect_failures_remaining > 0:
             self.connect_failures_remaining -= 1
             raise TransientCommunicationError(
@@ -78,6 +100,9 @@ class FakeWorkerDriver:
         """Return configured fake tag results."""
         if self.cancel_on_read:
             raise asyncio.CancelledError
+        if self.read_failures_remaining > 0:
+            self.read_failures_remaining -= 1
+            raise TransientCommunicationError("read failed", code="fake_read_failed")
         if self.read_failure:
             raise TransientCommunicationError("read failed", code="fake_read_failed")
 
@@ -145,6 +170,10 @@ def make_tag(tag_id: str = "temperature") -> TagConfig:
         address=f"fake://{tag_id}",
         value_type=ValueType.NUMERIC,
     )
+
+
+async def no_sleep(_: float) -> None:
+    """Deterministic retry sleeper."""
 
 
 @pytest.fixture(autouse=True)
@@ -242,14 +271,66 @@ async def test_worker_connect_lifecycle_is_reconnect_ready() -> None:
         make_connection(protocol_options={"connect_failures": 1}),
         make_registry(),
         clock=FixedClock(),
+        retry_sleep=no_sleep,
+        jitter=lambda: 0.5,
     )
-
-    with pytest.raises(TransientCommunicationError, match="connect failed"):
-        await worker.connect()
-    assert worker.status().state is WorkerState.FAILED
 
     await worker.connect()
     assert worker.status().state is WorkerState.RUNNING
+    metrics = worker.metrics()
+    assert metrics.connect_attempts == 2
+    assert metrics.connect_retry_attempts == 1
+    assert metrics.connect_successes == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_does_not_retry_configuration_connect_errors() -> None:
+    worker = ConnectionWorker(
+        make_connection(protocol_options={"connect_configuration_failure": True}),
+        make_registry(),
+        clock=FixedClock(),
+        retry_sleep=no_sleep,
+    )
+
+    with pytest.raises(ConfigurationError, match="invalid connection"):
+        await worker.connect()
+
+    metrics = worker.metrics()
+    assert worker.status().state is WorkerState.FAILED
+    assert metrics.connect_attempts == 1
+    assert metrics.connect_retry_attempts == 0
+    assert metrics.connect_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_retries_transient_poll_errors_with_correlation_id(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    worker = ConnectionWorker(
+        make_connection(protocol_options={"read_failures": 1}),
+        make_registry(),
+        clock=FixedClock(),
+        retry_sleep=no_sleep,
+        jitter=lambda: 0.5,
+    )
+    caplog.set_level(logging.INFO, logger="plc_gateway.runtime.connection_worker")
+    await worker.connect()
+
+    result = await worker.poll_group(make_group(), (make_tag(),))
+
+    metrics = worker.metrics()
+    assert result.execution.status is PollStatus.SUCCESS
+    assert metrics.poll_attempts == 1
+    assert metrics.poll_retry_attempts == 1
+    assert metrics.last_poll_correlation_id == result.execution.execution_id
+    poll_records = [
+        record
+        for record in caplog.records
+        if getattr(record, "operation", None) == "poll_group"
+    ]
+    assert {getattr(record, "correlation_id", None) for record in poll_records} == {
+        result.execution.execution_id
+    }
 
 
 @pytest.mark.asyncio

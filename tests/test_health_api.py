@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from plc_gateway.api import RuntimeApiState, create_api_app
 from plc_gateway.domain import RuntimeComponentStatus, WorkerState
 from plc_gateway.persistence import DatabaseWriterMetrics
-from plc_gateway.runtime import ReadingQueueMetrics
+from plc_gateway.runtime import ReadingQueueMetrics, WorkerRuntimeMetrics
 
 
 def timestamp() -> datetime:
@@ -88,6 +88,23 @@ def test_runtime_components_returns_status_and_metrics_without_secrets() -> None
         create_api_app(
             RuntimeApiState(
                 components=(make_status("database-writer"),),
+                worker_metrics=(
+                    WorkerRuntimeMetrics(
+                        component_id="connection-worker:mock",
+                        connect_attempts=2,
+                        connect_successes=1,
+                        connect_failures=0,
+                        connect_retry_attempts=1,
+                        poll_attempts=3,
+                        poll_successes=3,
+                        poll_failures=0,
+                        poll_retry_attempts=1,
+                        tag_successes=6,
+                        tag_failures=0,
+                        last_poll_correlation_id="poll-correlation",
+                        last_reconnect_correlation_id="connect-correlation",
+                    ),
+                ),
                 queue_metrics=ReadingQueueMetrics(
                     max_size=10,
                     size=2,
@@ -115,6 +132,7 @@ def test_runtime_components_returns_status_and_metrics_without_secrets() -> None
     assert response.status_code == 200
     payload = response.json()
     assert payload["components"][0]["component_id"] == "database-writer"
+    assert payload["worker_metrics"][0]["connect_retry_attempts"] == 1
     assert payload["queue"]["size"] == 2
     assert payload["writer"]["successful_batches"] == 3
     assert "secret" not in str(payload).lower()
@@ -125,6 +143,21 @@ def test_runtime_workers_returns_worker_statuses() -> None:
         create_api_app(
             RuntimeApiState(
                 workers=(make_status("connection-worker:mock"),),
+                worker_metrics=(
+                    WorkerRuntimeMetrics(
+                        component_id="connection-worker:mock",
+                        connect_attempts=1,
+                        connect_successes=1,
+                        connect_failures=0,
+                        connect_retry_attempts=0,
+                        poll_attempts=0,
+                        poll_successes=0,
+                        poll_failures=0,
+                        poll_retry_attempts=0,
+                        tag_successes=0,
+                        tag_failures=0,
+                    ),
+                ),
             )
         )
     )
@@ -133,6 +166,7 @@ def test_runtime_workers_returns_worker_statuses() -> None:
 
     assert response.status_code == 200
     assert response.json()["workers"][0]["state"] == "running"
+    assert response.json()["metrics"][0]["connect_successes"] == 1
 
 
 def test_about_returns_version_and_license_placeholder() -> None:

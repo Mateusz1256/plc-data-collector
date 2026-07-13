@@ -22,6 +22,17 @@ env/
 coverage.xml
 htmlcov/
 
+# AI agent files
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+Agents/
+agents/
+.codex/
+.cursor/
+.windsurf/
+.claude/
+
 # Local configuration
 .env
 .env.*

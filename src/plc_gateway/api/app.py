@@ -52,6 +52,7 @@ def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
         runtime_state = _runtime_state(app)
         return {
             "components": _encode(runtime_state.components),
+            "worker_metrics": _encode(runtime_state.worker_metrics),
             "queue": _encode(runtime_state.queue_metrics),
             "writer": _encode(runtime_state.writer_metrics),
         }
@@ -59,7 +60,11 @@ def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
     @app.get("/api/runtime/workers")
     async def runtime_workers() -> dict[str, object]:
         """Return observable connection worker states."""
-        return {"workers": _encode(_runtime_state(app).workers)}
+        runtime_state = _runtime_state(app)
+        return {
+            "workers": _encode(runtime_state.workers),
+            "metrics": _encode(runtime_state.worker_metrics),
+        }
 
     @app.get("/api/about")
     async def about() -> dict[str, object]:
