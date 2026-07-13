@@ -1,5 +1,7 @@
 # Task 14: Packaging i uruchamianie jako usługa
 
+Status: done
+
 ## Cel
 
 Przygotować stabilne uruchamianie aplikacji jako procesu długotrwałego.

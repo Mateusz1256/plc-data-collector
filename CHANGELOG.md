@@ -40,6 +40,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   mapping, timeout handling, reconnect support, and marked integration tests.
 - Durable SQLite offline spool with bounded capacity, retry scheduling,
   restart recovery, and database writer replay support.
+- Service process packaging helpers with configurable runtime paths, PID file,
+  file logging, graceful shutdown handling, and deployment examples.
 
 ### Changed
 

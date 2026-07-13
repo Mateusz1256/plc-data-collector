@@ -61,6 +61,29 @@ plc-gateway
 Aktualny bootstrap wypisuje status aplikacji w JSON i konfiguruje podstawowe
 logowanie. Nie uruchamia jeszcze workerow, API administracyjnego ani driverow.
 
+Tryb procesu dlugotrwalego:
+
+```powershell
+plc-gateway --run-service `
+  --config C:\ProgramData\PLC Gateway\gateway.config.json `
+  --data-dir C:\ProgramData\PLC Gateway\data `
+  --log-dir C:\ProgramData\PLC Gateway\logs `
+  --run-dir C:\ProgramData\PLC Gateway\run
+```
+
+W trybie uslugi aplikacja tworzy katalog danych, logow i runtime, zapisuje PID
+file, loguje JSON do pliku i reaguje na sygnal zamkniecia (`SIGTERM`/`SIGINT`
+lub odpowiednik wrappera uslugi). Domyslne sciezki sa poza katalogiem
+instalacyjnym i moga byc nadpisane flagami CLI albo zmiennymi
+`PLC_GATEWAY_DATA_DIR`, `PLC_GATEWAY_LOG_DIR`, `PLC_GATEWAY_RUN_DIR`,
+`PLC_GATEWAY_PID_FILE`, `PLC_GATEWAY_LOG_FILE` i `PLC_GATEWAY_CONFIG`.
+
+Przyklady wdrozenia systemd, WinSW i NSSM sa w:
+
+```text
+docs/deployment/service-packaging.md
+```
+
 ## Modele domenowe
 
 Podstawowe modele domenowe znajduja sie w src/plc_gateway/domain/.

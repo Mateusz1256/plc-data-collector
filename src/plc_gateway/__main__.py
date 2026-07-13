@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from plc_gateway._version import get_version
 from plc_gateway.app.health import build_health_status
 from plc_gateway.app.logging import configure_logging
+from plc_gateway.app.service import ServicePaths, run_service
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,6 +31,41 @@ def build_parser() -> argparse.ArgumentParser:
         "--serve-api",
         action="store_true",
         help="serve the read-only health and runtime API",
+    )
+    parser.add_argument(
+        "--run-service",
+        action="store_true",
+        help="run as a long-running service process until shutdown signal",
+    )
+    parser.add_argument(
+        "--config",
+        default=os.getenv("PLC_GATEWAY_CONFIG"),
+        help="path to gateway JSON config",
+    )
+    parser.add_argument(
+        "--data-dir",
+        default=os.getenv("PLC_GATEWAY_DATA_DIR"),
+        help="runtime data directory outside the installation directory",
+    )
+    parser.add_argument(
+        "--log-dir",
+        default=os.getenv("PLC_GATEWAY_LOG_DIR"),
+        help="runtime log directory",
+    )
+    parser.add_argument(
+        "--run-dir",
+        default=os.getenv("PLC_GATEWAY_RUN_DIR"),
+        help="runtime directory for PID and transient files",
+    )
+    parser.add_argument(
+        "--pid-file",
+        default=os.getenv("PLC_GATEWAY_PID_FILE"),
+        help="PID file path for service mode",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=os.getenv("PLC_GATEWAY_LOG_FILE"),
+        help="JSON log file path for service mode",
     )
     parser.add_argument(
         "--api-host",
@@ -56,6 +92,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     configure_logging(args.log_level)
     logging.getLogger(__name__).info("PLC Gateway bootstrap command started")
+    if args.run_service:
+        return run_service(
+            ServicePaths.from_values(
+                data_dir=args.data_dir,
+                log_dir=args.log_dir,
+                run_dir=args.run_dir,
+                config_file=args.config,
+                pid_file=args.pid_file,
+                log_file=args.log_file,
+            ),
+            log_level=args.log_level,
+        )
+
     if args.serve_api:
         import uvicorn
 
