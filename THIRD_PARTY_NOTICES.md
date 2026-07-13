@@ -109,6 +109,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by Uvicorn. License verified from package
   metadata field `License: BSD-3-Clause`.
 
+### colorama
+
+- Version: 0.4.6
+- Purpose: transitive Click dependency for Windows console support
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/colorama/0.4.6/
+- Copyright notice: Copyright (c) 2010 Jonathan Hartley.
+- Bundled in distribution: yes
+- Notes: installed transitively by Click on Windows. License verified from
+  package metadata field `License: BSD-3-Clause`.
+
 ### cffi
 
 - Version: 2.0.0
@@ -485,13 +496,16 @@ introduced.
 
 ### packaging
 
-- Version: 26.2
+- Version: 23.2
 - Purpose: transitive pytest dependency
 - License: Apache-2.0 OR BSD-2-Clause
-- Source: https://pypi.org/project/packaging/26.2/
+- Source: https://pypi.org/project/packaging/23.2/
 - Copyright notice: See package license file.
 - Bundled in distribution: no
-- Notes: installed transitively in the `dev` extra.
+- Notes: declared directly in the `dev` extra for the credits generator and
+  also installed transitively by pytest. License verified from package metadata
+  classifiers `License :: OSI Approved :: Apache Software License` and
+  `License :: OSI Approved :: BSD License`.
 
 ### pathspec
 

@@ -42,6 +42,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   restart recovery, and database writer replay support.
 - Service process packaging helpers with configurable runtime paths, PID file,
   file logging, graceful shutdown handling, and deployment examples.
+- Project license metadata, bundled verified dependency credits, `licenses` CLI
+  output, and build/license information in `/api/about`.
 
 ### Changed
 

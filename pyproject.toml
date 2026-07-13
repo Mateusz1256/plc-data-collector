@@ -8,6 +8,7 @@ version = "0.0.0"
 description = "Industrial PLC and OPC data collector MVP"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "LicenseRef-PLC-Gateway-Proprietary"
 authors = [
   { name = "PLC Gateway contributors" }
 ]
@@ -25,6 +26,7 @@ dev = [
   "httpx==0.28.1",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
+  "packaging==23.2",
   "ruff==0.15.21",
   "mypy==2.2.0"
 ]
@@ -36,7 +38,10 @@ plc-gateway = "plc_gateway.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-plc_gateway = ["py.typed"]
+plc_gateway = ["py.typed", "license_data/credits.json"]
+
+[tool.setuptools]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

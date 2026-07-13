@@ -40,6 +40,17 @@ def test_main_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
     assert captured.out.strip() == "0.0.0"
 
 
+def test_main_prints_license_report(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["licenses"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 0
+    assert payload["project"]["spdx_id"] == "LicenseRef-PLC-Gateway-Proprietary"
+    assert payload["build"]["version"] == "0.0.0"
+    assert payload["dependencies"]
+
+
 def test_main_serves_api_on_localhost_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

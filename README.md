@@ -58,6 +58,13 @@ Po instalacji editable dostepny jest tez skrypt:
 plc-gateway
 ```
 
+Informacje o buildzie, licencji projektu i zweryfikowanych licencjach
+zaleznosci:
+
+```powershell
+plc-gateway licenses
+```
+
 Aktualny bootstrap wypisuje status aplikacji w JSON i konfiguruje podstawowe
 logowanie. Nie uruchamia jeszcze workerow, API administracyjnego ani driverow.
 
@@ -440,7 +447,8 @@ Endpointy:
 - `GET /api/runtime/components` - komponenty runtime oraz metryki workerow,
   kolejki, writera i spoola,
 - `GET /api/runtime/workers` - obserwowalny stan workerow oraz ich metryki,
-- `GET /api/about` - wersja aplikacji i placeholder licencji.
+- `GET /api/about` - wersja aplikacji, commit SHA jezeli zostal wstrzykniety
+  przez build, licencja projektu i liczba zweryfikowanych zaleznosci.
 
 Awaria pojedynczego workera oznacza tryb zdegradowany, ale nie blokuje
 readiness, jezeli konfiguracja i storage sa dostepne. Endpointy sa read-only i
@@ -497,11 +505,23 @@ Format jest zgodny z Keep a Changelog.
 
 ## Licencja i zależności
 
-Licencja projektu nie zostala jeszcze ostatecznie wybrana. Do czasu wyboru
-licencji kod nie powinien byc publicznie dystrybuowany jako open source.
+Projekt ma obecnie jawny status `LicenseRef-PLC-Gateway-Proprietary` w pliku
+`LICENSE`. Nie jest to licencja open source i nie udziela praw do publicznej
+redystrybucji bez osobnej umowy z wlascicielem projektu.
 
 Licencji bibliotek nie wolno zgadywac. Kazda nowa zaleznosc musi zostac
 zweryfikowana na podstawie oficjalnych metadanych.
+
+Zweryfikowane informacje o zaleznosciach sa utrzymywane w
+`THIRD_PARTY_NOTICES.md`, a generowany plik credits jest dolaczany do paczki
+jako `plc_gateway/license_data/credits.json`. Generator:
+
+```powershell
+python tools/generate_credits.py
+```
+
+przerywa prace, jezeli runtime dependency nie ma zweryfikowanego wpisu albo
+wersja z metadanych zainstalowanego pakietu nie zgadza sie z notice.
 
 ## Bezpieczeństwo
 

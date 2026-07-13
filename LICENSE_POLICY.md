@@ -2,12 +2,13 @@
 
 ## Status
 
-Licencja projektu nie zostala jeszcze wybrana.
+Projekt ma obecnie status `LicenseRef-PLC-Gateway-Proprietary`.
 
-Do czasu wyboru licencji kod nie powinien byc publicznie dystrybuowany jako open
-source.
+Nie jest to licencja open source. Kod nie powinien byc publicznie
+dystrybuowany, sublicencjonowany ani hostowany bez osobnej pisemnej zgody
+wlasciciela projektu.
 
-## Candidate Licenses
+## Candidate Licenses For Future Review
 
 Do rozwazenia:
 
@@ -27,12 +28,12 @@ Wybor powinien uwzgledniac:
 
 ## Required Repository Files
 
-Po wyborze licencji repozytorium powinno zawierac:
+Repozytorium zawiera:
 
 - `LICENSE`,
 - `THIRD_PARTY_NOTICES.md`,
-- opcjonalny `NOTICE`,
-- SPDX identifier w metadanych projektu,
+- `NOTICE`,
+- SPDX-compatible `LicenseRef-PLC-Gateway-Proprietary` w metadanych projektu,
 - informacje o licencji w dokumentacji,
 - creditsy w dystrybucji.
 

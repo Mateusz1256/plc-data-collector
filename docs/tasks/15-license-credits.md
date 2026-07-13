@@ -1,5 +1,7 @@
 # Task 15: Licencja, credits i informacje o buildzie
 
+Status: done
+
 ## Cel
 
 Dodać poprawną obsługę licencji projektu i zależności.

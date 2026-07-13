@@ -178,17 +178,16 @@ def test_runtime_workers_returns_worker_statuses() -> None:
     assert response.json()["metrics"][0]["connect_successes"] == 1
 
 
-def test_about_returns_version_and_license_placeholder() -> None:
+def test_about_returns_version_build_and_license_information() -> None:
     client = TestClient(create_api_app())
 
     response = client.get("/api/about")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "application": "plc-gateway",
-        "version": "0.0.0",
-        "license": {
-            "status": "not_selected",
-            "name": None,
-        },
-    }
+    payload = response.json()
+    assert payload["application"] == "plc-gateway"
+    assert payload["version"] == "0.0.0"
+    assert payload["build"]["version"] == "0.0.0"
+    assert payload["license"]["spdx_id"] == "LicenseRef-PLC-Gateway-Proprietary"
+    assert payload["third_party_notices_file"] == "THIRD_PARTY_NOTICES.md"
+    assert payload["dependency_count"] > 0

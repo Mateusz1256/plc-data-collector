@@ -6,12 +6,14 @@ import argparse
 import json
 import logging
 import os
+import sys
 from collections.abc import Sequence
 
 from plc_gateway._version import get_version
 from plc_gateway.app.health import build_health_status
 from plc_gateway.app.logging import configure_logging
 from plc_gateway.app.service import ServicePaths, run_service
+from plc_gateway.license_info import load_license_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -83,8 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the minimal PLC Gateway bootstrap command."""
+    resolved_argv = list(sys.argv[1:] if argv is None else argv)
+    if resolved_argv and resolved_argv[0] == "licenses":
+        print(json.dumps(load_license_report().to_dict(), sort_keys=True))
+        return 0
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(resolved_argv)
 
     if args.version:
         print(get_version())

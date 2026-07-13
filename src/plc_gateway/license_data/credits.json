@@ -1,0 +1,306 @@
+{
+  "dependencies": [
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright Amethyst Reese. See package license file.",
+      "license": "MIT",
+      "name": "aiosqlite",
+      "notes": "installed transitively by asyncua. License verified from package metadata classifier `License :: OSI Approved :: MIT License`.",
+      "purpose": "transitive asyncua dependency for asynchronous SQLite access used by opcua-asyncio internals",
+      "source": "https://pypi.org/project/aiosqlite/0.22.1/",
+      "version": "0.22.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "alembic",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "database migrations for the relational persistence schema",
+      "source": "https://pypi.org/project/alembic/1.17.1/",
+      "version": "1.17.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "annotated-doc",
+      "notes": "installed transitively by FastAPI. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "transitive FastAPI dependency for annotated documentation metadata",
+      "source": "https://pypi.org/project/annotated-doc/0.0.4/",
+      "version": "0.0.4"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "annotated-types",
+      "notes": "installed transitively by Pydantic. License verified from package metadata classifier `License :: OSI Approved :: MIT License`.",
+      "purpose": "transitive Pydantic dependency for reusable validation constraints",
+      "source": "https://pypi.org/project/annotated-types/0.7.0/",
+      "version": "0.7.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "anyio",
+      "notes": "installed transitively by Starlette. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive Starlette dependency for async runtime compatibility",
+      "source": "https://pypi.org/project/anyio/4.9.0/",
+      "version": "4.9.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package COPYING file.",
+      "license": "GNU Lesser General Public License v3 or later",
+      "name": "asyncua",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License: GNU Lesser General Public License v3 or later` and classifier `License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)`.",
+      "purpose": "asynchronous OPC UA client used by the `opcua` protocol driver",
+      "source": "https://pypi.org/project/asyncua/2.0.1/",
+      "version": "2.0.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license and authors files.",
+      "license": "MIT",
+      "name": "cffi",
+      "notes": "installed transitively by cryptography. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "transitive cryptography dependency for C foreign function interface",
+      "source": "https://pypi.org/project/cffi/2.0.0/",
+      "version": "2.0.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "click",
+      "notes": "installed transitively by Uvicorn. License verified from package metadata field `License: BSD-3-Clause`.",
+      "purpose": "transitive Uvicorn dependency for command-line support",
+      "source": "https://pypi.org/project/click/8.1.7/",
+      "version": "8.1.7"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright (c) 2010 Jonathan Hartley.",
+      "license": "BSD-3-Clause",
+      "name": "colorama",
+      "notes": "installed transitively by Click on Windows. License verified from package metadata field `License: BSD-3-Clause`.",
+      "purpose": "transitive Click dependency for Windows console support",
+      "source": "https://pypi.org/project/colorama/0.4.6/",
+      "version": "0.4.6"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license files.",
+      "license": "Apache-2.0 OR BSD-3-Clause",
+      "name": "cryptography",
+      "notes": "installed transitively by asyncua and pyOpenSSL. License verified from package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.",
+      "purpose": "transitive asyncua dependency for certificate and encryption support",
+      "source": "https://pypi.org/project/cryptography/49.0.0/",
+      "version": "49.0.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "fastapi",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "read-only health and runtime HTTP API",
+      "source": "https://pypi.org/project/fastapi/0.139.0/",
+      "version": "0.139.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT AND Python-2.0",
+      "name": "greenlet",
+      "notes": "installed transitively by SQLAlchemy. License verified from package metadata field `License: MIT AND Python-2.0`.",
+      "purpose": "transitive SQLAlchemy dependency",
+      "source": "https://pypi.org/project/greenlet/3.2.2/",
+      "version": "3.2.2"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "h11",
+      "notes": "installed transitively by Uvicorn. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive Uvicorn dependency for HTTP/1.1 protocol handling",
+      "source": "https://pypi.org/project/h11/0.16.0/",
+      "version": "0.16.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "BSD-like",
+      "name": "idna",
+      "notes": "installed transitively by AnyIO. License verified from package metadata field `License: BSD-like`.",
+      "purpose": "transitive AnyIO dependency for internationalized domain names",
+      "source": "https://pypi.org/project/idna/2.10/",
+      "version": "2.10"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "Mako",
+      "notes": "installed transitively by Alembic. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive Alembic dependency for migration templates",
+      "source": "https://pypi.org/project/Mako/1.3.10/",
+      "version": "1.3.10"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "MarkupSafe",
+      "notes": "installed transitively by Mako. License verified from package metadata field `License-Expression: BSD-3-Clause`.",
+      "purpose": "transitive Mako dependency for safe markup handling",
+      "source": "https://pypi.org/project/MarkupSafe/3.0.3/",
+      "version": "3.0.3"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright Eli Bendersky. See package license file.",
+      "license": "BSD",
+      "name": "pycparser",
+      "notes": "installed transitively by cffi. License verified from package metadata field `License: BSD` and classifier `License :: OSI Approved :: BSD License`.",
+      "purpose": "transitive cffi dependency for parsing C declarations",
+      "source": "https://pypi.org/project/pycparser/2.21/",
+      "version": "2.21"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "pydantic",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "application configuration validation at process boundaries",
+      "source": "https://pypi.org/project/pydantic/2.11.3/",
+      "version": "2.11.3"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "pydantic_core",
+      "notes": "installed transitively by Pydantic. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive Pydantic validation engine",
+      "source": "https://pypi.org/project/pydantic-core/2.33.1/",
+      "version": "2.33.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "Apache License, Version 2.0",
+      "name": "pyOpenSSL",
+      "notes": "installed transitively by asyncua. License verified from package metadata field `License: Apache License, Version 2.0`.",
+      "purpose": "transitive asyncua dependency for OpenSSL integration",
+      "source": "https://pypi.org/project/pyOpenSSL/26.3.0/",
+      "version": "26.3.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "Dual License; Apache Software License OR BSD License",
+      "name": "python-dateutil",
+      "notes": "installed transitively by asyncua. License verified from package metadata field `License: Dual License` and Apache/BSD license classifiers.",
+      "purpose": "transitive asyncua dependency for date and time handling",
+      "source": "https://pypi.org/project/python-dateutil/2.8.2/",
+      "version": "2.8.2"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "pytz",
+      "notes": "installed transitively by asyncua. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive asyncua dependency for timezone data",
+      "source": "https://pypi.org/project/pytz/2023.3.post1/",
+      "version": "2023.3.post1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright Benjamin Peterson. See package license file.",
+      "license": "MIT",
+      "name": "six",
+      "notes": "installed transitively by python-dateutil. License verified from package metadata field `License: MIT`.",
+      "purpose": "transitive python-dateutil dependency for Python compatibility helpers",
+      "source": "https://pypi.org/project/six/1.16.0/",
+      "version": "1.16.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT OR Apache-2.0",
+      "name": "sniffio",
+      "notes": "installed transitively by AnyIO. License verified from package metadata field `License: MIT OR Apache-2.0`.",
+      "purpose": "transitive AnyIO dependency for async library detection",
+      "source": "https://pypi.org/project/sniffio/1.3.1/",
+      "version": "1.3.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright Grant Jenks. See package license file.",
+      "license": "Apache 2.0",
+      "name": "sortedcontainers",
+      "notes": "installed transitively by asyncua. License verified from package metadata field `License: Apache 2.0` and classifier `License :: OSI Approved :: Apache Software License`.",
+      "purpose": "transitive asyncua dependency for sorted collection primitives",
+      "source": "https://pypi.org/project/sortedcontainers/2.4.0/",
+      "version": "2.4.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "SQLAlchemy",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License: MIT`.",
+      "purpose": "relational schema and repository implementation",
+      "source": "https://pypi.org/project/SQLAlchemy/2.0.44/",
+      "version": "2.0.44"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "starlette",
+      "notes": "installed transitively by FastAPI. License verified from package metadata field `License-Expression: BSD-3-Clause`.",
+      "purpose": "transitive FastAPI dependency providing ASGI routing primitives",
+      "source": "https://pypi.org/project/starlette/1.3.1/",
+      "version": "1.3.1"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "PSF-2.0",
+      "name": "typing_extensions",
+      "notes": "installed transitively by Pydantic. License verified from package metadata field `License-Expression: PSF-2.0`.",
+      "purpose": "transitive Pydantic dependency for typing features",
+      "source": "https://pypi.org/project/typing-extensions/4.13.2/",
+      "version": "4.13.2"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "MIT",
+      "name": "typing-inspection",
+      "notes": "installed transitively by Pydantic and FastAPI. License verified from package metadata field `License-Expression: MIT`.",
+      "purpose": "transitive Pydantic dependency for runtime typing introspection",
+      "source": "https://pypi.org/project/typing-inspection/0.4.2/",
+      "version": "0.4.2"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "uvicorn",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: BSD-3-Clause`.",
+      "purpose": "ASGI server for local health and runtime HTTP API",
+      "source": "https://pypi.org/project/uvicorn/0.35.0/",
+      "version": "0.35.0"
+    }
+  ],
+  "generated_from": "THIRD_PARTY_NOTICES.md",
+  "schema_version": 1
+}

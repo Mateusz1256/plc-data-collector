@@ -10,6 +10,7 @@ from fastapi import FastAPI, Response, status
 
 from plc_gateway._version import get_version
 from plc_gateway.api.state import RuntimeApiState
+from plc_gateway.license_info import load_license_report
 
 
 def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
@@ -70,13 +71,14 @@ def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
     @app.get("/api/about")
     async def about() -> dict[str, object]:
         """Return build and license information."""
+        license_report = load_license_report()
         return {
             "application": "plc-gateway",
-            "version": get_version(),
-            "license": {
-                "status": "not_selected",
-                "name": None,
-            },
+            "version": license_report.build.version,
+            "build": _encode(license_report.build),
+            "license": _encode(license_report.project),
+            "third_party_notices_file": license_report.third_party_notices_file,
+            "dependency_count": len(license_report.dependencies),
         }
 
     return app
