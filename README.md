@@ -252,6 +252,26 @@ Lifecycle:
 - anulowanie `connect()`, `poll_group()` lub `health_check()` wykonuje
   best-effort `disconnect()` i propaguje `asyncio.CancelledError`.
 
+## Kolejka odczytow
+
+`ReadingQueue` w `plc_gateway.runtime` oddziela odczyty protokolow od
+pozniejszego zapisu do storage. Przenosi `WorkerPollResult`, czyli wynik
+pollingu workera wraz z `PollExecution` i wynikami tagow.
+
+Zachowanie:
+
+- kolejka jest zawsze ograniczona przez `max_size`,
+- producent uzywa `put()` i czeka na wolne miejsce maksymalnie
+  `put_timeout_s`,
+- przekroczenie timeoutu zglasza `StorageError` z kodem `reading_queue_full`,
+- `metrics()` zwraca rozmiar, zajetosc, liczbe timeoutow i liczbe jawnie
+  odrzuconych elementow,
+- konsument uzywa `get()`, a po zapisie wywoluje `task_done()`,
+- `join()` pozwala czekac na przetworzenie wszystkich pobranych elementow,
+- `close()` zamyka producentow bez usuwania oczekujacych elementow,
+- `drop_pending()` zamyka kolejke i zwraca jawny status liczby odrzuconych
+  elementow. Spool dyskowy pozostaje poza tym etapem.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

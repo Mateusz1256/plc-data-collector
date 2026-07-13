@@ -26,6 +26,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   accounting, stop/cancel controls, and observable scheduling state.
 - Isolated connection worker lifecycle with owned driver instances, observable
   health state, heartbeat, poll execution summaries, and cancellation cleanup.
+- Bounded reading queue for worker poll results with producer timeouts,
+  occupancy metrics, consumer acknowledgement, and explicit shutdown outcomes.
 
 ### Changed
 

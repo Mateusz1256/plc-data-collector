@@ -1,5 +1,7 @@
 # Task 07: Kolejka odczytów
 
+Status: done
+
 ## Cel
 
 Oddzielić odczyt protokołu od zapisu do storage.

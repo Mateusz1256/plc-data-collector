@@ -1,6 +1,11 @@
 """Runtime orchestration primitives."""
 
 from plc_gateway.runtime.connection_worker import ConnectionWorker, WorkerPollResult
+from plc_gateway.runtime.reading_queue import (
+    ReadingQueue,
+    ReadingQueueMetrics,
+    ReadingQueueShutdown,
+)
 from plc_gateway.runtime.scheduler import (
     PollScheduler,
     PollSchedulerSnapshot,
@@ -12,5 +17,8 @@ __all__ = [
     "PollScheduleState",
     "PollScheduler",
     "PollSchedulerSnapshot",
+    "ReadingQueue",
+    "ReadingQueueMetrics",
+    "ReadingQueueShutdown",
     "WorkerPollResult",
 ]
