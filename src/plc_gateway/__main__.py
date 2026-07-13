@@ -1,4 +1,4 @@
-"""Command line entry point for PLC Gateway."""
+"""Command line entry point for PLC Collector."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the minimal PLC Gateway bootstrap command."""
+    """Run the minimal PLC Collector bootstrap command."""
     resolved_argv = list(sys.argv[1:] if argv is None else argv)
     if resolved_argv and resolved_argv[0] == "licenses":
         print(json.dumps(load_license_report().to_dict(), sort_keys=True))
@@ -98,7 +98,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     configure_logging(args.log_level)
-    logging.getLogger(__name__).info("PLC Gateway bootstrap command started")
+    logging.getLogger(__name__).info("PLC Collector bootstrap command started")
     if args.run_service:
         return run_service(
             ServicePaths.from_values(

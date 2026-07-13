@@ -1,6 +1,6 @@
 # Service Packaging
 
-PLC Gateway moze dzialac jako dlugotrwaly proces uruchamiany przez manager
+PLC Collector moze dzialac jako dlugotrwaly proces uruchamiany przez manager
 uslug systemu operacyjnego. Core aplikacji nie zalezy od systemd ani Windows
 Service API; integracja z usluga jest zewnetrznym wrapperem procesu.
 
@@ -10,10 +10,10 @@ Tryb uslugi:
 
 ```powershell
 plc-gateway --run-service `
-  --config C:\ProgramData\PLC Gateway\gateway.config.json `
-  --data-dir C:\ProgramData\PLC Gateway\data `
-  --log-dir C:\ProgramData\PLC Gateway\logs `
-  --run-dir C:\ProgramData\PLC Gateway\run
+  --config C:\ProgramData\PLC Collector\gateway.config.json `
+  --data-dir C:\ProgramData\PLC Collector\data `
+  --log-dir C:\ProgramData\PLC Collector\logs `
+  --run-dir C:\ProgramData\PLC Collector\run
 ```
 
 Linux:
@@ -48,7 +48,7 @@ Example unit:
 
 ```ini
 [Unit]
-Description=PLC Gateway
+Description=PLC Collector
 After=network-online.target
 Wants=network-online.target
 
@@ -90,10 +90,10 @@ Example `plc-gateway.xml`:
 ```xml
 <service>
   <id>plc-gateway</id>
-  <name>PLC Gateway</name>
+  <name>PLC Collector</name>
   <description>Industrial PLC and OPC data collector</description>
-  <executable>C:\PLC Gateway\.venv\Scripts\plc-gateway.exe</executable>
-  <arguments>--run-service --config "C:\ProgramData\PLC Gateway\gateway.config.json" --data-dir "C:\ProgramData\PLC Gateway\data" --log-dir "C:\ProgramData\PLC Gateway\logs" --run-dir "C:\ProgramData\PLC Gateway\run"</arguments>
+  <executable>C:\PLC Collector\.venv\Scripts\plc-gateway.exe</executable>
+  <arguments>--run-service --config "C:\ProgramData\PLC Collector\gateway.config.json" --data-dir "C:\ProgramData\PLC Collector\data" --log-dir "C:\ProgramData\PLC Collector\logs" --run-dir "C:\ProgramData\PLC Collector\run"</arguments>
   <log mode="roll-by-size">
     <sizeThreshold>10485760</sizeThreshold>
     <keepFiles>5</keepFiles>
@@ -115,11 +115,11 @@ Install:
 Example installation:
 
 ```powershell
-nssm install plc-gateway "C:\PLC Gateway\.venv\Scripts\plc-gateway.exe"
-nssm set plc-gateway AppParameters --run-service --config "C:\ProgramData\PLC Gateway\gateway.config.json" --data-dir "C:\ProgramData\PLC Gateway\data" --log-dir "C:\ProgramData\PLC Gateway\logs" --run-dir "C:\ProgramData\PLC Gateway\run"
-nssm set plc-gateway AppDirectory "C:\PLC Gateway"
-nssm set plc-gateway AppStdout "C:\ProgramData\PLC Gateway\logs\service.stdout.log"
-nssm set plc-gateway AppStderr "C:\ProgramData\PLC Gateway\logs\service.stderr.log"
+nssm install plc-gateway "C:\PLC Collector\.venv\Scripts\plc-gateway.exe"
+nssm set plc-gateway AppParameters --run-service --config "C:\ProgramData\PLC Collector\gateway.config.json" --data-dir "C:\ProgramData\PLC Collector\data" --log-dir "C:\ProgramData\PLC Collector\logs" --run-dir "C:\ProgramData\PLC Collector\run"
+nssm set plc-gateway AppDirectory "C:\PLC Collector"
+nssm set plc-gateway AppStdout "C:\ProgramData\PLC Collector\logs\service.stdout.log"
+nssm set plc-gateway AppStderr "C:\ProgramData\PLC Collector\logs\service.stderr.log"
 nssm set plc-gateway AppRotateFiles 1
 nssm set plc-gateway AppRotateBytes 10485760
 nssm start plc-gateway

@@ -1,4 +1,4 @@
-"""Domain models and exceptions for PLC Gateway."""
+"""Domain models and exceptions for PLC Collector."""
 
 from plc_gateway.domain.exceptions import (
     ConfigurationError,

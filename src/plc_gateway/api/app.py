@@ -14,9 +14,9 @@ from plc_gateway.license_info import load_license_report
 
 
 def create_api_app(state: RuntimeApiState | None = None) -> FastAPI:
-    """Create the read-only PLC Gateway API application."""
+    """Create the read-only PLC Collector API application."""
     app = FastAPI(
-        title="PLC Gateway",
+        title="PLC Collector",
         version=get_version(),
         docs_url="/docs",
         redoc_url=None,

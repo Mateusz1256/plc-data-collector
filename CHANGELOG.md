@@ -10,7 +10,7 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 
 - Initial project planning files.
 - Incremental MVP task roadmap.
-- Contribution and agent guidelines.
+- Contribution and development guidelines.
 - Bootstrap Python package with editable install support.
 - Minimal command entry point exposing application status and version.
 - Pytest, pytest-asyncio, ruff, and mypy configuration.

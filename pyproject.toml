@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "plc-gateway"
 version = "0.0.0"
-description = "Industrial PLC and OPC data collector MVP"
+description = "Industrial PLC and OPC UA data collector MVP"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "LicenseRef-PLC-Gateway-Proprietary"
 authors = [
-  { name = "PLC Gateway contributors" }
+  { name = "PLC Collector contributors" }
 ]
 dependencies = [
   "alembic==1.17.1",

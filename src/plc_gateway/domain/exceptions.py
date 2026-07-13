@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 
 class GatewayError(Exception):
-    """Base class for PLC Gateway domain errors."""
+    """Base class for PLC Collector domain errors."""
 
     def __init__(
         self,

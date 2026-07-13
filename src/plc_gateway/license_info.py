@@ -9,7 +9,7 @@ from importlib import resources
 from plc_gateway.build_info import BuildInfo, get_build_info
 
 PROJECT_LICENSE_STATUS = "selected"
-PROJECT_LICENSE_NAME = "PLC Gateway Proprietary License Notice"
+PROJECT_LICENSE_NAME = "PLC Collector Proprietary License Notice"
 PROJECT_LICENSE_SPDX = "LicenseRef-PLC-Gateway-Proprietary"
 PROJECT_LICENSE_FILE = "LICENSE"
 THIRD_PARTY_NOTICES_FILE = "THIRD_PARTY_NOTICES.md"

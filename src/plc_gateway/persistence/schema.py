@@ -1,4 +1,4 @@
-"""Relational schema definition for PLC Gateway persistence."""
+"""Relational schema definition for PLC Collector persistence."""
 
 from __future__ import annotations
 

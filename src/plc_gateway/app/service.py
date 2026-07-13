@@ -208,8 +208,8 @@ def _default_data_dir(environ: Mapping[str, str]) -> Path:
     if sys.platform == "win32":
         root = environ.get("PROGRAMDATA")
         if root:
-            return Path(root) / "PLC Gateway"
-        return Path.home() / "AppData" / "Local" / "PLC Gateway"
+            return Path(root) / "PLC Collector"
+        return Path.home() / "AppData" / "Local" / "PLC Collector"
     state_home = environ.get("XDG_STATE_HOME")
     if state_home:
         return Path(state_home) / "plc-gateway"

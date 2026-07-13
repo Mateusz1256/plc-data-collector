@@ -1,4 +1,4 @@
-"""SQLAlchemy Core repositories for PLC Gateway persistence."""
+"""SQLAlchemy Core repositories for PLC Collector persistence."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""PLC Gateway package."""
+"""PLC Collector package."""
 
 from plc_gateway._version import __version__, get_version
 
