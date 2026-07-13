@@ -36,6 +36,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   API serving support.
 - Shared retry policy with capped exponential backoff, jitter, error
   classification, structured correlation logs, and runtime worker metrics.
+- Asynchronous OPC UA driver with batch reads, source timestamps, quality
+  mapping, timeout handling, reconnect support, and marked integration tests.
 
 ### Changed
 

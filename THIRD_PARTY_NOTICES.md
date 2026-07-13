@@ -24,9 +24,22 @@ repozytorium uzywanej wersji.
 ## Runtime Dependencies
 
 The following packages are installed by `python -m pip install -e .` for runtime
-configuration validation. Direct dependencies are declared in `pyproject.toml`;
-transitive dependencies are listed from installed package metadata and should be
+configuration validation, protocol communication, persistence, and the health
+API. Direct dependencies are declared in `pyproject.toml`; transitive
+dependencies are listed from installed package metadata and should be
 regenerated from a lockfile once dependency locking is introduced.
+
+### aiosqlite
+
+- Version: 0.22.1
+- Purpose: transitive asyncua dependency for asynchronous SQLite access used by
+  opcua-asyncio internals
+- License: MIT
+- Source: https://pypi.org/project/aiosqlite/0.22.1/
+- Copyright notice: Copyright Amethyst Reese. See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua. License verified from package
+  metadata classifier `License :: OSI Approved :: MIT License`.
 
 ### annotated-types
 
@@ -49,6 +62,19 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by FastAPI. License verified from package
   metadata field `License-Expression: MIT`.
+
+### asyncua
+
+- Version: 2.0.1
+- Purpose: asynchronous OPC UA client used by the `opcua` protocol driver
+- License: GNU Lesser General Public License v3 or later
+- Source: https://pypi.org/project/asyncua/2.0.1/
+- Copyright notice: See package COPYING file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License: GNU Lesser General Public License v3 or
+  later` and classifier `License :: OSI Approved :: GNU Lesser General Public
+  License v3 or later (LGPLv3+)`.
 
 ### alembic
 
@@ -82,6 +108,28 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by Uvicorn. License verified from package
   metadata field `License: BSD-3-Clause`.
+
+### cffi
+
+- Version: 2.0.0
+- Purpose: transitive cryptography dependency for C foreign function interface
+- License: MIT
+- Source: https://pypi.org/project/cffi/2.0.0/
+- Copyright notice: See package license and authors files.
+- Bundled in distribution: yes
+- Notes: installed transitively by cryptography. License verified from package
+  metadata field `License-Expression: MIT`.
+
+### cryptography
+
+- Version: 49.0.0
+- Purpose: transitive asyncua dependency for certificate and encryption support
+- License: Apache-2.0 OR BSD-3-Clause
+- Source: https://pypi.org/project/cryptography/49.0.0/
+- Copyright notice: See package license files.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua and pyOpenSSL. License verified from
+  package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.
 
 ### fastapi
 
@@ -171,6 +219,50 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by Pydantic. License verified from package
   metadata field `License: MIT`.
 
+### pycparser
+
+- Version: 2.21
+- Purpose: transitive cffi dependency for parsing C declarations
+- License: BSD
+- Source: https://pypi.org/project/pycparser/2.21/
+- Copyright notice: Copyright Eli Bendersky. See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by cffi. License verified from package metadata
+  field `License: BSD` and classifier `License :: OSI Approved :: BSD License`.
+
+### pyOpenSSL
+
+- Version: 26.3.0
+- Purpose: transitive asyncua dependency for OpenSSL integration
+- License: Apache License, Version 2.0
+- Source: https://pypi.org/project/pyOpenSSL/26.3.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua. License verified from package
+  metadata field `License: Apache License, Version 2.0`.
+
+### python-dateutil
+
+- Version: 2.8.2
+- Purpose: transitive asyncua dependency for date and time handling
+- License: Dual License; Apache Software License OR BSD License
+- Source: https://pypi.org/project/python-dateutil/2.8.2/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua. License verified from package
+  metadata field `License: Dual License` and Apache/BSD license classifiers.
+
+### pytz
+
+- Version: 2023.3.post1
+- Purpose: transitive asyncua dependency for timezone data
+- License: MIT
+- Source: https://pypi.org/project/pytz/2023.3.post1/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua. License verified from package
+  metadata field `License: MIT`.
+
 ### SQLAlchemy
 
 - Version: 2.0.44
@@ -180,6 +272,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License: MIT`.
+
+### six
+
+- Version: 1.16.0
+- Purpose: transitive python-dateutil dependency for Python compatibility helpers
+- License: MIT
+- Source: https://pypi.org/project/six/1.16.0/
+- Copyright notice: Copyright Benjamin Peterson. See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by python-dateutil. License verified from
   package metadata field `License: MIT`.
 
 ### sniffio
@@ -192,6 +295,18 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by AnyIO. License verified from package
   metadata field `License: MIT OR Apache-2.0`.
+
+### sortedcontainers
+
+- Version: 2.4.0
+- Purpose: transitive asyncua dependency for sorted collection primitives
+- License: Apache 2.0
+- Source: https://pypi.org/project/sortedcontainers/2.4.0/
+- Copyright notice: Copyright Grant Jenks. See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by asyncua. License verified from package
+  metadata field `License: Apache 2.0` and classifier
+  `License :: OSI Approved :: Apache Software License`.
 
 ### starlette
 

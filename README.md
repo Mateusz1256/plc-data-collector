@@ -210,6 +210,41 @@ Zachowanie:
 - blad pojedynczego taga zwraca `TagResult.failure()` bez przerywania calego
   batcha.
 
+## OPC UA driver
+
+Asynchroniczny driver `opcua` znajduje sie w `plc_gateway.protocols.opcua` i
+uzywa pakietu `asyncua`. Factory `create_opcua_driver` mozna zarejestrowac w
+`DriverRegistry` dla protokolu `opcua`.
+
+Opcje sa przekazywane przez `connections[].protocol_options`:
+
+```json
+{
+  "security_string": "Basic256Sha256,SignAndEncrypt,certs/client.der,certs/client.pem",
+  "username": "operator",
+  "password": "read-from-environment",
+  "auto_reconnect": false,
+  "reconnect_max_delay_s": 30,
+  "reconnect_request_timeout_s": 60
+}
+```
+
+Zachowanie:
+
+- jeden driver tworzy jedna sesje OPC UA dla jednego workera,
+- `connect()` tworzy swiezy klient, wiec po `disconnect()` mozliwy jest
+  reconnect bez wspoldzielenia starej sesji,
+- `read()` wykonuje batch read wielu node'ow i zwraca wynik dla kazdego taga w
+  kolejnosci requestow,
+- bledy pojedynczych node'ow i zle statusy OPC UA sa mapowane na
+  `TagResult.failure()` bez przerywania calego batcha,
+- `SourceTimestamp` z OPC UA jest przenoszony do `TagResult.source_timestamp`,
+- status OPC UA jest mapowany na `Quality`: good, uncertain albo bad,
+- operacje connect, disconnect, health check i read sa ograniczone timeoutem,
+- konfiguracja certyfikatow uzywa sciezek lub security string; sekrety nie
+  powinny byc przechowywane w repo, a pola takie jak `password` sa maskowane
+  przez bezpieczne logowanie konfiguracji.
+
 ## Scheduler grup odczytowych
 
 `PollScheduler` w `plc_gateway.runtime` uruchamia wlaczone `TagGroupConfig`

@@ -1,5 +1,7 @@
 # Task 12: Driver OPC UA
 
+Status: done
+
 ## Cel
 
 Dodać pierwszy rzeczywisty driver protokołu.

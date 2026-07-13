@@ -13,6 +13,7 @@ authors = [
 ]
 dependencies = [
   "alembic==1.17.1",
+  "asyncua==2.0.1",
   "fastapi==0.139.0",
   "SQLAlchemy==2.0.44",
   "uvicorn==0.35.0",
@@ -40,6 +41,9 @@ plc_gateway = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+  "integration: tests that start local protocol servers or use external-style integration fixtures"
+]
 
 [tool.ruff]
 line-length = 88
