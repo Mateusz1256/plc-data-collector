@@ -1,0 +1,41 @@
+{
+  "connections": [
+    {
+      "id": "opcua_demo",
+      "protocol": "opcua",
+      "endpoint": "opc.tcp://operator:secret@127.0.0.1:4840",
+      "enabled": true,
+      "timeout_ms": 5000,
+      "protocol_options": {
+        "username": "operator",
+        "password": "do-not-log",
+        "security": {
+          "private_key_path": "certs/client.key"
+        }
+      }
+    }
+  ],
+  "tag_groups": [
+    {
+      "id": "fast",
+      "connection_id": "opcua_demo",
+      "interval_ms": 1000,
+      "timeout_ms": 2000,
+      "overlap_policy": "skip",
+      "enabled": true
+    }
+  ],
+  "tags": [
+    {
+      "id": "temperature",
+      "tag_group_id": "fast",
+      "name": "Temperature",
+      "address": "ns=2;s=Machine.Temperature",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "C"
+      }
+    }
+  ]
+}

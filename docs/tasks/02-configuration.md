@@ -1,5 +1,7 @@
 # Task 02: Konfiguracja
 
+Status: done
+
 ## Cel
 
 Dodać ładowanie i walidację konfiguracji połączeń, grup i tagów.

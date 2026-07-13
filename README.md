@@ -73,6 +73,75 @@ wyjatkow.
 Wszystkie timestampy przekazywane do modeli runtime musza byc timezone-aware i
 sa normalizowane do UTC.
 
+## Konfiguracja
+
+Konfiguracja polaczen, grup tagow i tagow jest ladowana z pliku JSON na granicy
+aplikacji i mapowana do modeli domenowych po walidacji. Przykladowy plik:
+
+```text
+docs/examples/gateway.config.example.json
+```
+
+Minimalny ksztalt:
+
+```json
+{
+  "connections": [
+    {
+      "id": "opcua_demo",
+      "protocol": "opcua",
+      "endpoint": "opc.tcp://127.0.0.1:4840",
+      "timeout_ms": 5000,
+      "protocol_options": {}
+    }
+  ],
+  "tag_groups": [
+    {
+      "id": "fast",
+      "connection_id": "opcua_demo",
+      "interval_ms": 1000
+    }
+  ],
+  "tags": [
+    {
+      "id": "temperature",
+      "tag_group_id": "fast",
+      "name": "Temperature",
+      "address": "ns=2;s=Machine.Temperature",
+      "value_type": "numeric"
+    }
+  ]
+}
+```
+
+Domyslne wartosci:
+
+- `connections[].enabled`: `true`
+- `connections[].timeout_ms`: `3000`
+- `connections[].protocol_options`: `{}`
+- `tag_groups[].timeout_ms`: `3000`
+- `tag_groups[].overlap_policy`: `skip`
+- `tag_groups[].enabled`: `true`
+- `tags[].enabled`: `true`
+- `tags[].metadata`: `{}`
+
+Walidacja odrzuca puste identyfikatory, niepoprawne timeouty i interwaly,
+duplikaty identyfikatorow oraz bledne referencje `connection_id` i
+`tag_group_id`. Bledy sa zglaszane jako `ConfigurationError` z lokalizacja
+problemu, na przyklad `connections.0.timeout_ms`.
+
+Wspierane sa kontrolowane override'y polaczen przez zmienne srodowiskowe:
+
+```powershell
+$env:PLC_GATEWAY_CONNECTIONS__OPCUA_DEMO__ENDPOINT = "opc.tcp://localhost:4841"
+$env:PLC_GATEWAY_CONNECTIONS__OPCUA_DEMO__TIMEOUT_MS = "7500"
+$env:PLC_GATEWAY_CONNECTIONS__OPCUA_DEMO__ENABLED = "false"
+```
+
+Dane diagnostyczne nalezy pobierac przez `GatewayConfig.safe_for_logging()`.
+Maskuje ono sekrety w `protocol_options`, `metadata` i dane uwierzytelniajace w
+endpointach, zeby hasla, tokeny i klucze nie trafialy do logow.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

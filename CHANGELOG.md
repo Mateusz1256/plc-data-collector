@@ -16,6 +16,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 - Pytest, pytest-asyncio, ruff, and mypy configuration.
 - GitHub Actions workflow for tests, linting, formatting check, and type check.
 - Core framework-independent domain models, enums, and exceptions.
+- JSON configuration loading with Pydantic validation, environment overrides,
+  reference checks, secret masking, and an example configuration file.
 
 ### Changed
 

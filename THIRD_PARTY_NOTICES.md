@@ -23,7 +23,65 @@ repozytorium uzywanej wersji.
 
 ## Runtime Dependencies
 
-Brak zatwierdzonych zaleznosci runtime na obecnym etapie.
+The following packages are installed by `python -m pip install -e .` for runtime
+configuration validation. Direct dependencies are declared in `pyproject.toml`;
+transitive dependencies are listed from installed package metadata and should be
+regenerated from a lockfile once dependency locking is introduced.
+
+### annotated-types
+
+- Version: 0.7.0
+- Purpose: transitive Pydantic dependency for reusable validation constraints
+- License: MIT
+- Source: https://pypi.org/project/annotated-types/0.7.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Pydantic. License verified from package
+  metadata classifier `License :: OSI Approved :: MIT License`.
+
+### pydantic
+
+- Version: 2.11.3
+- Purpose: application configuration validation at process boundaries
+- License: MIT
+- Source: https://pypi.org/project/pydantic/2.11.3/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: MIT`.
+
+### pydantic_core
+
+- Version: 2.33.1
+- Purpose: transitive Pydantic validation engine
+- License: MIT
+- Source: https://pypi.org/project/pydantic-core/2.33.1/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Pydantic. License verified from package
+  metadata field `License: MIT`.
+
+### typing-inspection
+
+- Version: 0.4.0
+- Purpose: transitive Pydantic dependency for runtime typing introspection
+- License: MIT
+- Source: https://pypi.org/project/typing-inspection/0.4.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Pydantic. License verified from package
+  metadata classifier `License :: OSI Approved :: MIT License`.
+
+### typing_extensions
+
+- Version: 4.13.2
+- Purpose: transitive Pydantic dependency for typing features
+- License: PSF-2.0
+- Source: https://pypi.org/project/typing-extensions/4.13.2/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Pydantic. License verified from package
+  metadata field `License-Expression: PSF-2.0`.
 
 ## Development Dependencies
 
