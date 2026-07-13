@@ -1,5 +1,7 @@
 # Task 05: Scheduler grup odczytowych
 
+Status: done
+
 ## Cel
 
 Uruchamiać grupy tagów zgodnie z interwałem bez nakładania cykli.

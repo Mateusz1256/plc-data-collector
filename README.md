@@ -210,6 +210,26 @@ Zachowanie:
 - blad pojedynczego taga zwraca `TagResult.failure()` bez przerywania calego
   batcha.
 
+## Scheduler grup odczytowych
+
+`PollScheduler` w `plc_gateway.runtime` uruchamia wlaczone `TagGroupConfig`
+zgodnie z `interval_ms`. Scheduler uzywa monotonic clock i wylicza kolejne
+terminy przez dodawanie interwalu do poprzedniego terminu, wiec dlugi cykl lub
+opoznienie petli nie przesuwa trwale harmonogramu jak `sleep(interval)` po
+zakonczeniu kazdego cyklu.
+
+Zachowanie:
+
+- pierwsze uruchomienie grupy jest zaplanowane natychmiast po starcie,
+- aktualnie wspierana polityka overlap to `skip`,
+- dla kazdej grupy istnieje najwyzej jeden aktywny task pollingu,
+- gdy termin wypada podczas aktywnego cyklu, scheduler zwieksza
+  `missed_cycles` i nie tworzy kolejki zaleglych cykli,
+- `stop()` zatrzymuje petle schedulera bez anulowania aktywnego cyklu,
+- `cancel_active_cycles()` anuluje aktywne cykle i czeka na ich zakonczenie,
+- `snapshot()` udostepnia stan grup: uruchomione, pominiete i nieudane cykle
+  oraz ostatni blad handlera.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

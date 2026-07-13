@@ -22,6 +22,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   creating drivers by configured protocol name.
 - Deterministic mock protocol driver with configurable values, sequences,
   delays, timeouts, connection failures, tag failures, and health checks.
+- Async non-overlapping poll scheduler with monotonic timing, missed-cycle
+  accounting, stop/cancel controls, and observable scheduling state.
 
 ### Changed
 
