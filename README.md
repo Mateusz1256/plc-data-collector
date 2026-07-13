@@ -142,6 +142,34 @@ Dane diagnostyczne nalezy pobierac przez `GatewayConfig.safe_for_logging()`.
 Maskuje ono sekrety w `protocol_options`, `metadata` i dane uwierzytelniajace w
 endpointach, zeby hasla, tokeny i klucze nie trafialy do logow.
 
+## Kontrakt driverow
+
+Wspolny kontrakt driverow znajduje sie w `src/plc_gateway/protocols/`.
+Runtime tworzy drivery przez `DriverRegistry`, podajac zwalidowany
+`ConnectionConfig`. Registry mapuje nazwe protokolu na factory drivera i nie
+zna szczegolow bibliotek protokolow.
+
+Minimalny driver implementuje `CommunicationDriver`:
+
+```python
+class CommunicationDriver(Protocol):
+    @property
+    def capabilities(self) -> DriverCapabilities: ...
+    async def connect(self) -> None: ...
+    async def disconnect(self) -> None: ...
+    async def read(self, tags: Sequence[TagRequest]) -> list[TagResult]: ...
+    async def health_check(self) -> bool: ...
+```
+
+Zasady kontraktu:
+
+- jeden driver jest tworzony dla jednego `ConnectionConfig` i jednego workera,
+- `read()` przyjmuje batch tagow i zwraca wyniki w modelach domenowych,
+- `connect()`, `disconnect()` i `health_check()` honoruja timeout polaczenia,
+- `read()` honoruje `TagRequest.timeout_ms`, jezeli zostal ustawiony,
+- implementacje nie moga ukrywac `asyncio.CancelledError`,
+- nieznany protokol konczy sie `ConfigurationError` przed startem runtime.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

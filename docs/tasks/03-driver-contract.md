@@ -1,5 +1,7 @@
 # Task 03: Kontrakt drivera i registry
 
+Status: done
+
 ## Cel
 
 Zdefiniować wspólny interfejs dla wszystkich protokołów.
