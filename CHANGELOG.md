@@ -28,6 +28,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   health state, heartbeat, poll execution summaries, and cancellation cleanup.
 - Bounded reading queue for worker poll results with producer timeouts,
   occupancy metrics, consumer acknowledgement, and explicit shutdown outcomes.
+- SQLAlchemy/Alembic relational persistence schema and repositories for
+  configuration, poll executions, tag readings, and runtime component status.
 
 ### Changed
 

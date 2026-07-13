@@ -12,6 +12,8 @@ authors = [
   { name = "PLC Gateway contributors" }
 ]
 dependencies = [
+  "alembic==1.17.1",
+  "SQLAlchemy==2.0.44",
   "pydantic==2.11.3"
 ]
 

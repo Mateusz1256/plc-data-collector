@@ -39,6 +39,50 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by Pydantic. License verified from package
   metadata classifier `License :: OSI Approved :: MIT License`.
 
+### alembic
+
+- Version: 1.17.1
+- Purpose: database migrations for the relational persistence schema
+- License: MIT
+- Source: https://pypi.org/project/alembic/1.17.1/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: MIT`.
+
+### greenlet
+
+- Version: 3.2.2
+- Purpose: transitive SQLAlchemy dependency
+- License: MIT AND Python-2.0
+- Source: https://pypi.org/project/greenlet/3.2.2/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by SQLAlchemy. License verified from package
+  metadata field `License: MIT AND Python-2.0`.
+
+### Mako
+
+- Version: 1.3.10
+- Purpose: transitive Alembic dependency for migration templates
+- License: MIT
+- Source: https://pypi.org/project/Mako/1.3.10/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Alembic. License verified from package
+  metadata field `License: MIT`.
+
+### MarkupSafe
+
+- Version: 3.0.3
+- Purpose: transitive Mako dependency for safe markup handling
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/MarkupSafe/3.0.3/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Mako. License verified from package metadata
+  field `License-Expression: BSD-3-Clause`.
+
 ### pydantic
 
 - Version: 2.11.3
@@ -60,6 +104,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by Pydantic. License verified from package
   metadata field `License: MIT`.
+
+### SQLAlchemy
+
+- Version: 2.0.44
+- Purpose: relational schema and repository implementation
+- License: MIT
+- Source: https://pypi.org/project/SQLAlchemy/2.0.44/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License: MIT`.
 
 ### typing-inspection
 

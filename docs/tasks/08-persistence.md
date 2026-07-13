@@ -1,5 +1,7 @@
 # Task 08: Persistence i migracje
 
+Status: done
+
 ## Cel
 
 Dodać wspólny model relacyjny i repozytoria.

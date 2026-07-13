@@ -272,6 +272,41 @@ Zachowanie:
 - `drop_pending()` zamyka kolejke i zwraca jawny status liczby odrzuconych
   elementow. Spool dyskowy pozostaje poza tym etapem.
 
+## Persistence
+
+Warstwa `plc_gateway.persistence` uzywa SQLAlchemy Core i nie wycieka do modeli
+domenowych. Domyslny backend developerski to SQLite. Schemat obejmuje tabele:
+
+- `connections`,
+- `tag_groups`,
+- `tags`,
+- `tag_readings`,
+- `poll_executions`,
+- `runtime_components`.
+
+Migracje Alembic znajduja sie w `migrations/`. Lokalna migracja SQLite:
+
+```powershell
+alembic upgrade head
+```
+
+Repozytoria:
+
+- `ConfigurationRepository` zapisuje konfiguracje polaczen, grup i tagow,
+- `ReadingRepository` zapisuje `PollExecution` oraz `TagReadingRecord`,
+- `RuntimeStatusRepository` zapisuje obserwowalny status komponentow runtime.
+
+Zasady:
+
+- `tag_readings.event_id` jest unikalny i idempotentny; duplikat nie tworzy
+  drugiego rekordu,
+- wartosci tagow sa zapisane w typowanych kolumnach:
+  `numeric_value`, `integer_value`, `boolean_value`, `text_value`,
+  `binary_value`,
+- timestampy sa wymagane jako timezone-aware i zapisywane w UTC,
+- JSON jest uzywany tylko dla danych specyficznych dla protokolu
+  (`protocol_options`) oraz metadanych tagow.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:
