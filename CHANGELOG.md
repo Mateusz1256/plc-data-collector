@@ -20,6 +20,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   reference checks, secret masking, and an example configuration file.
 - Protocol driver contract, capability metadata, factory type, and registry for
   creating drivers by configured protocol name.
+- Deterministic mock protocol driver with configurable values, sequences,
+  delays, timeouts, connection failures, tag failures, and health checks.
 
 ### Changed
 

@@ -170,6 +170,46 @@ Zasady kontraktu:
 - implementacje nie moga ukrywac `asyncio.CancelledError`,
 - nieznany protokol konczy sie `ConfigurationError` przed startem runtime.
 
+## Mock driver
+
+Deterministyczny driver `mock` znajduje sie w `plc_gateway.protocols.mock`.
+Sluzy do lokalnego developmentu oraz testow schedulera i retry bez realnego PLC
+lub serwera OPC. Factory `create_mock_driver` mozna zarejestrowac w
+`DriverRegistry` dla protokolu `mock`.
+
+Opcje sa przekazywane przez `connections[].protocol_options`:
+
+```json
+{
+  "delay_ms": 250,
+  "connect_failures_before_success": 1,
+  "timeout_on_read": false,
+  "timeout_on_connect": false,
+  "tags": {
+    "temperature": {"value": 20.5},
+    "counter": {"sequence": [1, 2, 3]},
+    "broken": {
+      "error_code": "mock_bad_tag",
+      "error_message": "Configured tag failure"
+    }
+  }
+}
+```
+
+Zachowanie:
+
+- brak konfiguracji taga zwraca domyslna wartosc zgodna z `ValueType`,
+- `value` zwraca stala wartosc,
+- `sequence` zwraca kolejne wartosci cyklicznie,
+- `delay_ms` uzywa wstrzykiwanego async sleepera, wiec testy moga unikac
+  realnego czekania,
+- timeout jest zglaszany jako `TransientCommunicationError`, gdy `delay_ms`
+  przekracza timeout polaczenia lub najnizszy timeout taga w batchu,
+- `connect_failures_before_success` pozwala zasymulowac awarie i odzyskanie
+  polaczenia,
+- blad pojedynczego taga zwraca `TagResult.failure()` bez przerywania calego
+  batcha.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

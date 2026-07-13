@@ -1,5 +1,7 @@
 # Task 04: Mock driver
 
+Status: done
+
 ## Cel
 
 Dodać deterministyczny driver testowy umożliwiający rozwój bez PLC i OPC.
