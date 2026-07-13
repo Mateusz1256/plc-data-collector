@@ -1,5 +1,7 @@
 # Task 06: Connection worker
 
+Status: done
+
 ## Cel
 
 Dodać worker będący wyłącznym właścicielem jednego połączenia i drivera.

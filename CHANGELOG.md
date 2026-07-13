@@ -24,6 +24,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   delays, timeouts, connection failures, tag failures, and health checks.
 - Async non-overlapping poll scheduler with monotonic timing, missed-cycle
   accounting, stop/cancel controls, and observable scheduling state.
+- Isolated connection worker lifecycle with owned driver instances, observable
+  health state, heartbeat, poll execution summaries, and cancellation cleanup.
 
 ### Changed
 

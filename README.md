@@ -230,6 +230,28 @@ Zachowanie:
 - `snapshot()` udostepnia stan grup: uruchomione, pominiete i nieudane cykle
   oraz ostatni blad handlera.
 
+## Connection worker
+
+`ConnectionWorker` w `plc_gateway.runtime` jest wlascicielem jednego
+`ConnectionConfig` i jednej instancji drivera utworzonej przez `DriverRegistry`.
+Nie wspoldzieli klienta protokolu z innymi workerami.
+
+Lifecycle:
+
+- `connect()` ustawia stan `starting`, laczy driver i przechodzi do `running`,
+- blad polaczenia ustawia `failed`, ale ten sam worker moze ponowic
+  `connect()`, jezeli driver jest gotowy do reconnect,
+- `poll_group()` buduje `TagRequest` z tagow grupy i zwraca `WorkerPollResult`
+  zawierajacy `PollExecution` oraz wyniki tagow,
+- czesciowe bledy tagow daja status `partial_failure` i stan workera
+  `degraded`,
+- awaria batch read jest izolowana do wynikow blednych dla tagow z tej grupy i
+  nie zatrzymuje innych workerow,
+- `health_check()` aktualizuje obserwowalny stan workera,
+- `heartbeat()` odswieza timestamp statusu,
+- anulowanie `connect()`, `poll_group()` lub `health_check()` wykonuje
+  best-effort `disconnect()` i propaguje `asyncio.CancelledError`.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:
