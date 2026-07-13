@@ -26,6 +26,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.getenv("PLC_GATEWAY_LOG_LEVEL", "INFO"),
         help="logging level, defaults to PLC_GATEWAY_LOG_LEVEL or INFO",
     )
+    parser.add_argument(
+        "--serve-api",
+        action="store_true",
+        help="serve the read-only health and runtime API",
+    )
+    parser.add_argument(
+        "--api-host",
+        default=os.getenv("PLC_GATEWAY_API_HOST", "127.0.0.1"),
+        help="API host, defaults to localhost only",
+    )
+    parser.add_argument(
+        "--api-port",
+        type=int,
+        default=int(os.getenv("PLC_GATEWAY_API_PORT", "8080")),
+        help="API port, defaults to PLC_GATEWAY_API_PORT or 8080",
+    )
     return parser
 
 
@@ -40,6 +56,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     configure_logging(args.log_level)
     logging.getLogger(__name__).info("PLC Gateway bootstrap command started")
+    if args.serve_api:
+        import uvicorn
+
+        from plc_gateway.api import create_api_app
+
+        uvicorn.run(create_api_app(), host=args.api_host, port=args.api_port)
+        return 0
+
     print(json.dumps(build_health_status(), sort_keys=True))
     return 0
 

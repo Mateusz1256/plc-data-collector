@@ -32,6 +32,8 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   configuration, poll executions, tag readings, and runtime component status.
 - Batched database writer that consumes the bounded reading queue, flushes by
   size or interval, retries storage failures, and records writer metrics.
+- Read-only FastAPI health and runtime status endpoints with localhost default
+  API serving support.
 
 ### Changed
 

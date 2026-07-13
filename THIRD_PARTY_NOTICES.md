@@ -39,12 +39,56 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by Pydantic. License verified from package
   metadata classifier `License :: OSI Approved :: MIT License`.
 
+### annotated-doc
+
+- Version: 0.0.4
+- Purpose: transitive FastAPI dependency for annotated documentation metadata
+- License: MIT
+- Source: https://pypi.org/project/annotated-doc/0.0.4/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by FastAPI. License verified from package
+  metadata field `License-Expression: MIT`.
+
 ### alembic
 
 - Version: 1.17.1
 - Purpose: database migrations for the relational persistence schema
 - License: MIT
 - Source: https://pypi.org/project/alembic/1.17.1/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: MIT`.
+
+### anyio
+
+- Version: 4.9.0
+- Purpose: transitive Starlette dependency for async runtime compatibility
+- License: MIT
+- Source: https://pypi.org/project/anyio/4.9.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Starlette. License verified from package
+  metadata field `License: MIT`.
+
+### click
+
+- Version: 8.1.7
+- Purpose: transitive Uvicorn dependency for command-line support
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/click/8.1.7/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Uvicorn. License verified from package
+  metadata field `License: BSD-3-Clause`.
+
+### fastapi
+
+- Version: 0.139.0
+- Purpose: read-only health and runtime HTTP API
+- License: MIT
+- Source: https://pypi.org/project/fastapi/0.139.0/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: declared directly as a runtime dependency. License verified from
@@ -60,6 +104,28 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by SQLAlchemy. License verified from package
   metadata field `License: MIT AND Python-2.0`.
+
+### h11
+
+- Version: 0.16.0
+- Purpose: transitive Uvicorn dependency for HTTP/1.1 protocol handling
+- License: MIT
+- Source: https://pypi.org/project/h11/0.16.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Uvicorn. License verified from package
+  metadata field `License: MIT`.
+
+### idna
+
+- Version: 2.10
+- Purpose: transitive AnyIO dependency for internationalized domain names
+- License: BSD-like
+- Source: https://pypi.org/project/idna/2.10/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by AnyIO. License verified from package
+  metadata field `License: BSD-like`.
 
 ### Mako
 
@@ -116,16 +182,38 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: declared directly as a runtime dependency. License verified from
   package metadata field `License: MIT`.
 
-### typing-inspection
+### sniffio
 
-- Version: 0.4.0
-- Purpose: transitive Pydantic dependency for runtime typing introspection
-- License: MIT
-- Source: https://pypi.org/project/typing-inspection/0.4.0/
+- Version: 1.3.1
+- Purpose: transitive AnyIO dependency for async library detection
+- License: MIT OR Apache-2.0
+- Source: https://pypi.org/project/sniffio/1.3.1/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
-- Notes: installed transitively by Pydantic. License verified from package
-  metadata classifier `License :: OSI Approved :: MIT License`.
+- Notes: installed transitively by AnyIO. License verified from package
+  metadata field `License: MIT OR Apache-2.0`.
+
+### starlette
+
+- Version: 1.3.1
+- Purpose: transitive FastAPI dependency providing ASGI routing primitives
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/starlette/1.3.1/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by FastAPI. License verified from package
+  metadata field `License-Expression: BSD-3-Clause`.
+
+### typing-inspection
+
+- Version: 0.4.2
+- Purpose: transitive Pydantic dependency for runtime typing introspection
+- License: MIT
+- Source: https://pypi.org/project/typing-inspection/0.4.2/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: installed transitively by Pydantic and FastAPI. License verified from
+  package metadata field `License-Expression: MIT`.
 
 ### typing_extensions
 
@@ -137,6 +225,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by Pydantic. License verified from package
   metadata field `License-Expression: PSF-2.0`.
+
+### uvicorn
+
+- Version: 0.35.0
+- Purpose: ASGI server for local health and runtime HTTP API
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/uvicorn/0.35.0/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: BSD-3-Clause`.
 
 ## Development Dependencies
 
@@ -165,6 +264,39 @@ introduced.
 - Copyright notice: Copyright (c) 2010 Jonathan Hartley.
 - Bundled in distribution: no
 - Notes: installed transitively in the `dev` extra.
+
+### certifi
+
+- Version: 2021.5.30
+- Purpose: transitive httpx dependency for certificate authority bundle
+- License: MPL-2.0
+- Source: https://pypi.org/project/certifi/2021.5.30/
+- Copyright notice: See package license file.
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata field `License: MPL-2.0`.
+
+### httpcore
+
+- Version: 1.0.9
+- Purpose: transitive httpx dependency for low-level HTTP client behavior
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/httpcore/1.0.9/
+- Copyright notice: See package license file.
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata field `License-Expression: BSD-3-Clause`.
+
+### httpx
+
+- Version: 0.28.1
+- Purpose: test client dependency for FastAPI API tests
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/httpx/0.28.1/
+- Copyright notice: See package license file.
+- Bundled in distribution: no
+- Notes: declared directly in the `dev` extra. License verified from package
+  metadata field `License: BSD-3-Clause`.
 
 ### iniconfig
 

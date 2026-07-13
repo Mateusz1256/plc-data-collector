@@ -13,12 +13,15 @@ authors = [
 ]
 dependencies = [
   "alembic==1.17.1",
+  "fastapi==0.139.0",
   "SQLAlchemy==2.0.44",
+  "uvicorn==0.35.0",
   "pydantic==2.11.3"
 ]
 
 [project.optional-dependencies]
 dev = [
+  "httpx==0.28.1",
   "pytest==9.1.1",
   "pytest-asyncio==1.4.0",
   "ruff==0.15.21",

@@ -1,5 +1,7 @@
 # Task 10: Health i runtime API
 
+Status: done
+
 ## Cel
 
 Udostępnić podstawowy wgląd w działanie aplikacji.

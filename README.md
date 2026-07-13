@@ -327,6 +327,35 @@ Zachowanie:
 - `shutdown(timeout_s)` prosi writer o zatrzymanie i probuje oproznic kolejke w
   zadanym limicie.
 
+## Health i runtime API
+
+Read-only API jest zbudowane na FastAPI i domyslnie binduje sie do localhost.
+Uruchomienie developerskie:
+
+```powershell
+plc-gateway --serve-api
+```
+
+Domyslny adres:
+
+```text
+http://127.0.0.1:8080
+```
+
+Endpointy:
+
+- `GET /health/live` - liveness procesu, niezalezny od pojedynczego PLC,
+- `GET /health/ready` - readiness krytycznych zaleznosci: konfiguracja,
+  storage i bledy krytyczne,
+- `GET /api/runtime/components` - komponenty runtime oraz metryki kolejki i
+  writera,
+- `GET /api/runtime/workers` - obserwowalny stan workerow,
+- `GET /api/about` - wersja aplikacji i placeholder licencji.
+
+Awaria pojedynczego workera oznacza tryb zdegradowany, ale nie blokuje
+readiness, jezeli konfiguracja i storage sa dostepne. Endpointy sa read-only i
+nie zwracaja sekretow.
+
 ## Jakość
 
 Kazda zmiana powinna przechodzic:

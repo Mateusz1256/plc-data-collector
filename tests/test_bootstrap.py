@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -37,6 +38,23 @@ def test_main_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.strip() == "0.0.0"
+
+
+def test_main_serves_api_on_localhost_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, Any]] = []
+
+    def fake_run(app: object, *, host: str, port: int) -> None:
+        calls.append({"app": app, "host": host, "port": port})
+
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    exit_code = main(["--serve-api"])
+
+    assert exit_code == 0
+    assert calls[0]["host"] == "127.0.0.1"
+    assert calls[0]["port"] == 8080
 
 
 def test_configure_logging_rejects_unknown_level() -> None:
