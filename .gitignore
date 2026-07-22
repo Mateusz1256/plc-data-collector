@@ -22,7 +22,7 @@ env/
 coverage.xml
 htmlcov/
 
-# AI agent files
+# Local workspace tooling
 AGENTS.md
 CLAUDE.md
 GEMINI.md

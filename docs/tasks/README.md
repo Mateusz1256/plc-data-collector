@@ -1,10 +1,10 @@
-# Task roadmap
+# Task Roadmap
 
-Taski wykonujemy kolejno.
+Tasks are completed in order.
 
-Nie realizuj więcej niż jednego taska w jednej iteracji.
+Only one task should be active in a single implementation pass.
 
-## Kolejność
+## Order
 
 1. `00-bootstrap.md`
 2. `01-domain-models.md`
@@ -24,9 +24,9 @@ Nie realizuj więcej niż jednego taska w jednej iteracji.
 16. `15-license-credits.md`
 17. `16-mvp-release.md`
 
-## Status
+## Status Values
 
-Do śledzenia można dodać przy każdym tasku jedno z oznaczeń:
+Use one status line in each task file:
 
 ```text
 Status: todo
@@ -35,4 +35,4 @@ Status: blocked
 Status: done
 ```
 
-Nie zmieniaj statusu na `done`, dopóki wszystkie kryteria akceptacji nie są spełnione.
+Do not mark a task as `done` until all acceptance criteria are met.
