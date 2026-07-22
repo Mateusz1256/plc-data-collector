@@ -12,6 +12,7 @@ from plc_gateway.domain import (
     ConnectionConfig,
     PollExecution,
     RuntimeComponentStatus,
+    StorageError,
     TagConfig,
     TagGroupConfig,
     TagValue,
@@ -199,7 +200,9 @@ class RuntimeStatusRepository:
             )
 
 
-def _reading_values(record: TagReadingRecord) -> dict[str, object]:
+def _reading_values(
+    connection: Connection, record: TagReadingRecord
+) -> dict[str, object]:
     result = record.result
     value = result.value
     values: dict[str, object] = {
@@ -210,7 +213,7 @@ def _reading_values(record: TagReadingRecord) -> dict[str, object]:
         "source_timestamp": result.source_timestamp,
         "received_at": result.received_at,
         "quality": result.quality.value,
-        "value_type": value.value_type.value if value is not None else None,
+        "value_type": _reading_value_type(connection, record),
         "numeric_value": None,
         "integer_value": None,
         "boolean_value": None,
@@ -222,6 +225,23 @@ def _reading_values(record: TagReadingRecord) -> dict[str, object]:
     if value is not None:
         values.update(_tag_value_columns(value))
     return values
+
+
+def _reading_value_type(connection: Connection, record: TagReadingRecord) -> str:
+    value = record.result.value
+    if value is not None:
+        return value.value_type.value
+
+    configured_value_type = connection.scalar(
+        select(tags.c.value_type).where(tags.c.id == record.result.tag_id)
+    )
+    if isinstance(configured_value_type, str) and configured_value_type:
+        return configured_value_type
+    raise StorageError(
+        "Cannot persist failed tag reading without configured value_type.",
+        code="missing_tag_value_type",
+        details={"tag_id": record.result.tag_id},
+    )
 
 
 def _save_poll_execution(connection: Connection, execution: PollExecution) -> None:
@@ -257,7 +277,7 @@ def _save_tag_reading(
     record: TagReadingRecord,
 ) -> CursorResult[object]:
     statement = sqlite_insert(tag_readings).values(
-        **_reading_values(record),
+        **_reading_values(connection, record),
     )
     return connection.execute(
         statement.on_conflict_do_nothing(

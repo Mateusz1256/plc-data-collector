@@ -26,7 +26,7 @@ def test_license_report_loads_bundled_credits() -> None:
     report = load_license_report()
 
     assert report.project.spdx_id == "LicenseRef-PLC-Gateway-Proprietary"
-    assert report.build.version == "0.0.0"
+    assert report.build.version == "0.1.0"
     assert any(dependency.name == "asyncua" for dependency in report.dependencies)
     assert all(dependency.license for dependency in report.dependencies)
 

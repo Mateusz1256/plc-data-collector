@@ -10,9 +10,9 @@ repositories, a database writer, disk spool support, and a read-only health API.
 
 ## Status
 
-The project is under active MVP development. Core runtime components are
-implemented and covered by tests, while full end-to-end production wiring is
-still being completed.
+The project is at MVP release `0.1.0`. Core runtime components are implemented
+and covered by tests. Production deployment still requires an external service
+manager and environment-specific PLC/storage validation.
 
 Current capabilities include:
 
@@ -262,6 +262,31 @@ Build a local wheel without dependencies:
 ```powershell
 pip wheel . --no-deps -w dist
 ```
+
+## Release 0.1.0
+
+Release notes are maintained in:
+
+```text
+docs/release-notes/0.1.0.md
+```
+
+The expected distribution artifact is:
+
+```text
+dist/plc_gateway-0.1.0-py3-none-any.whl
+```
+
+Known MVP limitations:
+
+- Service orchestration is delegated to systemd, WinSW, NSSM, or another
+  external process manager.
+- Encrypted secret storage is not included; use environment-specific secret
+  management and avoid committing credentials.
+- Runtime API endpoints are read-only.
+- SQLite is the validated local persistence backend.
+- Real PLC interoperability must be validated against target devices before
+  production rollout.
 
 ## Project Layout
 

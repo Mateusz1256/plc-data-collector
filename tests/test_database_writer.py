@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from threading import Event
 
 import pytest
 from sqlalchemy import Engine
@@ -53,6 +54,26 @@ class FakeRepository:
             raise StorageError("storage failed", code="fake_storage_failed")
         self.batches.append(list(poll_results))
         return sum(len(item.results) for item in poll_results)
+
+
+class BlockingRepository(FakeRepository):
+    """Repository that blocks one save until released by the test."""
+
+    def __init__(self) -> None:
+        """Create a blocking repository."""
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+
+    def save_poll_results(self, poll_results: list[WorkerPollResult]) -> int:
+        """Block the storage operation after reporting that it started."""
+        self.started.set()
+        if not self.release.wait(timeout=1):
+            raise StorageError(
+                "blocking repository was not released",
+                code="blocking_repository_timeout",
+            )
+        return super().save_poll_results(poll_results)
 
 
 async def no_sleep(_: float) -> None:
@@ -399,7 +420,7 @@ async def test_database_writer_schedules_failed_spool_replay(
 @pytest.mark.asyncio
 async def test_database_writer_shutdown_reports_timeout() -> None:
     queue = make_queue()
-    repository = FakeRepository()
+    repository = BlockingRepository()
     writer = DatabaseWriter(
         queue,
         repository,
@@ -409,10 +430,12 @@ async def test_database_writer_shutdown_reports_timeout() -> None:
     )
     task = await start_writer(writer)
 
+    await queue.put(make_poll_result("poll-1"))
+    await wait_until(repository.started.is_set)
     shutdown = await writer.shutdown(timeout_s=0.001)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
+    repository.release.set()
+    await queue.join()
+    await task
 
     assert shutdown.drained is False
 

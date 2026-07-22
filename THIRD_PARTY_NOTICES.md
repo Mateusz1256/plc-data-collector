@@ -89,25 +89,25 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### anyio
 
-- Version: 4.9.0
+- Version: 4.14.2
 - Purpose: transitive Starlette dependency for async runtime compatibility
 - License: MIT
-- Source: https://pypi.org/project/anyio/4.9.0/
+- Source: https://pypi.org/project/anyio/4.14.2/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by Starlette. License verified from package
-  metadata field `License: MIT`.
+  metadata field `License-Expression: MIT`.
 
 ### click
 
-- Version: 8.1.7
+- Version: 8.4.2
 - Purpose: transitive Uvicorn dependency for command-line support
 - License: BSD-3-Clause
-- Source: https://pypi.org/project/click/8.1.7/
+- Source: https://pypi.org/project/click/8.4.2/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by Uvicorn. License verified from package
-  metadata field `License: BSD-3-Clause`.
+  metadata field `License-Expression: BSD-3-Clause`.
 
 ### colorama
 
@@ -122,14 +122,14 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### cffi
 
-- Version: 2.0.0
+- Version: 2.1.0
 - Purpose: transitive cryptography dependency for C foreign function interface
-- License: MIT
-- Source: https://pypi.org/project/cffi/2.0.0/
+- License: MIT-0
+- Source: https://pypi.org/project/cffi/2.1.0/
 - Copyright notice: See package license and authors files.
 - Bundled in distribution: yes
 - Notes: installed transitively by cryptography. License verified from package
-  metadata field `License-Expression: MIT`.
+  metadata field `License-Expression: MIT-0`.
 
 ### cryptography
 
@@ -155,14 +155,14 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### greenlet
 
-- Version: 3.2.2
+- Version: 3.5.4
 - Purpose: transitive SQLAlchemy dependency
-- License: MIT AND Python-2.0
-- Source: https://pypi.org/project/greenlet/3.2.2/
+- License: MIT AND PSF-2.0
+- Source: https://pypi.org/project/greenlet/3.5.4/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by SQLAlchemy. License verified from package
-  metadata field `License: MIT AND Python-2.0`.
+  metadata field `License-Expression: MIT AND PSF-2.0`.
 
 ### h11
 
@@ -177,21 +177,21 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### idna
 
-- Version: 2.10
+- Version: 3.18
 - Purpose: transitive AnyIO dependency for internationalized domain names
-- License: BSD-like
-- Source: https://pypi.org/project/idna/2.10/
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/idna/3.18/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by AnyIO. License verified from package
-  metadata field `License: BSD-like`.
+  metadata field `License-Expression: BSD-3-Clause`.
 
 ### Mako
 
-- Version: 1.3.10
+- Version: 1.3.12
 - Purpose: transitive Alembic dependency for migration templates
 - License: MIT
-- Source: https://pypi.org/project/Mako/1.3.10/
+- Source: https://pypi.org/project/Mako/1.3.12/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by Alembic. License verified from package
@@ -232,14 +232,14 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### pycparser
 
-- Version: 2.21
+- Version: 3.0
 - Purpose: transitive cffi dependency for parsing C declarations
-- License: BSD
-- Source: https://pypi.org/project/pycparser/2.21/
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/pycparser/3.0/
 - Copyright notice: Copyright Eli Bendersky. See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by cffi. License verified from package metadata
-  field `License: BSD` and classifier `License :: OSI Approved :: BSD License`.
+  field `License-Expression: BSD-3-Clause`.
 
 ### pyOpenSSL
 
@@ -254,10 +254,10 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### python-dateutil
 
-- Version: 2.8.2
+- Version: 2.9.0.post0
 - Purpose: transitive asyncua dependency for date and time handling
 - License: Dual License; Apache Software License OR BSD License
-- Source: https://pypi.org/project/python-dateutil/2.8.2/
+- Source: https://pypi.org/project/python-dateutil/2.9.0.post0/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by asyncua. License verified from package
@@ -265,10 +265,10 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### pytz
 
-- Version: 2023.3.post1
+- Version: 2026.2
 - Purpose: transitive asyncua dependency for timezone data
 - License: MIT
-- Source: https://pypi.org/project/pytz/2023.3.post1/
+- Source: https://pypi.org/project/pytz/2026.2/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by asyncua. License verified from package
@@ -287,10 +287,10 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### six
 
-- Version: 1.16.0
+- Version: 1.17.0
 - Purpose: transitive python-dateutil dependency for Python compatibility helpers
 - License: MIT
-- Source: https://pypi.org/project/six/1.16.0/
+- Source: https://pypi.org/project/six/1.17.0/
 - Copyright notice: Copyright Benjamin Peterson. See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by python-dateutil. License verified from
@@ -343,10 +343,10 @@ regenerated from a lockfile once dependency locking is introduced.
 
 ### typing_extensions
 
-- Version: 4.13.2
+- Version: 4.16.0
 - Purpose: transitive Pydantic dependency for typing features
 - License: PSF-2.0
-- Source: https://pypi.org/project/typing-extensions/4.13.2/
+- Source: https://pypi.org/project/typing-extensions/4.16.0/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
 - Notes: installed transitively by Pydantic. License verified from package
@@ -393,10 +393,10 @@ introduced.
 
 ### certifi
 
-- Version: 2021.5.30
+- Version: 2026.7.22
 - Purpose: transitive httpx dependency for certificate authority bundle
 - License: MPL-2.0
-- Source: https://pypi.org/project/certifi/2021.5.30/
+- Source: https://pypi.org/project/certifi/2026.7.22/
 - Copyright notice: See package license file.
 - Bundled in distribution: no
 - Notes: installed transitively in the `dev` extra. License verified from

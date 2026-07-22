@@ -8,6 +8,23 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+- Failed tag readings now persist the configured tag `value_type`, preventing
+  storage batch rejection on error-only poll results.
+
+### Security
+
+## [0.1.0] - 2026-07-22
+
+### Added
+
 - Initial project planning files.
 - Incremental MVP task roadmap.
 - Contribution and development guidelines.
@@ -44,6 +61,9 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
   file logging, graceful shutdown handling, and deployment examples.
 - Project license metadata, bundled verified dependency credits, `licenses` CLI
   output, and build/license information in `/api/about`.
+- MVP release validation covering multi-cycle runtime polling, connection
+  failure isolation, storage failure spool/replay, graceful shutdown draining,
+  release notes, known limitations, and distribution artifact guidance.
 
 ### Changed
 
@@ -54,4 +74,3 @@ Format opiera sie na Keep a Changelog, a projekt uzywa Semantic Versioning.
 ### Fixed
 
 ### Security
-

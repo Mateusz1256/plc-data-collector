@@ -107,6 +107,21 @@ def make_reading(event_id: str) -> TagReadingRecord:
     )
 
 
+def make_failed_reading(event_id: str) -> TagReadingRecord:
+    timestamp = utc_now()
+    return TagReadingRecord(
+        event_id=event_id,
+        connection_id="mock_connection",
+        tag_group_id="fast",
+        result=TagResult.failure(
+            tag_id="temperature",
+            error_code="mock_timeout",
+            error_message="Mock read timed out.",
+            received_at=timestamp,
+        ),
+    )
+
+
 def test_alembic_migration_creates_schema(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     config = Config("alembic.ini")
@@ -143,6 +158,21 @@ def test_repositories_persist_poll_executions_and_readings() -> None:
     assert row["event_id"] == "event-1"
     assert row["numeric_value"] == 20.5
     assert row["received_at"] == utc_now()
+
+
+def test_repositories_persist_failed_readings_with_configured_value_type() -> None:
+    engine = make_engine()
+    seed_configuration(engine)
+    repository = ReadingRepository(engine)
+
+    inserted = repository.save_tag_readings([make_failed_reading("event-1")])
+
+    assert inserted == 1
+    with engine.connect() as connection:
+        row = connection.execute(select(tag_readings)).mappings().one()
+    assert row["value_type"] == "numeric"
+    assert row["numeric_value"] is None
+    assert row["error_code"] == "mock_timeout"
 
 
 def test_duplicate_event_id_does_not_create_second_reading() -> None:

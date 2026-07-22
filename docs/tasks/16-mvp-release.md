@@ -1,5 +1,7 @@
 # Task 16: Release MVP
 
+Status: done
+
 ## Cel
 
 Przygotować pierwsze spójne wydanie MVP.
