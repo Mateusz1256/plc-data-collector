@@ -232,6 +232,7 @@ async def test_mvp_storage_failure_spools_and_replays_after_recovery(
         storage_timeout_s=1,
         max_retries=0,
         spool=spool,
+        spool_retry_delay_s=0,
         spool_timeout_s=1,
     )
     failing_task = await start_writer(failing_writer)
