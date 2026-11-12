@@ -143,13 +143,15 @@ regenerated from a lockfile once dependency locking is introduced.
 ### cryptography
 
 - Version: 50.0.2
-- Purpose: transitive asyncua dependency for certificate and encryption support
+- Purpose: Fernet encryption of Connection secrets at rest; also used by asyncua
+  for certificate and encryption support
 - License: Apache-2.0 OR BSD-3-Clause
 - Source: https://pypi.org/project/cryptography/50.0.2/
 - Copyright notice: See package license files.
 - Bundled in distribution: yes
-- Notes: installed transitively by asyncua and pyOpenSSL. License verified from
-  package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.
+- Notes: declared directly as a runtime dependency; also installed by asyncua and
+  pyOpenSSL. License verified from package metadata field
+  `License-Expression: Apache-2.0 OR BSD-3-Clause`.
 
 ### fastapi
 

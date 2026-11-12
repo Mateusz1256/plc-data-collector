@@ -19,7 +19,8 @@ dependencies = [
   "pg8000==1.31.2",
   "SQLAlchemy==2.0.44",
   "uvicorn==0.35.0",
-  "pydantic==2.11.3"
+  "pydantic==2.11.3",
+  "cryptography==50.0.2"
 ]
 
 [project.optional-dependencies]

@@ -11,10 +11,15 @@ from sqlalchemy import Engine
 from sqlalchemy.engine import make_url
 
 from plc_data_collector.api.state import RuntimeApiState
-from plc_data_collector.app.config import CollectorConfig, load_collector_config
+from plc_data_collector.app.config import (
+    ENV_PREFIX,
+    CollectorConfig,
+    load_collector_config,
+)
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.domain import (
     CollectorError,
+    ConfigurationError,
     StorageError,
     TagConfig,
     TagGroupConfig,
@@ -116,7 +121,9 @@ class CollectorRuntime:
             "runtime_starting",
             extra={
                 "database_url": _mask_database_url(settings.database_url),
-                "config_file": str(settings.config_file),
+                "config_file": (
+                    None if settings.config_file is None else str(settings.config_file)
+                ),
                 "data_dir": str(settings.data_dir),
             },
         )
@@ -167,8 +174,15 @@ class CollectorRuntime:
         )
 
     async def _startup(self) -> None:
+        config_file = self._settings.config_file
+        if config_file is None:
+            # Removed in Task 6, when configuration moves into the database.
+            raise ConfigurationError(
+                f"Collector configuration file is required; set {ENV_PREFIX}CONFIG.",
+                code="config_file_required",
+            )
         await self._prepare_database()
-        config = load_collector_config(self._settings.config_file)
+        config = load_collector_config(config_file)
         await asyncio.to_thread(self._upsert_configuration, config)
         self._config = config
         self._build_components(config)

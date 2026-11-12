@@ -12,6 +12,7 @@ from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from plc_data_collector.app.secrets import is_sensitive_key
 from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
@@ -22,14 +23,6 @@ from plc_data_collector.domain import (
 )
 
 ENV_PREFIX = "PLC_DATA_COLLECTOR_"
-_SENSITIVE_KEY_FRAGMENTS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "key",
-    "credential",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,7 +348,7 @@ def _connection_for_logging(connection: ConnectionConfig) -> dict[str, object]:
 def _mask_mapping(mapping: Mapping[str, object]) -> dict[str, object]:
     masked: dict[str, object] = {}
     for key, value in mapping.items():
-        if _is_sensitive_key(key):
+        if is_sensitive_key(key):
             masked[key] = "***"
         elif isinstance(value, Mapping):
             masked[key] = _mask_mapping(value)
@@ -372,11 +365,6 @@ def _mask_sequence_item(value: object) -> object:
     if isinstance(value, list):
         return [_mask_sequence_item(item) for item in value]
     return value
-
-
-def _is_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    return any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
 
 
 def _mask_endpoint(endpoint: str) -> str:

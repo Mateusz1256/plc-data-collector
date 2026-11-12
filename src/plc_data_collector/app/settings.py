@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,7 @@ from plc_data_collector.domain import ConfigurationError
 
 DATABASE_FILE_NAME = "collector.db"
 SPOOL_FILE_NAME = "spool.db"
+SECRET_KEY_FILE_NAME = "secret.key"
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,8 +22,8 @@ class RuntimeSettings:
     """Settings that wire the collector runtime together."""
 
     database_url: str
-    config_file: Path
     data_dir: Path
+    config_file: Path | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8080
     database_wait_timeout_s: float = 60.0
@@ -31,6 +32,8 @@ class RuntimeSettings:
     writer_flush_interval_s: float = 1.0
     storage_timeout_s: float = 5.0
     spool_max_items: int = 100000
+    secret_key: str | None = field(default=None, repr=False)
+    admin_password: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         """Reject values the runtime components cannot work with."""
@@ -51,6 +54,11 @@ class RuntimeSettings:
     def spool_path(self) -> Path:
         """Return the durable Spool file location inside the data directory."""
         return self.data_dir / SPOOL_FILE_NAME
+
+    @property
+    def secret_key_path(self) -> Path:
+        """Return the generated secret key file location inside the data directory."""
+        return self.data_dir / SECRET_KEY_FILE_NAME
 
     @classmethod
     def from_env(
@@ -84,17 +92,14 @@ class RuntimeSettings:
                 raise _invalid(name, f"cannot parse {raw!r}") from None
 
         config_file = resolve("config_file", Path)
-        if config_file is None:
-            raise ConfigurationError(
-                f"Collector configuration file is required; set {ENV_PREFIX}CONFIG.",
-                code="config_file_required",
-            )
         data_dir = ServicePaths.from_values(
             data_dir=_as_path(given.get("data_dir")),
             environ=env,
         ).data_dir
         values: dict[str, object] = {
-            "config_file": Path(str(config_file)).expanduser(),
+            "config_file": (
+                None if config_file is None else Path(str(config_file)).expanduser()
+            ),
             "data_dir": data_dir,
             "database_url": resolve("database_url", str)
             or f"sqlite:///{data_dir / DATABASE_FILE_NAME}",
@@ -116,6 +121,8 @@ _PARSERS: dict[str, Callable[[str], object]] = {
     "writer_flush_interval_s": float,
     "storage_timeout_s": float,
     "spool_max_items": int,
+    "secret_key": str,
+    "admin_password": str,
 }
 
 

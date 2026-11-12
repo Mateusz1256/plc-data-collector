@@ -501,11 +501,19 @@ async def test_runtime_logs_do_not_leak_secrets(
     assert SECRET not in json.dumps(components)
 
 
-def test_settings_require_config_file() -> None:
+def test_settings_config_file_is_optional() -> None:
+    assert RuntimeSettings.from_env({}).config_file is None
+
+
+async def test_runtime_start_requires_config_file(tmp_path: Path) -> None:
+    settings = RuntimeSettings.from_env({}, data_dir=tmp_path / "data")
+    runtime = CollectorRuntime(settings)
+
     with pytest.raises(ConfigurationError) as error:
-        RuntimeSettings.from_env({})
+        await runtime.start()
 
     assert error.value.code == "config_file_required"
+    assert "PLC_DATA_COLLECTOR_CONFIG" in str(error.value)
 
 
 def test_settings_read_environment_and_overrides(tmp_path: Path) -> None:

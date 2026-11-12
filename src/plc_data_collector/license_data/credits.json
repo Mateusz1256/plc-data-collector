@@ -95,8 +95,8 @@
       "copyright_notice": "See package license files.",
       "license": "Apache-2.0 OR BSD-3-Clause",
       "name": "cryptography",
-      "notes": "installed transitively by asyncua and pyOpenSSL. License verified from package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.",
-      "purpose": "transitive asyncua dependency for certificate and encryption support",
+      "notes": "declared directly as a runtime dependency; also installed by asyncua and pyOpenSSL. License verified from package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.",
+      "purpose": "Fernet encryption of Connection secrets at rest; also used by asyncua for certificate and encryption support",
       "source": "https://pypi.org/project/cryptography/50.0.2/",
       "version": "50.0.2"
     },
