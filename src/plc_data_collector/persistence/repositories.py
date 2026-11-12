@@ -5,12 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from sqlalchemy import Connection, Engine, func, select
-from sqlalchemy.dialects.postgresql import dml as postgresql_dml
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import dml as sqlite_dml
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.sql.schema import Table
 
 from plc_data_collector.domain import (
     ConnectionConfig,
@@ -30,6 +25,7 @@ from plc_data_collector.persistence.schema import (
     tag_readings,
     tags,
 )
+from plc_data_collector.persistence.sql import insert_for as _insert
 from plc_data_collector.runtime import WorkerPollResult
 
 
@@ -46,8 +42,7 @@ class ConfigurationRepository:
             for config in configs:
                 statement = _insert(connection, connections).values(
                     id=config.id,
-                    # Until the Panel manages names, the display name is the ID.
-                    name=config.id,
+                    name=config.name,
                     protocol=config.protocol,
                     endpoint=config.endpoint,
                     enabled=config.enabled,
@@ -205,15 +200,6 @@ class RuntimeStatusRepository:
                     },
                 )
             )
-
-
-def _insert(
-    connection: Connection, table: Table
-) -> sqlite_dml.Insert | postgresql_dml.Insert:
-    # SQLite and PostgreSQL expose the same ON CONFLICT API on separate classes.
-    if connection.dialect.name == "postgresql":
-        return postgresql_insert(table)
-    return sqlite_insert(table)
 
 
 def _reading_values(

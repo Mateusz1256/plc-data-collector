@@ -1,5 +1,10 @@
 """Persistence adapters for relational storage."""
 
+from plc_data_collector.persistence.app_settings import (
+    AppSettingsStore,
+    RetentionSettings,
+)
+from plc_data_collector.persistence.config_store import ConfigStore
 from plc_data_collector.persistence.database import (
     create_database_engine,
     create_sqlite_engine,
@@ -26,12 +31,15 @@ from plc_data_collector.persistence.writer import (
 )
 
 __all__ = [
+    "AppSettingsStore",
+    "ConfigStore",
     "ConfigurationRepository",
     "DatabaseWriter",
     "DatabaseWriterMetrics",
     "DatabaseWriterShutdown",
     "DurableSqliteSpool",
     "ReadingRepository",
+    "RetentionSettings",
     "RuntimeStatusRepository",
     "SpoolEntry",
     "SpoolMetrics",

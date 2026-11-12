@@ -157,10 +157,12 @@ class ConnectionConfig:
     enabled: bool = True
     timeout_ms: int = 3000
     protocol_options: Mapping[str, object] = field(default_factory=dict)
+    name: str = ""
 
     def __post_init__(self) -> None:
         """Validate connection invariants."""
         _set_stripped(self, "id", self.id)
+        object.__setattr__(self, "name", self.name.strip() or self.id)
         _set_stripped(self, "protocol", self.protocol)
         _set_stripped(self, "endpoint", self.endpoint)
         _require_positive_int(self.timeout_ms, "timeout_ms")

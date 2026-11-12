@@ -7,7 +7,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Literal, Self
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -71,6 +71,7 @@ class ConnectionConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(min_length=1)
+    name: str | None = None
     protocol: str = Field(min_length=1)
     endpoint: str = Field(min_length=1)
     enabled: bool = True
@@ -110,6 +111,7 @@ class CollectorConfigModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    format_version: Literal[1] = 1
     connections: list[ConnectionConfigModel] = Field(min_length=1)
     tag_groups: list[TagGroupConfigModel] = Field(min_length=1)
     tags: list[TagConfigModel] = Field(min_length=1)
@@ -144,6 +146,7 @@ class CollectorConfigModel(BaseModel):
                 connections=tuple(
                     ConnectionConfig(
                         id=connection.id,
+                        name=connection.name or "",
                         protocol=connection.protocol,
                         endpoint=connection.endpoint,
                         enabled=connection.enabled,
@@ -192,9 +195,13 @@ def load_collector_config(
     """Load a JSON collector configuration file and apply environment overrides."""
     raw_config = _read_json_object(Path(path))
     _apply_environment_overrides(raw_config, os.environ if environ is None else environ)
+    return parse_collector_config(raw_config)
 
+
+def parse_collector_config(raw: Mapping[str, object]) -> CollectorConfig:
+    """Validate a raw configuration mapping (file contents or an import)."""
     try:
-        model = CollectorConfigModel.model_validate(raw_config)
+        model = CollectorConfigModel.model_validate(raw)
     except ValidationError as error:
         raise ConfigurationError(
             _format_validation_error(error),
@@ -337,6 +344,7 @@ def _format_validation_error(error: ValidationError) -> str:
 def _connection_for_logging(connection: ConnectionConfig) -> dict[str, object]:
     return {
         "id": connection.id,
+        "name": connection.name,
         "protocol": connection.protocol,
         "endpoint": _mask_endpoint(connection.endpoint),
         "enabled": connection.enabled,
