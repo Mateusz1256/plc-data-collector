@@ -5,6 +5,13 @@ from plc_data_collector.runtime.connection_worker import (
     WorkerPollResult,
     WorkerRuntimeMetrics,
 )
+from plc_data_collector.runtime.live_values import (
+    Freshness,
+    GroupPoll,
+    LiveValue,
+    LiveValueCache,
+    freshness,
+)
 from plc_data_collector.runtime.reading_queue import (
     ReadingQueue,
     ReadingQueueMetrics,
@@ -25,6 +32,10 @@ from plc_data_collector.runtime.scheduler import (
 __all__ = [
     "ConnectionWorker",
     "ErrorClass",
+    "Freshness",
+    "GroupPoll",
+    "LiveValue",
+    "LiveValueCache",
     "PollScheduleState",
     "PollScheduler",
     "PollSchedulerSnapshot",
@@ -36,4 +47,5 @@ __all__ = [
     "WorkerPollResult",
     "WorkerRuntimeMetrics",
     "classify_error",
+    "freshness",
 ]
