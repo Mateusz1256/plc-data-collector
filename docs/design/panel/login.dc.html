@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#E6E8EA;color:#1D2329;font-family:'Archivo',system-ui,sans-serif}
+a{color:#2457A6}a:hover{color:#173E7A}
+:focus-visible{outline:2px solid #2457A6;outline-offset:2px}
+.addr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 48px 16px; box-sizing: border-box">
+<form aria-label="Sign in" style="width: 100%; max-width: 400px; background: #F7F8F9; border: 1px solid #C5CBD1; border-radius: 6px; padding: 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 26px; line-height: 1.2; font-weight: 700; font-stretch: 87.5%">PLC Data Collector</h1>
+<p style="margin: 0; font-size: 15px; color: #56606B">Sign in to manage connections and see live tags.</p>
+</div>
+<sc-if value="{{failed}}" hint-placeholder-val="{{false}}">
+<p role="alert" style="margin: 0; padding: 10px 12px; font-size: 14px; line-height: 1.45; background: #FBE4E1; color: #7A1A10">That password doesn't match. Check <span class="addr">PLC_DATA_COLLECTOR_ADMIN_PASSWORD</span> in the server's .env file.</p>
+</sc-if>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Admin password
+<input type="password" autocomplete="current-password" value="••••••••••" style="font: inherit; font-weight: 400; font-size: 15px; min-height: 44px; padding: 0 12px; border: 1px solid #8A939C; border-radius: 4px; background: #FFFFFF; color: #1D2329; box-sizing: border-box; width: 100%">
+</label>
+<a href="live.dc.html" style="display: inline-flex; align-items: center; justify-content: center; min-height: 44px; font-size: 15px; font-weight: 600; color: #FFFFFF; background: #2457A6; border-radius: 4px; text-decoration: none">Sign in</a>
+</form>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"failed":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { failed: this.props.failed ?? false };
+  }
+}
+</script>
+</body>
+</html>

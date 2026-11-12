@@ -1,0 +1,56 @@
+# Demo stack: OPC UA simulator -> collector -> PostgreSQL.
+# Usage: cp .env.example .env && docker compose up
+services:
+  # PostgreSQL 17, the storage target for Readings.
+  postgres:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data # named volume keeps data across restarts
+    healthcheck: # collector starts only after this passes
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # OPC UA line simulator, built from the same image as the collector.
+  opcua-sim:
+    build: .
+    image: plc-data-collector:local
+    command: ["python", "-m", "plc_data_collector.simulators.opcua"]
+    healthcheck: # healthy once the OPC UA port accepts TCP connections
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 4840), 3).close()"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # The collector service: polls the simulator and writes Readings to PostgreSQL.
+  collector:
+    build: .
+    image: plc-data-collector:local
+    depends_on: # wait until both dependencies report healthy
+      postgres:
+        condition: service_healthy
+      opcua-sim:
+        condition: service_healthy
+    restart: unless-stopped # also covers the case where the DB wait times out
+    stop_grace_period: 30s # leave time to drain the Reading Queue and spool on SIGTERM
+    ports:
+      - "${COLLECTOR_API_PORT:-8080}:8080" # HTTP API: /health/*, /api/*
+    environment:
+      PLC_DATA_COLLECTOR_CONFIG: /etc/plc-data-collector/collector.config.json
+      PLC_DATA_COLLECTOR_DATA_DIR: /var/lib/plc-data-collector
+      PLC_DATA_COLLECTOR_API_HOST: 0.0.0.0 # listen on all interfaces so the port mapping works
+      PLC_DATA_COLLECTOR_DATABASE_URL: postgresql+pg8000://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      PLC_DATA_COLLECTOR_LOG_LEVEL: ${PLC_DATA_COLLECTOR_LOG_LEVEL:-INFO}
+    volumes:
+      - ./deploy/demo/collector.config.json:/etc/plc-data-collector/collector.config.json:ro # demo config, read-only
+      - collector-data:/var/lib/plc-data-collector # Spool and runtime files survive restarts
+
+volumes:
+  pgdata:
+  collector-data:

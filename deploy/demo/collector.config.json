@@ -1,0 +1,62 @@
+{
+  "connections": [
+    {
+      "id": "line1_opcua",
+      "protocol": "opcua",
+      "endpoint": "opc.tcp://opcua-sim:4840/plc-data-collector/sim/",
+      "enabled": true,
+      "timeout_ms": 5000,
+      "protocol_options": {
+        "auto_reconnect": false
+      }
+    }
+  ],
+  "tag_groups": [
+    {
+      "id": "line1_fast",
+      "connection_id": "line1_opcua",
+      "interval_ms": 1000,
+      "timeout_ms": 2000,
+      "overlap_policy": "skip",
+      "enabled": true
+    }
+  ],
+  "tags": [
+    {
+      "id": "line1_temperature",
+      "tag_group_id": "line1_fast",
+      "name": "Line 1 temperature",
+      "address": "ns=2;s=Line1.Temperature",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": { "unit": "C" }
+    },
+    {
+      "id": "line1_pressure",
+      "tag_group_id": "line1_fast",
+      "name": "Line 1 pressure",
+      "address": "ns=2;s=Line1.Pressure",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": { "unit": "bar" }
+    },
+    {
+      "id": "line1_part_count",
+      "tag_group_id": "line1_fast",
+      "name": "Line 1 part count",
+      "address": "ns=2;s=Line1.PartCount",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {}
+    },
+    {
+      "id": "line1_machine_state",
+      "tag_group_id": "line1_fast",
+      "name": "Line 1 machine state",
+      "address": "ns=2;s=Line1.MachineState",
+      "value_type": "text",
+      "enabled": true,
+      "metadata": {}
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#E6E8EA;color:#1D2329;font-family:'Archivo',system-ui,sans-serif}
+a{color:#2457A6}a:hover{color:#173E7A}
+:focus-visible{outline:2px solid #2457A6;outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.addr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;color:#56606B}
+.field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}
+.input{font:inherit;font-weight:400;font-size:15px;min-height:44px;padding:0 12px;border:1px solid #8A939C;border-radius:4px;background:#FFFFFF;color:#1D2329;box-sizing:border-box;width:100%}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-weight:600;font-size:13px;color:#56606B;text-align:left;padding:8px 16px;font-stretch:87.5%}
+.tbl td{padding:10px 16px;border-top:1px solid #D5DADF;font-size:14px;vertical-align:middle}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;font:inherit;font-size:15px;font-weight:600;border-radius:4px;cursor:pointer;text-decoration:none}
+.btn-primary{color:#FFFFFF;background:#2457A6;border:0}
+.btn-secondary{color:#1D2329;background:#FFFFFF;border:1px solid #8A939C}
+.btn-quiet{color:#2457A6;background:transparent;border:0;padding:0 8px}
+.btn-danger{color:#B42318;background:transparent;border:0;padding:0 8px}
+.panel{background:#F7F8F9;border:1px solid #C5CBD1;border-radius:6px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+
+<header style="background: #F7F8F9; border-bottom: 1px solid #C5CBD1">
+<div style="max-width: 1360px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 32px; min-height: 64px">
+<a href="live.dc.html" style="font-weight: 700; font-size: 18px; font-stretch: 87.5%; color: #1D2329; text-decoration: none">PLC Data Collector</a>
+<nav aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+<a href="live.dc.html" style="padding: 12px 14px; font-size: 15px; color: #56606B; text-decoration: none">Live</a>
+<a href="connections.dc.html" style="padding: 12px 14px; font-size: 15px; color: #56606B; text-decoration: none">Connections</a>
+<a href="settings.dc.html" aria-current="page" style="padding: 12px 14px; font-size: 15px; font-weight: 600; color: #1D2329; text-decoration: none; box-shadow: inset 0 -3px 0 #2457A6">Settings</a>
+</nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 14px; color: #56606B">
+<span>admin</span>
+<a href="login.dc.html" style="color: #56606B">Sign out</a>
+</div>
+</div>
+</header>
+
+<main style="flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 32px 24px 64px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.15; font-weight: 700; font-stretch: 87.5%">Settings</h1>
+
+<section aria-labelledby="keys-h" class="panel" style="overflow: hidden">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 24px; padding: 20px">
+<div style="flex: 1 1 380px; display: flex; flex-direction: column; gap: 6px">
+<h2 id="keys-h" style="margin: 0; font-size: 20px; font-weight: 700; font-stretch: 87.5%">API keys</h2>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: #56606B; max-width: 62ch">Give each application that reads collected data its own key, so you can revoke one without affecting the others. Keys can read data only.</p>
+</div>
+<form aria-label="Create API key" style="flex: 1 1 320px; display: flex; gap: 8px; align-items: flex-end">
+<label class="field" style="flex: 1">Application name<input class="input" type="text" value="grafana-hall-2"></label>
+<button type="button" class="btn btn-primary" onClick="{{create}}">Create key</button>
+</form>
+</div>
+
+<sc-if value="{{revealed}}" hint-placeholder-val="{{true}}">
+<div role="status" style="margin: 0 20px 20px; padding: 16px; background: #FFFFFF; border: 1px solid #2457A6; border-radius: 4px; display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0; font-size: 15px; font-weight: 600">Key for grafana-hall-2 created. Copy it now: it won't be shown again.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+<input class="input" type="text" readonly aria-label="New API key" value="pdc_7f3a9c21e84b40d6a1f0c5b2e9d47a81" style="flex: 1 1 360px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px">
+<button type="button" class="btn btn-secondary">Copy key</button>
+<button type="button" class="btn btn-quiet" onClick="{{dismiss}}">Done</button>
+</div>
+<p style="margin: 0; font-size: 13px; color: #56606B">Send it in the <span class="addr">X-API-Key</span> header.</p>
+</div>
+</sc-if>
+
+<div style="overflow-x: auto">
+<table class="tbl">
+<thead><tr><th scope="col">Application</th><th scope="col">Key</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th></tr></thead>
+<tbody>
+<sc-if value="{{revealed}}" hint-placeholder-val="{{true}}">
+<tr><td style="font-weight: 600">grafana-hall-2</td><td class="addr">pdc_7f3a…</td><td class="num">12 Nov 2026</td><td style="color: #56606B">Never</td><td style="text-align: right"><button type="button" class="btn btn-danger">Revoke</button></td></tr>
+</sc-if>
+<tr><td style="font-weight: 600">grafana-line-1</td><td class="addr">pdc_2b81…</td><td class="num">3 Nov 2026</td><td class="num">2 min ago</td><td style="text-align: right"><button type="button" class="btn btn-danger">Revoke</button></td></tr>
+<tr><td style="font-weight: 600">oee-report</td><td class="addr">pdc_c40e…</td><td class="num">21 Oct 2026</td><td class="num">Today, 06:00</td><td style="text-align: right"><button type="button" class="btn btn-danger">Revoke</button></td></tr>
+<tr><td style="font-weight: 600; color: #6B747D">old-dashboard</td><td class="addr">pdc_91d7…</td><td class="num" style="color: #6B747D">2 Sep 2026</td><td style="color: #6B747D">Revoked 14 Oct 2026</td><td></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section aria-labelledby="ret-h" class="panel" style="padding: 20px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h2 id="ret-h" style="margin: 0; font-size: 20px; font-weight: 700; font-stretch: 87.5%">Data retention</h2>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: #56606B; max-width: 62ch">Delete old readings automatically to keep the database small. Connections, tags and settings are never deleted.</p>
+</div>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 15px"><input type="checkbox" checked="{{retentionOn}}" onChange="{{toggle}}" style="width: 20px; height: 20px; accent-color: #2457A6">Delete old readings</label>
+<sc-if value="{{retentionOn}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end">
+<label class="field" style="width: 160px">Keep readings for<input class="input num" type="number" value="30"></label>
+<span style="font-size: 15px; padding-bottom: 12px">days</span>
+<p class="num" style="margin: 0 0 12px; font-size: 14px; color: #56606B; flex: 1 1 280px">About 41 million readings older than 30 days will be deleted after you save.</p>
+</div>
+</sc-if>
+<sc-if value="{{retentionOff}}" hint-placeholder-val="{{false}}">
+<p style="margin: 0; font-size: 14px; color: #56606B">Readings are kept until you delete them yourself.</p>
+</sc-if>
+<div><button type="button" class="btn btn-primary">Save retention</button></div>
+</section>
+
+<section aria-labelledby="cfg-h" class="panel" style="padding: 20px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h2 id="cfg-h" style="margin: 0; font-size: 20px; font-weight: 700; font-stretch: 87.5%">Configuration file</h2>
+<p style="margin: 0; font-size: 15px; line-height: 1.5; color: #56606B; max-width: 62ch">Back up or move all connections, tag groups and tags as one JSON file.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 10px; align-items: flex-start">
+<h3 style="margin: 0; font-size: 16px; font-weight: 700">Export</h3>
+<p style="margin: 0; font-size: 14px; line-height: 1.5; color: #56606B">Passwords and other secrets are left out of the file. Enter them again after importing.</p>
+<button type="button" class="btn btn-secondary">Export configuration</button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; align-items: flex-start">
+<h3 style="margin: 0; font-size: 16px; font-weight: 700">Import</h3>
+<p style="margin: 0; font-size: 14px; line-height: 1.5; color: #56606B">Importing replaces the whole configuration. You'll see what will be added, changed and removed before anything is saved.</p>
+<label class="field" style="width: 100%">Configuration file<input class="input" type="file" accept=".json,application/json" style="padding: 8px 12px"></label>
+<button type="button" class="btn btn-secondary">Review import</button>
+</div>
+</div>
+</section>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1420}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { revealed: true, retentionOn: true };
+  }
+  renderVals() {
+    return {
+      revealed: this.state.revealed,
+      retentionOn: this.state.retentionOn,
+      retentionOff: !this.state.retentionOn,
+      create: () => this.setState({ revealed: true }),
+      dismiss: () => this.setState({ revealed: false }),
+      toggle: () => this.setState({ retentionOn: !this.state.retentionOn }),
+    };
+  }
+}
+</script>
+</body>
+</html>

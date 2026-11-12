@@ -1,0 +1,53 @@
+# Pinned versions of every runtime and development dependency (direct and transitive).
+# Used as a pip constraints file so CI, the Docker image and local installs resolve the
+# same versions that THIRD_PARTY_NOTICES.md and credits.json were verified against:
+#   pip install -c constraints.txt -e ".[dev]"
+# To refresh: upgrade in a clean venv, run `pip freeze --exclude-editable`, drop tools
+# that are not project dependencies, then update THIRD_PARTY_NOTICES.md and run
+# `python tools/generate_credits.py`.
+aiosqlite==0.22.1
+alembic==1.17.1
+annotated-doc==0.0.6
+annotated-types==0.8.0
+anyio==4.16.0
+asn1crypto==1.5.1
+ast_serialize==0.13.1
+asyncua==2.0.1
+certifi==2026.10.23
+cffi==2.1.1
+click==8.5.1
+cryptography==50.0.2
+fastapi==0.139.0
+greenlet==3.5.6
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+iniconfig==2.3.1
+librt==0.16.0
+Mako==1.4.3
+MarkupSafe==3.0.4
+mypy==2.2.0
+mypy_extensions==1.2.0
+packaging==23.2
+pathspec==1.1.1
+pg8000==1.31.2
+pluggy==1.7.0
+pycparser==3.12
+pydantic==2.11.3
+pydantic_core==2.33.1
+Pygments==2.21.0
+pyOpenSSL==26.4.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
+python-dateutil==4.0.0
+pytz==2026.6
+ruff==0.15.21
+scramp==1.5.0
+sortedcontainers==2.4.0
+SQLAlchemy==2.0.44
+starlette==1.10.0
+typing-inspection==0.4.5
+typing_extensions==4.16.0
+tzdata==2026.6
+uvicorn==0.35.0

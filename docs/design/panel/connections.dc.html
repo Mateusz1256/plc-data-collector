@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connections</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#E6E8EA;color:#1D2329;font-family:'Archivo',system-ui,sans-serif}
+a{color:#2457A6}a:hover{color:#173E7A}
+:focus-visible{outline:2px solid #2457A6;outline-offset:2px}
+.num{font-variant-numeric:tabular-nums}
+.addr{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13px;color:#56606B}
+.field{display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}
+.input{font:inherit;font-weight:400;font-size:15px;min-height:44px;padding:0 12px;border:1px solid #8A939C;border-radius:4px;background:#FFFFFF;color:#1D2329;box-sizing:border-box;width:100%}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-weight:600;font-size:13px;color:#56606B;text-align:left;padding:8px 16px;font-stretch:87.5%}
+.tbl td{padding:12px 16px;border-top:1px solid #D5DADF;font-size:14px;vertical-align:middle}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;font:inherit;font-size:15px;font-weight:600;border-radius:4px;cursor:pointer;text-decoration:none}
+.btn-primary{color:#FFFFFF;background:#2457A6;border:0}
+.btn-quiet{color:#2457A6;background:transparent;border:0;padding:0 8px}
+.opt{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid #8A939C;border-radius:4px;background:#FFFFFF;cursor:pointer;font-size:14px;min-height:44px;box-sizing:border-box}
+.opt:has(input:checked){border:2px solid #2457A6;padding:13px 15px}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column">
+
+<header style="background: #F7F8F9; border-bottom: 1px solid #C5CBD1">
+<div style="max-width: 1360px; margin: 0 auto; padding: 0 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 32px; min-height: 64px">
+<a href="live.dc.html" style="font-weight: 700; font-size: 18px; font-stretch: 87.5%; color: #1D2329; text-decoration: none">PLC Data Collector</a>
+<nav aria-label="Main" style="display: flex; gap: 4px; flex-wrap: wrap">
+<a href="live.dc.html" style="padding: 12px 14px; font-size: 15px; color: #56606B; text-decoration: none">Live</a>
+<a href="connections.dc.html" aria-current="page" style="padding: 12px 14px; font-size: 15px; font-weight: 600; color: #1D2329; text-decoration: none; box-shadow: inset 0 -3px 0 #2457A6">Connections</a>
+<a href="settings.dc.html" style="padding: 12px 14px; font-size: 15px; color: #56606B; text-decoration: none">Settings</a>
+</nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 16px; font-size: 14px; color: #56606B">
+<span>admin</span>
+<a href="login.dc.html" style="color: #56606B">Sign out</a>
+</div>
+</div>
+</header>
+
+<main style="flex: 1; width: 100%; max-width: 1360px; margin: 0 auto; padding: 32px 24px 64px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px">
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px">
+<div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 32px; line-height: 1.15; font-weight: 700; font-stretch: 87.5%">Connections</h1>
+<p class="num" style="margin: 0; font-size: 15px; color: #56606B">4 connections, 17 tags. One link to one controller or meter each.</p>
+</div>
+<button type="button" class="btn btn-primary" onClick="{{toggleAdd}}">Add connection</button>
+</div>
+
+<sc-if value="{{adding}}" hint-placeholder-val="{{true}}">
+<form aria-label="Add connection" style="background: #F7F8F9; border: 1px solid #2457A6; border-radius: 6px; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 700; font-stretch: 87.5%">Add connection</h2>
+<fieldset style="margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px">
+<legend style="padding: 0; margin-bottom: 10px; font-size: 14px; font-weight: 600">Protocol</legend>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+<label class="opt"><span style="display: flex; gap: 8px; align-items: center; font-weight: 600"><input type="radio" name="proto" checked style="accent-color: #2457A6">OPC UA</span><span style="color: #56606B">Endpoint URL, optional user and certificate</span></label>
+<label class="opt"><span style="display: flex; gap: 8px; align-items: center; font-weight: 600"><input type="radio" name="proto" style="accent-color: #2457A6">Modbus TCP</span><span style="color: #56606B">Host, port and unit ID</span></label>
+<label class="opt"><span style="display: flex; gap: 8px; align-items: center; font-weight: 600"><input type="radio" name="proto" style="accent-color: #2457A6">S7</span><span style="color: #56606B">Host, rack and slot</span></label>
+<label class="opt"><span style="display: flex; gap: 8px; align-items: center; font-weight: 600"><input type="radio" name="proto" style="accent-color: #2457A6">M-Bus</span><span style="color: #56606B">Serial port or TCP gateway, meter address</span></label>
+</div>
+</fieldset>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; max-width: 760px">
+<label class="field">Name<input class="input" type="text" placeholder="Line 2 oven"></label>
+<label class="field">ID<input class="input" type="text" placeholder="line2_oven" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<a href="connection-edit.dc.html" class="btn btn-primary">Continue to settings</a>
+<button type="button" class="btn btn-quiet" onClick="{{toggleAdd}}">Cancel</button>
+</div>
+</form>
+</sc-if>
+
+<section aria-label="All connections" style="background: #F7F8F9; border: 1px solid #C5CBD1; border-radius: 6px; overflow: hidden">
+<div style="overflow-x: auto">
+<table class="tbl">
+<thead><tr><th scope="col">Connection</th><th scope="col">Protocol</th><th scope="col">Address</th><th scope="col">Status</th><th scope="col">Tags collected</th><th scope="col">Last poll</th><th scope="col"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Actions</span></th></tr></thead>
+<tbody>
+<tr>
+<td><a href="live.dc.html#line1_opcua" style="font-weight: 600; color: #1D2329">Line 1 filler</a><div class="addr" style="margin-top: 2px">line1_opcua</div></td>
+<td>OPC UA</td>
+<td class="addr">opc.tcp://plc-sim:4840</td>
+<td><span style="display: inline-flex; align-items: center; gap: 8px; color: #56606B; font-weight: 600"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5" fill="none" stroke="#56606B" stroke-width="1.5"></circle></svg>Running</span></td>
+<td class="num">5 of 5</td>
+<td class="num" style="color: #56606B">0.4 s ago</td>
+<td style="text-align: right"><a href="connection-edit.dc.html" class="btn btn-quiet">Edit</a></td>
+</tr>
+<tr>
+<td><a href="live.dc.html#press2_modbus" style="font-weight: 600; color: #1D2329">Press 2</a><div class="addr" style="margin-top: 2px">press2_modbus</div></td>
+<td>Modbus TCP</td>
+<td class="addr">press2-plc:502, unit 1</td>
+<td><span style="display: inline-flex; align-items: center; gap: 8px; color: #8A4B00; font-weight: 600"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0.5 11.5 6 6 11.5 0.5 6Z" fill="#C77700"></path></svg>Degraded</span></td>
+<td class="num">4 of 5</td>
+<td class="num" style="color: #56606B">0.2 s ago</td>
+<td style="text-align: right"><a href="connection-edit.dc.html" class="btn btn-quiet">Edit</a></td>
+</tr>
+<tr style="background: #FBE4E1">
+<td><a href="live.dc.html#boiler_mbus" style="font-weight: 600; color: #1D2329">Boiler house heat meter</a><div class="addr" style="margin-top: 2px; color: #7A1A10">boiler_mbus</div></td>
+<td>M-Bus</td>
+<td class="addr" style="color: #7A1A10">mbus-gw:10001, primary 5</td>
+<td><span style="display: inline-flex; align-items: center; gap: 8px; color: #B42318; font-weight: 600"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" fill="#B42318"></rect></svg>Failed</span><div style="font-size: 13px; color: #7A1A10; margin-top: 2px">Connection refused since 11:58</div></td>
+<td class="num">0 of 3</td>
+<td class="num" style="color: #7A1A10">Failed 4 s ago</td>
+<td style="text-align: right"><a href="connection-edit.dc.html" class="btn btn-quiet">Edit</a></td>
+</tr>
+<tr>
+<td><span style="font-weight: 600; color: #6B747D">Packer</span><div class="addr" style="margin-top: 2px">packer_s7</div></td>
+<td style="color: #6B747D">S7</td>
+<td class="addr">packer-plc, rack 0, slot 1</td>
+<td><span style="display: inline-flex; align-items: center; gap: 8px; color: #6B747D; font-weight: 600"><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10" stroke="#8A939C" stroke-width="2"></path></svg>Disabled</span></td>
+<td class="num" style="color: #6B747D">Not collecting (4 tags)</td>
+<td style="color: #6B747D">None</td>
+<td style="text-align: right"><a href="connection-edit.dc.html" class="btn btn-quiet">Edit</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { adding: true };
+  }
+  renderVals() {
+    return {
+      adding: this.state.adding,
+      toggleAdd: () => this.setState({ adding: !this.state.adding }),
+    };
+  }
+}
+</script>
+</body>
+</html>

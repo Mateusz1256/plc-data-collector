@@ -1,0 +1,28 @@
+# Keep the build context small and free of local/private files.
+.git
+.github
+.venv
+venv
+build
+dist
+*.egg-info
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+tests
+.env
+.env.*
+!.env.example
+*.db
+data
+
+# Author notes and private planning material (never part of an image)
+portfolio-*.md
+.superpowers
+docs/superpowers
+docs/design
+docs/tasks

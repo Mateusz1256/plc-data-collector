@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plc-data-collector"
+version = "0.2.0"
+description = "Industrial PLC and OPC UA data collector MVP"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "Mateusz Prucnal" }
+]
+dependencies = [
+  "alembic==1.17.1",
+  "asyncua==2.0.1",
+  "fastapi==0.139.0",
+  "pg8000==1.31.2",
+  "SQLAlchemy==2.0.44",
+  "uvicorn==0.35.0",
+  "pydantic==2.11.3"
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx==0.28.1",
+  "pytest==9.1.1",
+  "pytest-asyncio==1.4.0",
+  "packaging==23.2",
+  "ruff==0.15.21",
+  "mypy==2.2.0"
+]
+
+[project.scripts]
+plc-data-collector = "plc_data_collector.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+plc_data_collector = [
+  "py.typed",
+  "license_data/credits.json",
+  "persistence/migrations/*.py",
+  "persistence/migrations/versions/*.py",
+  "persistence/migrations/script.py.mako",
+]
+
+[tool.setuptools]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "integration: tests that start local protocol servers or use external-style integration fixtures",
+  "postgres: tests that need a real PostgreSQL (set PLC_DATA_COLLECTOR_TEST_DATABASE_URL)"
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "RUF", "SIM", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
