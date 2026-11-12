@@ -22,7 +22,12 @@ from plc_data_collector.persistence.app_settings import (
     get_setting,
     set_setting,
 )
-from plc_data_collector.persistence.schema import connections, tag_groups, tags
+from plc_data_collector.persistence.schema import (
+    app_settings,
+    connections,
+    tag_groups,
+    tags,
+)
 from plc_data_collector.persistence.sql import insert_for
 
 
@@ -123,47 +128,54 @@ class ConfigStore:
     def upsert_connection(self, config: ConnectionConfig) -> None:
         """Create or update a Connection, restoring it when archived."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             self._write_connection(connection, config)
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def upsert_tag_group(self, group: TagGroupConfig) -> None:
         """Create or update a Tag Group; its Connection must be active."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             _write_tag_group(connection, group)
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def upsert_tag(self, tag: TagConfig) -> None:
         """Create or update a Tag; its Tag Group must be active."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             _write_tag(connection, tag)
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def archive_connection(self, connection_id: str) -> None:
         """Archive a Connection and, with it, its Tag Groups and Tags."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             now = _now()
             _archive_connection(connection, connection_id, now)
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def archive_tag_group(self, group_id: str) -> None:
         """Archive a Tag Group and its Tags."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             _archive_group(connection, group_id, _now())
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def archive_tag(self, tag_id: str) -> None:
         """Archive a Tag."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             connection.execute(
                 update(tags)
                 .where(tags.c.id == tag_id, tags.c.archived_at.is_(None))
                 .values(archived_at=_now())
             )
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def replace_all(self, config: CollectorConfig) -> None:
         """Make ``config`` the active set: upsert it, archive everything else."""
         with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
             for item in config.connections:
                 self._write_connection(connection, item)
             for group in config.tag_groups:
@@ -192,7 +204,7 @@ class ConfigStore:
                     connection.execute(
                         update(tags).where(tags.c.id == row_id).values(archived_at=now)
                     )
-            self._finish_write(connection)
+            self._finish_write(connection, revision)
 
     def encrypt_plaintext_secrets(self) -> int:
         """Move sensitive options from ``protocol_options`` into ``secret_options``.
@@ -275,11 +287,29 @@ class ConfigStore:
             )
         )
 
-    def _finish_write(self, connection: Connection) -> None:
+    def _finish_write(self, connection: Connection, revision: int) -> None:
         _validate_active_references(connection)
-        current = get_setting(connection, CONFIG_REVISION_KEY)
-        revision = current if isinstance(current, int) else 0
         set_setting(connection, CONFIG_REVISION_KEY, revision + 1)
+
+
+def _lock_revision(connection: Connection) -> int:
+    """Lock the revision row for this transaction and return its value.
+
+    Called first in every write transaction. Concurrent writers queue on the row
+    lock (PostgreSQL), so revisions are distinct and strictly increasing and
+    reference checks never race with another write. SQLite serialises writers.
+    """
+    connection.execute(
+        insert_for(connection, app_settings)
+        .values(key=CONFIG_REVISION_KEY, value=0)
+        .on_conflict_do_nothing(index_elements=[app_settings.c.key])
+    )
+    value = connection.execute(
+        select(app_settings.c.value)
+        .where(app_settings.c.key == CONFIG_REVISION_KEY)
+        .with_for_update()
+    ).scalar_one()
+    return value if isinstance(value, int) else 0
 
 
 def _now() -> datetime:

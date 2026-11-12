@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import Engine, insert, select
+from sqlalchemy import Engine, create_engine, insert, select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
 
 from plc_data_collector.app.config import CollectorConfig, parse_collector_config
 from plc_data_collector.app.secrets import SecretBox
@@ -35,11 +38,26 @@ from plc_data_collector.persistence.schema import (
 
 
 @pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
-def database_url(request: pytest.FixtureRequest, tmp_path: Path) -> str:
-    if request.param == "postgres":
-        url: str = request.getfixturevalue("postgres_url")
-        return url
-    return f"sqlite:///{tmp_path / 'config.db'}"
+def database_url(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[str]:
+    if request.param == "sqlite":
+        yield f"sqlite:///{tmp_path / 'config.db'}"
+        return
+    # PostgreSQL: a scratch database per test, so state never leaks between tests.
+    base_url: str = request.getfixturevalue("postgres_url")
+    admin_engine = create_engine(
+        base_url, isolation_level="AUTOCOMMIT", poolclass=NullPool
+    )
+    name = f"pdc_config_{uuid.uuid4().hex[:12]}"
+    with admin_engine.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{name}"'))
+    try:
+        yield (
+            make_url(base_url).set(database=name).render_as_string(hide_password=False)
+        )
+    finally:
+        with admin_engine.connect() as connection:
+            connection.execute(text(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+        admin_engine.dispose()
 
 
 @pytest.fixture
@@ -306,3 +324,23 @@ def test_retention_days_are_validated(days: int) -> None:
     with pytest.raises(ConfigurationError) as caught:
         RetentionSettings(enabled=True, days=days)
     assert caught.value.code == "invalid_retention_days"
+
+
+def test_revision_strictly_increases_and_failed_write_leaves_it(
+    store: ConfigStore,
+) -> None:
+    seen = [store.revision()]
+    store.upsert_connection(_connection())
+    seen.append(store.revision())
+    store.upsert_tag_group(_group())
+    seen.append(store.revision())
+    store.upsert_tag_group(_group())
+    seen.append(store.revision())
+    store.archive_tag_group("g1")
+    seen.append(store.revision())
+    assert seen == sorted(set(seen))
+
+    with pytest.raises(ConfigurationError):
+        store.upsert_tag(_tag())
+
+    assert store.revision() == seen[-1]
