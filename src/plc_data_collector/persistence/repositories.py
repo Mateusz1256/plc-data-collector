@@ -46,6 +46,8 @@ class ConfigurationRepository:
             for config in configs:
                 statement = _insert(connection, connections).values(
                     id=config.id,
+                    # Until the Panel manages names, the display name is the ID.
+                    name=config.id,
                     protocol=config.protocol,
                     endpoint=config.endpoint,
                     enabled=config.enabled,
@@ -56,6 +58,7 @@ class ConfigurationRepository:
                     statement.on_conflict_do_update(
                         index_elements=[connections.c.id],
                         set_={
+                            "name": statement.excluded.name,
                             "protocol": statement.excluded.protocol,
                             "endpoint": statement.excluded.endpoint,
                             "enabled": statement.excluded.enabled,

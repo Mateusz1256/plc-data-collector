@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import fields
 from datetime import UTC, datetime
 from importlib import resources
@@ -346,6 +348,138 @@ def _assert_migration_0002_widens_columns(url: str) -> None:
         assert "ck_poll_requested_non_negative" in check_names
     finally:
         engine.dispose()
+
+
+def test_0003_upgrade_adds_configuration_columns_and_tables(tmp_path: Path) -> None:
+    _assert_0003_upgrade(f"sqlite:///{tmp_path}/t.db")
+
+
+def test_0003_downgrade_round_trip(tmp_path: Path) -> None:
+    _assert_0003_round_trip(f"sqlite:///{tmp_path}/t.db")
+
+
+@pytest.mark.postgres
+def test_0003_upgrade_adds_configuration_columns_and_tables_on_postgres(
+    postgres_url: str,
+) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0003_upgrade(url)
+
+
+@pytest.mark.postgres
+def test_0003_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0003_round_trip(url)
+
+
+@contextmanager
+def _scratch_postgres_database(postgres_url: str) -> Iterator[str]:
+    admin_engine = create_engine(
+        postgres_url, isolation_level="AUTOCOMMIT", poolclass=NullPool
+    )
+    database_name = f"pdc_migration_{uuid.uuid4().hex[:12]}"
+    with admin_engine.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+    url = make_url(postgres_url).set(database=database_name)
+    try:
+        yield url.render_as_string(hide_password=False)
+    finally:
+        with admin_engine.connect() as connection:
+            connection.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+        admin_engine.dispose()
+
+
+def _assert_0003_upgrade(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "0002")
+    engine = create_database_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO connections (id, protocol, endpoint, enabled, "
+                    "timeout_ms, protocol_options) VALUES "
+                    "('c1', 'mock', 'mock://local', true, 1000, '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tag_groups (id, connection_id, interval_ms, "
+                    "timeout_ms, overlap_policy, enabled) VALUES "
+                    "('g1', 'c1', 1000, 1000, 'skip', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tags (id, tag_group_id, name, address, enabled, "
+                    "metadata_json) VALUES ('t1', 'g1', 'T', 'a', true, '{}')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT name, secret_options, archived_at FROM connections")
+            ).one()
+            assert row.name == "c1"
+            assert row.secret_options is None
+            assert row.archived_at is None
+            for table in ("tag_groups", "tags"):
+                assert (
+                    connection.scalar(text(f"SELECT archived_at FROM {table}")) is None
+                )
+        inspector = inspect(engine)
+        assert {"app_settings", "api_keys"} <= set(inspector.get_table_names())
+        assert {column["name"] for column in inspector.get_columns("api_keys")} == {
+            "id",
+            "name",
+            "prefix",
+            "key_hash",
+            "created_at",
+            "last_used_at",
+            "revoked_at",
+        }
+        assert {column["name"] for column in inspector.get_columns("app_settings")} == {
+            "key",
+            "value",
+        }
+        name_column = next(
+            column
+            for column in inspector.get_columns("connections")
+            if column["name"] == "name"
+        )
+        assert name_column["nullable"] is False
+        indexes = {
+            table: {index["name"] for index in inspector.get_indexes(table)}
+            for table in ("tag_readings", "poll_executions")
+        }
+        assert {
+            "ix_tag_readings_received_at",
+            "ix_tag_readings_tag_id_received_at",
+        } <= indexes["tag_readings"]
+        assert "ix_poll_executions_started_at" in indexes["poll_executions"]
+        with engine.connect() as connection:
+            diff = compare_metadata(MigrationContext.configure(connection), metadata)
+        assert diff == []
+    finally:
+        engine.dispose()
+
+
+def _assert_0003_round_trip(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    command.downgrade(config, "0002")
+    engine = create_database_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert "api_keys" not in inspector.get_table_names()
+        assert "name" not in {c["name"] for c in inspector.get_columns("connections")}
+    finally:
+        engine.dispose()
+    command.upgrade(config, "head")
 
 
 def _alembic_config(url: str) -> Config:
