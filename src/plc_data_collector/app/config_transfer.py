@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Literal
 
 from plc_data_collector.app.config import CollectorConfig, parse_collector_config
-from plc_data_collector.app.secrets import split_secrets
+from plc_data_collector.app.secrets import merge_secrets, split_secrets
 from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
@@ -144,6 +144,13 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
             code="invalid_configuration_json",
             details={"line": error.lineno, "column": error.colno},
         ) from error
+    except (RecursionError, ValueError) as error:
+        # Deeply nested input or an integer literal over Python's digit limit.
+        raise ConfigurationError(
+            "The file is not valid JSON, is nested too deeply or has a number "
+            "that is too long.",
+            code="invalid_configuration_json",
+        ) from error
     if not isinstance(loaded, dict):
         raise ConfigurationError(
             "Configuration root at $ must be a JSON object.",
@@ -158,7 +165,8 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
         known = existing.get(connection.id)
         if known is not None:
             secrets = split_secrets(known.protocol_options)[1]
-            options = {**secrets, **connection.protocol_options}
+            # Existing secrets first, then the file's options on top: file wins.
+            options = merge_secrets(secrets, connection.protocol_options)
             connection = replace(connection, protocol_options=options)
         connections.append(connection)
     return replace(parsed, connections=tuple(connections))

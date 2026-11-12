@@ -10,7 +10,12 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
-from plc_data_collector.app.secrets import SecretBox, is_sensitive_key, split_secrets
+from plc_data_collector.app.secrets import (
+    SecretBox,
+    is_sensitive_key,
+    merge_secrets,
+    split_secrets,
+)
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.domain import ConfigurationError
 
@@ -125,3 +130,29 @@ def test_settings_without_config_file(tmp_path: Path) -> None:
     assert settings.config_file is None
     assert settings.secret_key == "k"
     assert settings.admin_password == "pw"
+
+
+def test_nested_split_and_merge_round_trip() -> None:
+    options = {
+        "auth": {"user": "u", "password": "x", "deep": {"api_token": "t", "n": 1}},
+        "items": [{"password": "left-alone"}],
+        "plain": {"a": 1},
+    }
+
+    plain, secret = split_secrets(options)
+
+    assert plain == {
+        "auth": {"user": "u", "deep": {"n": 1}},
+        "items": [{"password": "left-alone"}],
+        "plain": {"a": 1},
+    }
+    assert secret == {"auth": {"password": "x", "deep": {"api_token": "t"}}}
+    assert merge_secrets(plain, secret) == options
+
+
+def test_merge_secrets_secret_wins() -> None:
+    merged = merge_secrets(
+        {"a": {"password": "old", "u": 1}}, {"a": {"password": "new"}}
+    )
+
+    assert merged == {"a": {"password": "new", "u": 1}}

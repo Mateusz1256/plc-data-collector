@@ -159,6 +159,33 @@ def test_import_errors() -> None:
     assert "tags[0].tag_group_id" in err.message
 
 
+def test_nested_secret_not_exported_and_restored_on_import() -> None:
+    base = _config()
+    connection = replace(
+        base.connections[0],
+        protocol_options={"auth": {"user": "u", "password": "nested-pw"}},
+    )
+    config = replace(base, connections=(connection,))
+
+    exported = export_config(config)
+
+    assert "nested-pw" not in json.dumps(exported)
+    assert parse_import(json.dumps(exported).encode(), current=config) == config
+
+
+@pytest.mark.parametrize(
+    "data",
+    [b"[" * 100_000, b"1" + b"0" * 5000],
+    ids=["too-deep", "huge-integer"],
+)
+def test_import_pathological_json_is_a_coded_error(data: bytes) -> None:
+    with pytest.raises(ConfigurationError) as error:
+        parse_import(data, current=_config())
+
+    assert error.value.code == "invalid_configuration_json"
+    assert "too deeply" in error.value.message
+
+
 def test_export_is_valid_seed_file(tmp_path: Path) -> None:
     config = _config()
     path = tmp_path / "seed.json"

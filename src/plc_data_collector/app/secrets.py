@@ -42,12 +42,41 @@ def is_sensitive_key(key: str) -> bool:
 def split_secrets(
     options: Mapping[str, object],
 ) -> tuple[dict[str, object], dict[str, object]]:
-    """Split top-level options into ``(plain, secret)`` by key name."""
+    """Split options into ``(plain, secret)`` by key name at any mapping depth.
+
+    The secret side mirrors the nesting of the options; nested mappings that
+    hold no secrets are not emitted there. Lists are left untouched.
+    """
     plain: dict[str, object] = {}
     secret: dict[str, object] = {}
     for key, value in options.items():
-        (secret if is_sensitive_key(key) else plain)[key] = value
+        if is_sensitive_key(key):
+            secret[key] = value
+        elif isinstance(value, Mapping):
+            nested_plain, nested_secret = split_secrets(value)
+            plain[key] = nested_plain
+            if nested_secret:
+                secret[key] = nested_secret
+        else:
+            plain[key] = value
     return plain, secret
+
+
+def merge_secrets(
+    plain: Mapping[str, object],
+    secret: Mapping[str, object],
+) -> dict[str, object]:
+    """Deep-merge ``secret`` into ``plain``; secret values win on the same path."""
+    merged: dict[str, object] = dict(plain)
+    for key, value in secret.items():
+        existing = merged.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[key] = merge_secrets(existing, value)
+        elif isinstance(value, Mapping):
+            merged[key] = merge_secrets({}, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 class SecretBox:

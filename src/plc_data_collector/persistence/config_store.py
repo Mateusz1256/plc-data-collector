@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Connection, Engine, Row, select, update
 
 from plc_data_collector.app.config import CollectorConfig
-from plc_data_collector.app.secrets import SecretBox, split_secrets
+from plc_data_collector.app.secrets import SecretBox, merge_secrets, split_secrets
 from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
@@ -225,10 +225,10 @@ class ConfigStore:
                 plain, found = split_secrets(row.protocol_options or {})
                 if not found:
                     continue
-                merged: dict[str, object] = {}
-                if row.secret_options:
-                    merged.update(self._box.decrypt(row.secret_options))
-                merged.update(found)
+                merged = merge_secrets(
+                    self._box.decrypt(row.secret_options) if row.secret_options else {},
+                    found,
+                )
                 connection.execute(
                     update(connections)
                     .where(connections.c.id == row.id)
@@ -243,9 +243,10 @@ class ConfigStore:
     # Internals
 
     def _connection_from_row(self, row: Row[tuple[object, ...]]) -> ConnectionConfig:
-        options: dict[str, object] = dict(row.protocol_options or {})
-        if row.secret_options:
-            options.update(self._box.decrypt(row.secret_options))
+        options = merge_secrets(
+            row.protocol_options or {},
+            self._box.decrypt(row.secret_options) if row.secret_options else {},
+        )
         return ConnectionConfig(
             id=row.id,
             name=row.name,

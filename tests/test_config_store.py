@@ -129,6 +129,26 @@ def test_load_active_round_trip_with_secrets(
     assert row.secret_options != "p"
 
 
+def test_nested_secret_is_encrypted_not_in_protocol_options(
+    store: ConfigStore, engine: Engine
+) -> None:
+    store.upsert_connection(
+        _connection(auth={"user": "u", "password": "nested-pw"}, username="u")
+    )
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(connections.c.protocol_options, connections.c.secret_options)
+        ).one()
+    assert row.protocol_options == {"auth": {"user": "u"}, "username": "u"}
+    assert "nested-pw" not in str(row.protocol_options)
+    assert row.secret_options is not None
+    assert "nested-pw" not in row.secret_options
+    loaded = store.get_connection("c1")
+    assert loaded is not None
+    assert loaded.protocol_options["auth"] == {"user": "u", "password": "nested-pw"}
+
+
 def test_every_write_bumps_revision(store: ConfigStore) -> None:
     assert store.revision() == 0
     store.upsert_connection(_connection())
