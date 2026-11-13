@@ -1,6 +1,6 @@
 {#- Pending-changes banner; ``pending`` is a PendingChanges or None. -#}
 {% if pending %}
-<div class="banner{% if pending.stopped_error %} banner-failed{% endif %}" role="status">
+<div class="banner{% if pending.css_class %} {{ pending.css_class }}{% endif %}" role="status">
 <div class="banner-inner">
 <p><strong>{{ pending.headline }}</strong> {{ pending.detail }}</p>
 <div class="banner-actions">

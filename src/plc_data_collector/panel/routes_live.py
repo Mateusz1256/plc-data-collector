@@ -77,7 +77,6 @@ NOTHING_PENDING_MESSAGE = "Nothing to apply. The saved configuration is running.
 NO_VALUE = "—"
 THIN_SPACE = "\u2009"
 EMPTY_CONFIG = CollectorConfig(connections=(), tag_groups=(), tags=())
-DATABASE_UNAVAILABLE = "database_unavailable"
 STOPPED_INTRO = "Collection is stopped, so there are no live values."
 APPLYING_INTRO = "Applying changes. Live values return in a few seconds."
 # A Tag Group interval below this cannot come from the store; it is clamped
@@ -97,16 +96,33 @@ def utc_now() -> datetime:
 
 @dataclass(frozen=True)
 class PendingChanges:
-    """Saved configuration that is not running yet, or a stopped collection."""
+    """Saved configuration that is not running yet, or a stopped collection.
+
+    ``stopped_error`` is set when collection is stopped by an error;
+    ``apply_error`` when an apply failed and the previous configuration still
+    runs.
+    """
 
     diff: ConfigDiff
     stopped_error: str | None
+    apply_error: str | None = None
+
+    @property
+    def css_class(self) -> str:
+        """Return the banner's state class, or an empty string."""
+        if self.stopped_error is not None:
+            return "banner-failed"
+        if self.apply_error is not None:
+            return "banner-degraded"
+        return ""
 
     @property
     def headline(self) -> str:
         """Return the banner's bold first sentence."""
         if self.stopped_error is not None:
             return f"Collection is stopped: {self.stopped_error}."
+        if self.apply_error is not None:
+            return f"Changes could not be applied: {self.apply_error}."
         total = self.diff.total
         if total == 0:
             return "Saved changes are not running yet."
@@ -119,6 +135,8 @@ class PendingChanges:
         """Return the sentence after the headline."""
         if self.stopped_error is not None:
             return "Fix the problem and apply changes again."
+        if self.apply_error is not None:
+            return "Collection continues with the previous configuration."
         return (
             "Applying restarts collection for a few seconds. "
             "Readings waiting to be stored are kept."
@@ -129,12 +147,13 @@ def pending_changes(host: CollectorHost) -> PendingChanges | None:
     """Return what the banner shows, or None to hide it.
 
     Blocking: reads the store, so call it in a thread. The banner shows when
-    the saved revision differs from the running one, or when collection is
-    stopped by an error. It stays hidden while an apply is in progress and
-    while collection is starting (stopped without an error code).
+    the saved revision differs from the running one, when collection is
+    stopped by an error, or when the last apply failed and the previous
+    configuration runs instead. It stays hidden while an apply is in progress
+    and while collection is starting (stopped without an error code).
 
-    When the database cannot be read, a stopped collection still gets its
-    banner (with an empty diff) and a running one gets none, so the page
+    When the database cannot be read, an error banner still shows (with an
+    empty diff) and a plain pending-changes banner does not, so the page
     renders instead of failing.
     """
     stores = host.stores
@@ -142,27 +161,30 @@ def pending_changes(host: CollectorHost) -> PendingChanges | None:
         return None
     running_revision = host.running_revision
     running_config = host.running_config
-    stopped_error: str | None = None
-    if running_revision is None:
-        stopped_error = host.last_error_code
-        if stopped_error is None:
-            return None
+    error = host.last_error_code
+    stopped = running_revision is None
+    if stopped and error is None:
+        return None
+    saved: CollectorConfig | None = None
     try:
-        if stopped_error is None and stores.config.revision() == running_revision:
+        if error is None and stores.config.revision() == running_revision:
             return None
         saved, revision = stores.config.load_active()
     except (SQLAlchemyError, StorageError):
-        if stopped_error is None:
+        if error is None:
             return None
-        return PendingChanges(
-            diff=diff_configs(EMPTY_CONFIG, EMPTY_CONFIG),
-            stopped_error=stopped_error or DATABASE_UNAVAILABLE,
-        )
-    if stopped_error is None and revision == running_revision:
-        return None
+    else:
+        if error is None and revision == running_revision:
+            return None
+    # Unreadable database: the error banner shows with an empty diff.
+    if saved is None:
+        diff = diff_configs(EMPTY_CONFIG, EMPTY_CONFIG)
+    else:
+        diff = diff_configs(running_config or EMPTY_CONFIG, saved)
     return PendingChanges(
-        diff=diff_configs(running_config or EMPTY_CONFIG, saved),
-        stopped_error=stopped_error,
+        diff=diff,
+        stopped_error=error if stopped else None,
+        apply_error=None if stopped else error,
     )
 
 

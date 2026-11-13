@@ -469,9 +469,36 @@ async def test_apply_after_archiving_tag_stores_pending_readings(
         await supervisor.stop()
 
 
+def _add_pressure_tag(supervisor: RuntimeSupervisor) -> None:
+    stores = supervisor.stores
+    assert stores is not None
+    stores.config.upsert_tag(
+        TagConfig(
+            id="line_1_pressure",
+            tag_group_id="fast",
+            name="Line 1 Pressure",
+            address="mock://line_1_pressure",
+            value_type=ValueType.NUMERIC,
+        )
+    )
+
+
+async def _ready_status(client: httpx.AsyncClient) -> int:
+    return (await client.get("/health/ready")).status_code
+
+
+async def _wait_ready(client: httpx.AsyncClient) -> None:
+    for _ in range(250):
+        if await asyncio.wait_for(_ready_status(client), timeout=10) == 200:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("not ready before timeout")
+
+
 async def test_apply_failure_keeps_web_up_and_retry_works(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """A failed Apply falls back to the previous configuration."""
     caplog.set_level(logging.INFO)
     calls = 0
 
@@ -487,40 +514,95 @@ async def test_apply_failure_keeps_web_up_and_retry_works(
     )
     app = create_api_app(supervisor.api_state)
     transport = httpx.ASGITransport(app=app)
-    await supervisor.start()
+    await asyncio.wait_for(supervisor.start(), timeout=10)
     try:
-        with pytest.raises(StorageError):
-            await supervisor.apply()
+        previous_revision = supervisor.running_revision
+        previous_config = supervisor.running_config
+        _add_pressure_tag(supervisor)
 
-        state = supervisor.api_state()
-        assert state.ready is False
-        assert "database_unavailable" in state.critical_errors
-        assert supervisor.running_revision is None
+        with pytest.raises(StorageError):
+            await asyncio.wait_for(supervisor.apply(), timeout=10)
+
+        assert calls == 3
+        assert supervisor.running_revision == previous_revision
+        assert supervisor.running_config == previous_config
         assert supervisor.last_error_code == "database_unavailable"
         assert "runtime_apply_failed" in caplog.text
+        assert "runtime_apply_rolled_back" in caplog.text
+        await wait_until(
+            lambda: supervisor.live_values.get("line_1_temperature") is not None
+        )
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as client:
             assert (await client.get("/health/live")).status_code == 200
-            assert (await client.get("/health/ready")).status_code == 503
+            # Collection continues, so readiness stays OK.
+            await _wait_ready(client)
+            body = (await client.get("/health/ready")).json()
+            assert "database_unavailable" not in body["critical_errors"]
 
-            await supervisor.apply()
+            await asyncio.wait_for(supervisor.apply(), timeout=10)
 
             stores = supervisor.stores
             assert stores is not None
             assert supervisor.running_revision == stores.config.revision()
             assert supervisor.last_error_code is None
-
-            async def ready() -> bool:
-                return (await client.get("/health/ready")).status_code == 200
-
-            for _ in range(250):
-                if await ready():
-                    break
-                await asyncio.sleep(0.02)
-            assert await ready()
+            await _wait_ready(client)
     finally:
-        await supervisor.stop()
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
+
+
+async def test_apply_failure_without_fallback_stops_collection(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When the previous configuration cannot start either, collection stops."""
+    caplog.set_level(logging.INFO)
+    calls = 0
+
+    def flaky_factory(*args: Any, **kwargs: Any) -> CollectorRuntime:
+        nonlocal calls
+        calls += 1
+        if calls in (2, 3):
+            raise StorageError("database went away", code="database_unavailable")
+        return CollectorRuntime(*args, **kwargs)
+
+    supervisor = RuntimeSupervisor(
+        make_settings(tmp_path, mock_config()), runtime_factory=flaky_factory
+    )
+    app = create_api_app(supervisor.api_state)
+    transport = httpx.ASGITransport(app=app)
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    try:
+        _add_pressure_tag(supervisor)
+
+        with pytest.raises(StorageError):
+            await asyncio.wait_for(supervisor.apply(), timeout=10)
+
+        assert calls == 3
+        state = supervisor.api_state()
+        assert state.ready is False
+        assert "database_unavailable" in state.critical_errors
+        assert supervisor.running_revision is None
+        assert supervisor.running_config is None
+        assert supervisor.last_error_code == "database_unavailable"
+        assert "runtime_apply_failed" in caplog.text
+        assert "runtime_rollback_failed" in caplog.text
+        assert "runtime_apply_rolled_back" not in caplog.text
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
+            assert (await client.get("/health/live")).status_code == 200
+            assert await _ready_status(client) == 503
+
+            await asyncio.wait_for(supervisor.apply(), timeout=10)
+
+            stores = supervisor.stores
+            assert stores is not None
+            assert supervisor.running_revision == stores.config.revision()
+            assert supervisor.last_error_code is None
+            await _wait_ready(client)
+    finally:
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
 
 
 async def test_concurrent_apply_rejected(tmp_path: Path) -> None:

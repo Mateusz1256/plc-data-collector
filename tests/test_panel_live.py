@@ -490,6 +490,34 @@ def test_apply_failure_shows_stopped_banner(
     assert "Changes applied" not in html
 
 
+def test_apply_failure_with_fallback_shows_not_applied_banner(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    stores.config.upsert_tag(_tag("speed"))
+    revision = fake_host.running_revision
+    fake_host.apply_falls_back = True
+    fake_host.apply_error = CollectorError(
+        "Database went away.", code="database_unavailable"
+    )
+
+    response = signed_in_client.post("/panel/apply")
+
+    assert response.status_code == 303
+    assert fake_host.running_revision == revision
+    html = signed_in_client.get("/panel/live").text
+    assert (
+        "Changes could not be applied: database_unavailable. "
+        "Collection continues with the previous configuration."
+    ) in _text(html)
+    assert "banner-degraded" in html
+    assert 'action="/panel/apply"' in html and "Apply changes" in html
+    assert "Collection is stopped" not in html
+    assert "Changes applied" not in html
+    # The running values stay on the page.
+    assert 'data-tag="temperature"' in html
+
+
 def test_apply_requires_sign_in(panel_client: TestClient, fake_host: FakeHost) -> None:
     response = panel_client.post("/panel/apply")
 

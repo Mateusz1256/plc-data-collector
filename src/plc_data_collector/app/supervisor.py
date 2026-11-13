@@ -191,8 +191,12 @@ class RuntimeSupervisor:
         """Replace the runtime with one built from the database configuration.
 
         The current runtime stops first, so its pending Poll Results are stored
-        (or spooled) before the new runtime starts. On a failed start no runtime
-        runs, readiness reports the error code, and a later apply() retries.
+        (or spooled) before the new runtime starts. When loading or starting
+        the new configuration fails, a runtime for the previous configuration
+        starts again with its previous revision, ``last_error_code`` keeps the
+        failure's code and the error propagates; a later apply() retries. Only
+        when that fallback fails too is collection left stopped, and readiness
+        then reports the error code.
         The swap runs in its own task, so a cancelled caller cannot leave it
         half done.
         """
@@ -220,6 +224,8 @@ class RuntimeSupervisor:
         try:
             LOGGER.info("runtime_apply_started")
             runtime, self._runtime = self._runtime, None
+            previous_config = self._running_config
+            previous_revision = self._running_revision
             self._running_revision = None
             self._running_config = None
             try:
@@ -241,6 +247,8 @@ class RuntimeSupervisor:
                         "error_type": type(error).__name__,
                     },
                 )
+                if previous_config is not None and previous_revision is not None:
+                    await self._roll_back(previous_config, previous_revision)
                 raise
             self._last_error_code = None
             LOGGER.info("runtime_applied", extra={"revision": self._running_revision})
@@ -248,6 +256,31 @@ class RuntimeSupervisor:
             self._applying = False
             self._apply_task = None
             self._apply_lock.release()
+
+    async def _roll_back(self, config: CollectorConfig, revision: int) -> None:
+        """Start a runtime for the configuration that ran before a failed apply.
+
+        ``last_error_code`` keeps the apply's code, so the Panel can say the
+        changes were not applied. When this start fails too, no runtime runs
+        and readiness reports the apply's error code.
+        """
+        if self._stop_requested:
+            return
+        try:
+            await self._start_runtime((config, revision))
+        except Exception as error:
+            LOGGER.error(
+                "runtime_rollback_failed",
+                extra={
+                    "error_code": error_code(error),
+                    "error_type": type(error).__name__,
+                },
+            )
+            return
+        LOGGER.warning(
+            "runtime_apply_rolled_back",
+            extra={"revision": revision, "error_code": self._last_error_code},
+        )
 
     async def stop(self, timeout_s: float = 10.0) -> None:
         """Stop the runtime, then dispose the database engine.
@@ -395,11 +428,20 @@ class RuntimeSupervisor:
             },
         )
 
-    async def _start_runtime(self) -> None:
-        """Load the active configuration and start a runtime for it."""
+    async def _start_runtime(
+        self, previous: tuple[CollectorConfig, int] | None = None
+    ) -> None:
+        """Start a runtime for the active configuration, or for ``previous``.
+
+        Without ``previous`` the active configuration and its revision are
+        loaded from the database; with it (a rollback) nothing is read.
+        """
         if self._engine is None or self._stores is None:
             raise RuntimeError("The database is not prepared.")
-        config, revision = await asyncio.to_thread(self._stores.config.load_active)
+        if previous is None:
+            config, revision = await asyncio.to_thread(self._stores.config.load_active)
+        else:
+            config, revision = previous
         if not config.connections:
             LOGGER.warning("configuration_empty")
         runtime = self._runtime_factory(

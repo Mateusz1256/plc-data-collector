@@ -132,6 +132,9 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 /* Collection stopped is abnormal, so this banner takes the failed colours. */
 .banner-failed { background: var(--state-failed-band); border-bottom-color: var(--state-failed); }
 .banner-failed p, .banner-failed .banner-link { color: var(--state-failed-detail); }
+/* A failed apply with the previous configuration still running is degraded. */
+.banner-degraded { background: var(--state-degraded-band); border-bottom-color: var(--state-degraded-marker); }
+.banner-degraded p, .banner-degraded .banner-link { color: var(--state-degraded-band-ink); }
 
 /* Panels and tables */
 .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); }

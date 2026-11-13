@@ -32,7 +32,9 @@ class FakeHost:
     """``CollectorHost`` over a migrated SQLite database with a scripted apply().
 
     Set ``stores`` to None to simulate a database that is not ready yet, and
-    ``apply_error`` to make the next ``apply()`` calls raise it.
+    ``apply_error`` to make the next ``apply()`` calls raise it. With
+    ``apply_falls_back`` a failed apply keeps the previous configuration
+    running, as the supervisor's rollback does; without it collection stops.
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -49,6 +51,7 @@ class FakeHost:
         self.runtime_state = RuntimeApiState()
         self.apply_calls = 0
         self.apply_error: BaseException | None = None
+        self.apply_falls_back = False
         self.retention_triggers = 0
 
     def api_state(self) -> RuntimeApiState:
@@ -63,8 +66,9 @@ class FakeHost:
         """Record the call, then fail as scripted or adopt the stored config."""
         self.apply_calls += 1
         if self.apply_error is not None:
-            self.running_revision = None
-            self.running_config = None
+            if not self.apply_falls_back:
+                self.running_revision = None
+                self.running_config = None
             if isinstance(self.apply_error, CollectorError):
                 self.last_error_code = self.apply_error.code
             raise self.apply_error
