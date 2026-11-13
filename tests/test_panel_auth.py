@@ -32,7 +32,7 @@ def _text(html: str) -> str:
 def test_root_redirects_to_live(panel_client: TestClient) -> None:
     response = panel_client.get("/")
 
-    assert response.status_code in (303, 307)
+    assert response.status_code == 303
     assert response.headers["location"] == "/panel/live"
 
 
@@ -51,6 +51,82 @@ def test_htmx_request_without_session_gets_hx_redirect(
     assert response.status_code == 401
     assert response.headers["hx-redirect"] == "/panel/login?next=/panel/live"
     assert "location" not in response.headers
+
+
+def test_htmx_request_returns_to_the_page_the_browser_shows(
+    panel_client: TestClient,
+) -> None:
+    response = panel_client.get(
+        "/panel/live",
+        headers={
+            "HX-Request": "true",
+            "HX-Current-URL": "http://testserver/panel/connections",
+        },
+    )
+
+    assert response.headers["hx-redirect"] == "/panel/login?next=/panel/connections"
+
+
+def test_htmx_current_url_outside_the_panel_falls_back_to_request_path(
+    panel_client: TestClient,
+) -> None:
+    response = panel_client.get(
+        "/panel/live",
+        headers={"HX-Request": "true", "HX-Current-URL": "https://evil.example/x"},
+    )
+
+    assert response.headers["hx-redirect"] == "/panel/login?next=/panel/live"
+
+
+def test_cross_site_post_is_refused(panel_client: TestClient) -> None:
+    response = panel_client.post(
+        "/panel/login",
+        data={"password": "pw"},
+        headers={"Sec-Fetch-Site": "cross-site"},
+    )
+
+    assert response.status_code == 403
+    assert "pdc_session" not in panel_client.cookies
+
+
+def test_post_with_mismatched_origin_is_refused(panel_client: TestClient) -> None:
+    for origin in (
+        "https://evil.example",
+        "http://testserver:8080",
+        "null",
+    ):
+        response = panel_client.post(
+            "/panel/login", data={"password": "pw"}, headers={"Origin": origin}
+        )
+
+        assert response.status_code == 403, origin
+    assert "pdc_session" not in panel_client.cookies
+
+
+def test_post_with_same_origin_is_accepted(panel_client: TestClient) -> None:
+    response = panel_client.post(
+        "/panel/login",
+        data={"password": "pw"},
+        headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"},
+    )
+
+    assert response.status_code == 303
+    assert "pdc_session" in panel_client.cookies
+
+
+def test_post_without_origin_headers_is_accepted(panel_client: TestClient) -> None:
+    response = panel_client.post("/panel/login", data={"password": "pw"})
+
+    assert response.status_code == 303
+
+
+def test_cross_site_sign_out_is_refused(signed_in_client: TestClient) -> None:
+    response = signed_in_client.post(
+        "/panel/sign-out", headers={"Origin": "https://evil.example"}
+    )
+
+    assert response.status_code == 403
+    assert signed_in_client.get("/panel/live").status_code == 200
 
 
 def test_login_page_shows_mockup_copy(panel_client: TestClient) -> None:
@@ -147,7 +223,7 @@ def test_login_throttle_resets_after_success() -> None:
     assert not throttle.blocked("10.0.0.1")
 
 
-@pytest.mark.parametrize("panel_admin_password", [None])
+@pytest.mark.parametrize("panel_admin_password", [None, ""])
 def test_panel_off_without_admin_password(
     panel_client: TestClient, login_sleeps: list[float]
 ) -> None:
@@ -164,6 +240,14 @@ def test_panel_off_without_admin_password(
     assert "pdc_session" not in panel_client.cookies
     assert login_sleeps == []
     assert panel_client.get("/panel/live").status_code == 303
+
+
+def test_empty_admin_password_never_matches() -> None:
+    from plc_data_collector.panel.auth import password_matches
+
+    assert not password_matches("", "")
+    assert not password_matches(None, "")
+    assert password_matches("pw", "pw")
 
 
 def test_sign_out_clears_session(signed_in_client: TestClient) -> None:

@@ -9,7 +9,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from fastapi import Request
 
@@ -100,9 +100,18 @@ def web_options(request: Request) -> WebOptions:
     return options
 
 
+def panel_enabled(options: WebOptions) -> bool:
+    """Return whether the Panel is on: an admin password is set and not empty."""
+    return bool(options.admin_password)
+
+
 def password_matches(expected: str | None, submitted: str) -> bool:
-    """Compare passwords in constant time; no password configured never matches."""
-    if expected is None:
+    """Compare passwords in constant time.
+
+    An unset or empty expected password never matches, so an empty
+    ``PLC_DATA_COLLECTOR_ADMIN_PASSWORD`` cannot be used to sign in.
+    """
+    if not expected:
         return False
     return hmac.compare_digest(expected.encode("utf-8"), submitted.encode("utf-8"))
 
@@ -124,7 +133,7 @@ def session_token(options: WebOptions) -> str:
 def is_signed_in(request: Request) -> bool:
     """Return whether the request carries a valid admin session."""
     options = web_options(request)
-    if options.admin_password is None:
+    if not panel_enabled(options):
         return False
     stored = request.session.get(SESSION_KEY)
     if not isinstance(stored, str):
@@ -144,9 +153,75 @@ def sign_out(request: Request) -> None:
 
 
 def require_admin(request: Request) -> None:
-    """FastAPI dependency: let signed-in admins through, send others to sign in."""
+    """FastAPI dependency: let signed-in admins through, send others to sign in.
+
+    For htmx requests the page to come back to is the one the browser shows
+    (``HX-Current-URL``), not the fragment URL htmx requested.
+    """
     if not is_signed_in(request):
-        raise LoginRequired(request.url.path)
+        raise LoginRequired(_return_path(request))
+
+
+class CrossSiteRequest(Exception):
+    """Raised by ``require_same_site`` for a request sent from another site."""
+
+
+def require_same_site(request: Request) -> None:
+    """FastAPI dependency for every Panel POST: refuse cross-site requests.
+
+    A second layer on top of the SameSite=Strict session cookie. The request
+    is refused when ``Sec-Fetch-Site`` is ``cross-site``, or when ``Origin`` is
+    present and its host:port differs from ``Host``. Requests with neither
+    header (non-browser clients, older browsers) pass.
+    """
+    if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+        raise CrossSiteRequest
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return
+    host = request.headers.get("Host", "")
+    if _origin_authority(origin) != _authority(host, request.url.scheme):
+        raise CrossSiteRequest
+
+
+def _origin_authority(origin: str) -> str | None:
+    try:
+        parts = urlsplit(origin)
+        if not parts.scheme or not parts.hostname:
+            return None
+        return _authority(parts.netloc, parts.scheme)
+    except ValueError:
+        return None
+
+
+def _authority(netloc: str, scheme: str) -> str | None:
+    """Return ``host:port`` in lower case with the scheme's default port filled in."""
+    try:
+        parts = urlsplit(f"//{netloc}")
+        hostname = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    if port is None:
+        port = 443 if scheme in ("https", "wss") else 80
+    return f"{hostname.lower()}:{port}"
+
+
+def _return_path(request: Request) -> str:
+    if request.headers.get("HX-Request") == "true":
+        current = request.headers.get("HX-Current-URL")
+        if current:
+            try:
+                parts = urlsplit(current)
+            except ValueError:
+                parts = None
+            if parts is not None:
+                path = parts.path + (f"?{parts.query}" if parts.query else "")
+                if safe_next(path) == path:
+                    return path
+    return request.url.path
 
 
 def safe_next(value: str | None) -> str:

@@ -27,8 +27,8 @@ PANEL_SESSION_MAX_AGE_S = 12 * 60 * 60
 class WebOptions:
     """What the app needs to serve the Panel.
 
-    ``admin_password`` None turns the Panel off; ``session_secret`` signs the
-    session cookie. Neither appears in ``repr``.
+    An unset or empty ``admin_password`` turns the Panel off;
+    ``session_secret`` signs the session cookie. Neither appears in ``repr``.
     """
 
     host: CollectorHost
@@ -128,10 +128,11 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     from plc_data_collector.panel.app import (
         DatabaseNotReady,
         create_panel_router,
+        cross_site_request_handler,
         database_not_ready_handler,
         login_required_handler,
     )
-    from plc_data_collector.panel.auth import LoginRequired
+    from plc_data_collector.panel.auth import CrossSiteRequest, LoginRequired
 
     app.state.panel_web = web
     # SameSite=Strict is the CSRF defence for the Panel's forms.
@@ -150,6 +151,7 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     app.include_router(create_panel_router(), prefix="/panel")
     app.add_exception_handler(LoginRequired, login_required_handler)
     app.add_exception_handler(DatabaseNotReady, database_not_ready_handler)
+    app.add_exception_handler(CrossSiteRequest, cross_site_request_handler)
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:
