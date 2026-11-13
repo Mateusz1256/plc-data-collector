@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -364,3 +365,64 @@ def test_revision_strictly_increases_and_failed_write_leaves_it(
         store.upsert_tag(_tag())
 
     assert store.revision() == seen[-1]
+
+
+def test_create_inserts_new_items_and_bumps_revision(store: ConfigStore) -> None:
+    store.create_connection(_connection(password="p"))
+    store.create_tag_group(_group())
+    store.create_tag(_tag())
+
+    config, revision = store.load_active()
+    assert [c.id for c in config.connections] == ["c1"]
+    assert config.connections[0].protocol_options["password"] == "p"
+    assert [g.id for g in config.tag_groups] == ["g1"]
+    assert [t.id for t in config.tags] == ["t1"]
+    assert revision == 3
+
+
+def test_create_refuses_active_ids(store: ConfigStore) -> None:
+    _seed(store)
+    before = store.revision()
+
+    attempts = (
+        partial(store.create_connection, _connection(username="other")),
+        partial(store.create_tag_group, _group()),
+        partial(store.create_tag, _tag()),
+    )
+    for attempt in attempts:
+        with pytest.raises(ConfigurationError) as caught:
+            attempt()
+        assert caught.value.code == "duplicate_id"
+
+    assert store.revision() == before
+    existing = store.get_connection("c1")
+    assert existing is not None
+    assert existing.protocol_options["username"] == "u"
+
+
+def test_create_refuses_archived_ids(store: ConfigStore) -> None:
+    _seed(store)
+    store.archive_connection("c1")
+    store.create_connection(_connection("c2"))
+    store.create_tag_group(_group("g2", "c2"))
+    before = store.revision()
+
+    attempts = (
+        partial(store.create_connection, _connection()),
+        partial(store.create_tag_group, _group("g1", "c2")),
+        partial(store.create_tag, _tag("t1", "g2")),
+    )
+    for attempt in attempts:
+        with pytest.raises(ConfigurationError) as caught:
+            attempt()
+        assert caught.value.code == "archived_id"
+
+    assert store.revision() == before
+    assert store.get_connection("c1") is None
+
+
+def test_create_tag_group_needs_active_connection(store: ConfigStore) -> None:
+    with pytest.raises(ConfigurationError) as caught:
+        store.create_tag_group(_group())
+
+    assert caught.value.code == "unknown_reference"

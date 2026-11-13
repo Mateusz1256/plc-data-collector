@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
-from panel_support import FakeHost
+from panel_support import PANEL_SESSION_SECRET, FakeHost
 from sqlalchemy import select
 
-from plc_data_collector.api import RuntimeApiState
+from plc_data_collector.api import RuntimeApiState, WebOptions, create_api_app
 from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import (
     ConnectionConfig,
@@ -24,11 +26,27 @@ from plc_data_collector.domain import (
     ValueType,
     WorkerState,
 )
+from plc_data_collector.panel.protocol_forms import (
+    FormErrors,
+    FormField,
+    ProtocolForm,
+    connection_from_form,
+)
 from plc_data_collector.persistence.schema import connections
+from plc_data_collector.protocols import (
+    MOCK_PROTOCOL,
+    MockDriver,
+    build_driver_registry,
+)
 from plc_data_collector.runtime.connection_worker import WorkerPollResult
 
 SAVED_FLASH = "Saved changes take effect after you apply them from the banner."
 ID_ERROR = "Use letters, digits, dot, dash or underscore (up to 128)."
+TIMEOUT_ERROR = "Enter a whole number of milliseconds from 1 to 600000."
+ARCHIVED_ID_ERROR = (
+    "A deleted connection used this ID. Choose another ID, so its stored "
+    "readings stay separate."
+)
 PASSWORD = "s3cret-Pa55word"
 NOW = datetime.now(UTC)
 
@@ -398,7 +416,7 @@ def test_create_requires_endpoint_and_positive_timeout(
 
     assert response.status_code == 400
     assert "Enter the endpoint URL." in response.text
-    assert "Enter a whole number of milliseconds, 1 or more." in response.text
+    assert TIMEOUT_ERROR in response.text
 
 
 def test_endpoint_with_credentials_is_refused(signed_in_client: TestClient) -> None:
@@ -423,19 +441,114 @@ def test_create_with_unavailable_protocol_is_refused(
     assert _stores(fake_host).config.load_active()[0].connections == ()
 
 
-def test_create_restores_archived_id(
+def test_create_refuses_archived_id(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
     stores = _stores(fake_host)
     stores.config.upsert_connection(_opcua("line1_opcua", name="Old"))
     stores.config.archive_connection("line1_opcua")
+    before = stores.config.revision()
 
     response = signed_in_client.post("/panel/connections", data=_create_form())
 
+    assert response.status_code == 400
+    assert ARCHIVED_ID_ERROR in response.text.replace("&#39;", "'")
+    assert 'aria-invalid="true"' in response.text
+    assert stores.config.get_connection("line1_opcua") is None
+    assert stores.config.revision() == before
+
+
+def test_create_maps_store_duplicate_to_field_error(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Another request created the ID between any read and this write.
+    stores = _stores(fake_host)
+    stores.config.upsert_connection(_opcua("line1_opcua", name="Original"))
+    monkeypatch.setattr(stores.config, "get_connection", lambda _id: None)
+
+    response = signed_in_client.post("/panel/connections", data=_create_form())
+
+    assert response.status_code == 400
+    assert "A connection with this ID already exists" in response.text
+    monkeypatch.undo()
+    existing = stores.config.get_connection("line1_opcua")
+    assert existing is not None
+    assert existing.name == "Original"
+
+
+@pytest.mark.parametrize(
+    "timeout_ms",
+    [
+        "0",
+        "-5",
+        "600001",
+        "2147483648",
+        "99999999999999999999",
+        "1_000",
+        "1e3",
+        "1.5",
+        "\u0661\u0662",
+        "\u00b2",
+    ],
+)
+def test_timeout_must_be_digits_within_bounds(
+    signed_in_client: TestClient, fake_host: FakeHost, timeout_ms: str
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_create_form(timeout_ms=timeout_ms)
+    )
+
+    assert response.status_code == 400
+    assert TIMEOUT_ERROR in response.text
+    assert _stores(fake_host).config.get_connection("line1_opcua") is None
+
+
+def test_timeout_upper_bound_is_accepted(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_create_form(timeout_ms="600000")
+    )
+
     assert response.status_code == 303
-    restored = stores.config.get_connection("line1_opcua")
-    assert restored is not None
-    assert restored.name == "Line 1 filler"
+    stored = _stores(fake_host).config.get_connection("line1_opcua")
+    assert stored is not None
+    assert stored.timeout_ms == 600000
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["http://plc-sim:4840", "opc.tcp://plc-sim", "opc.tcp://plc-sim:", "plc-sim:4840"],
+)
+def test_opcua_endpoint_needs_opc_tcp_scheme_and_port(
+    signed_in_client: TestClient, endpoint: str
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_create_form(endpoint=endpoint)
+    )
+
+    assert response.status_code == 400, endpoint
+    assert "Enter an opc.tcp:// URL with a host and port." in response.text
+
+
+def test_remove_and_new_password_together_is_refused(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _stores(fake_host)
+    stores.config.upsert_connection(_opcua(password=PASSWORD))
+
+    response = signed_in_client.post(
+        "/panel/connections/line1_opcua",
+        data=_edit_form(password="new-pw", remove_password="on"),
+    )
+
+    assert response.status_code == 400
+    assert "Clear the new password or untick Remove, not both." in response.text
+    stored = stores.config.get_connection("line1_opcua")
+    assert stored is not None
+    assert stored.protocol_options["password"] == PASSWORD
 
 
 # Edit
@@ -799,3 +912,90 @@ def test_test_connection_reports_form_errors(
     assert response.status_code == 200
     assert "Enter the endpoint URL." in response.text
     assert "alert-failed" in response.text
+
+
+def test_test_connection_unknown_returns_partial(signed_in_client: TestClient) -> None:
+    response = signed_in_client.post(
+        "/panel/connections/nope/test",
+        data=_edit_form(),
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 200
+    assert "<html" not in response.text
+    assert "This connection doesn't exist or was deleted." in response.text.replace(
+        "&#39;", "'"
+    )
+
+
+async def test_second_test_of_same_connection_is_refused_while_running(
+    fake_host: FakeHost,
+) -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class GatedMockDriver(MockDriver):
+        async def connect(self) -> None:
+            started.set()
+            await release.wait()
+            await super().connect()
+
+    fake_host.registry = build_driver_registry([(MOCK_PROTOCOL, GatedMockDriver)])
+    _stores(fake_host).config.upsert_connection(
+        ConnectionConfig(
+            id="sim", protocol=MOCK_PROTOCOL, endpoint="mock://sim", timeout_ms=5000
+        )
+    )
+    app = create_api_app(
+        fake_host.api_state,
+        web=WebOptions(
+            host=fake_host, admin_password="pw", session_secret=PANEL_SESSION_SECRET
+        ),
+    )
+    form = {"name": "sim", "endpoint": "mock://sim", "timeout_ms": "5000"}
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
+        login = await asyncio.wait_for(
+            client.post("/panel/login", data={"password": "pw"}), timeout=10
+        )
+        assert login.status_code == 303
+        first = asyncio.create_task(
+            client.post("/panel/connections/sim/test", data=form)
+        )
+        try:
+            await asyncio.wait_for(started.wait(), timeout=10)
+            second = await asyncio.wait_for(
+                client.post("/panel/connections/sim/test", data=form), timeout=10
+            )
+            assert second.status_code == 200
+            assert "A test of this connection is already running." in second.text
+        finally:
+            release.set()
+        first_response = await asyncio.wait_for(first, timeout=10)
+
+    assert "Connected in" in first_response.text
+
+
+def test_int_fields_accept_ascii_digits_only() -> None:
+    form = ProtocolForm(
+        protocol="mock",
+        label="Mock",
+        summary="",
+        fields=(
+            FormField(
+                name="endpoint", label="Endpoint", kind="text", target="endpoint"
+            ),
+            FormField(name="port", label="Port", kind="int", target="option"),
+        ),
+    )
+    base = {"id": "c1", "endpoint": "mock://x", "timeout_ms": "1000"}
+
+    for bad in ("1_000", "-1", "1e3", "\u0661", " 5x"):
+        with pytest.raises(FormErrors) as caught:
+            connection_from_form(form, {**base, "port": bad}, existing=None)
+        assert caught.value.errors == {"port": "Enter a whole number."}
+
+    built = connection_from_form(form, {**base, "port": " 502 "}, existing=None)
+    assert built.protocol_options["port"] == 502

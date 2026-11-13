@@ -25,7 +25,10 @@ ID_HELP = (
     "Used in the database and API. It can't be changed after the connection is created."
 )
 DEFAULT_TIMEOUT_MS = 3000
-TIMEOUT_ERROR = "Enter a whole number of milliseconds, 1 or more."
+MAX_TIMEOUT_MS = 600_000
+TIMEOUT_ERROR = "Enter a whole number of milliseconds from 1 to 600000."
+INT_ERROR = "Enter a whole number."
+SECRET_CONFLICT_ERROR = "Clear the new {label} or untick Remove, not both."
 ENDPOINT_CREDENTIALS_ERROR = (
     "Remove the user name and password from the URL and use the "
     "User name and Password fields instead."
@@ -56,6 +59,8 @@ class FormField:
     help: str = ""
     choices: tuple[tuple[str, str], ...] = ()
     default: object = None
+    # For a url field: the allowed schemes; when set, a port is required too.
+    schemes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,7 @@ PROTOCOL_FORMS: tuple[ProtocolForm, ...] = (
                 target="endpoint",
                 required=True,
                 help="For example opc.tcp://plc-sim:4840",
+                schemes=("opc.tcp",),
             ),
             FormField(name="username", label="User name", kind="text", target="option"),
             FormField(
@@ -237,7 +243,7 @@ def connection_from_form(
         if field.target == "endpoint":
             endpoint = _parse_endpoint(field, raw, existing, errors)
         elif field.target == "secret":
-            _apply_secret(field, raw, data, options)
+            _apply_secret(field, raw, data, options, errors)
         else:
             _apply_option(field, raw, data, options, errors)
 
@@ -258,15 +264,23 @@ def connection_from_form(
         raise FormErrors({"form": error.message}) from None
 
 
-def _parse_timeout(raw: str, errors: dict[str, str]) -> int:
+def _parse_digits(raw: str) -> int | None:
+    """Return the value of plain ASCII digits, or None for anything else.
+
+    ``int()`` alone would also take ``1_000``, signs, spaces inside and
+    non-ASCII digits.
+    """
     text = raw.strip()
-    if not text:
+    if not text or not (text.isascii() and text.isdigit()):
+        return None
+    return int(text)
+
+
+def _parse_timeout(raw: str, errors: dict[str, str]) -> int:
+    if not raw.strip():
         return DEFAULT_TIMEOUT_MS
-    try:
-        value = int(text)
-    except ValueError:
-        value = 0
-    if value < 1:
+    value = _parse_digits(raw)
+    if value is None or not 1 <= value <= MAX_TIMEOUT_MS:
         errors["timeout_ms"] = TIMEOUT_ERROR
         return DEFAULT_TIMEOUT_MS
     return value
@@ -286,16 +300,24 @@ def _parse_endpoint(
         errors[field.name] = f"Enter the {field.label[0].lower()}{field.label[1:]}."
         return value
     if field.kind == "url":
+        scheme = ""
         try:
             parts = urlsplit(value)
-            valid = bool(parts.scheme and parts.hostname)
-            _ = parts.port  # Raises for a port that is not a number.
+            scheme = parts.scheme.lower()
+            valid = bool(scheme and parts.hostname)
+            port = parts.port  # Raises for a port that is not a number.
         except ValueError:
+            valid, port = False, None
+        if field.schemes and (scheme not in field.schemes or port is None):
             valid = False
         if not valid:
-            errors[field.name] = (
-                f"Enter a full URL with a scheme, host and port. {field.help}."
-            )
+            if field.schemes:
+                wanted = " or ".join(f"{s}://" for s in field.schemes)
+                article = "an" if wanted[0] in "aeiou" else "a"
+                lead = f"Enter {article} {wanted} URL with a host and port."
+            else:
+                lead = "Enter a full URL with a scheme and host."
+            errors[field.name] = f"{lead} {field.help}." if field.help else lead
         elif "@" in parts.netloc:
             errors[field.name] = ENDPOINT_CREDENTIALS_ERROR
     return value
@@ -306,8 +328,12 @@ def _apply_secret(
     raw: str,
     data: Mapping[str, str],
     options: dict[str, object],
+    errors: dict[str, str],
 ) -> None:
     if data.get(f"remove_{field.name}"):
+        if raw != "":
+            errors[field.name] = SECRET_CONFLICT_ERROR.format(label=field.label.lower())
+            return
         options.pop(field.name, None)
     elif raw != "":
         options[field.name] = raw
@@ -330,10 +356,11 @@ def _apply_option(
         options.pop(field.name, None)
         return
     if field.kind == "int":
-        try:
-            options[field.name] = int(value)
-        except ValueError:
-            errors[field.name] = "Enter a whole number."
+        number = _parse_digits(value)
+        if number is None:
+            errors[field.name] = INT_ERROR
+        else:
+            options[field.name] = number
         return
     if field.kind == "select" and value not in {key for key, _ in field.choices}:
         errors[field.name] = "Choose one of the listed options."

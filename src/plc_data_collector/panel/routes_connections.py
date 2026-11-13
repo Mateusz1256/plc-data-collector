@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.connection_test import probe_connection
+from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
@@ -34,7 +36,6 @@ from plc_data_collector.panel.protocol_forms import (
     display_endpoint,
     form_for,
     picker_forms,
-    validate_new_id,
 )
 from plc_data_collector.panel.rendering import (
     StateBadge,
@@ -51,6 +52,11 @@ DELETED_MESSAGE = (
     "from the banner."
 )
 DUPLICATE_ID_ERROR = "A connection with this ID already exists. Choose another ID."
+ARCHIVED_ID_ERROR = (
+    "A deleted connection used this ID. Choose another ID, so its stored "
+    "readings stay separate."
+)
+TEST_RUNNING_MESSAGE = "A test of this connection is already running."
 PICK_PROTOCOL_ERROR = "Choose a protocol that this version supports."
 NOT_FOUND_MESSAGE = "This connection doesn't exist or was deleted."
 WORKER_PREFIX = "connection-worker:"
@@ -76,12 +82,23 @@ class ConnectionRow:
 
 
 def create_connections_router() -> APIRouter:
-    """Create the Connections routes; include them with the ``/panel`` prefix."""
+    """Create the Connections routes; include them with the ``/panel`` prefix.
+
+    Store calls are blocking database I/O. Handlers that also read runtime
+    state (worker states, live values), which belongs to the event loop, stay
+    async and run the store calls with ``asyncio.to_thread``. Handlers that
+    only touch the stores are plain ``def``, so Starlette runs them in its
+    threadpool.
+    """
     router = APIRouter()
+    # One Test connection at a time per Connection, so repeated clicks do not
+    # open parallel sessions to the same controller.
+    test_locks: dict[str, asyncio.Lock] = {}
 
     @router.get("/connections", include_in_schema=False, dependencies=[AdminRequired])
     async def list_connections(request: Request, stores: PanelStores) -> HTMLResponse:
-        return _list_page(request, stores.config.load_active()[0])
+        config = await _load_config(stores)
+        return _list_page(request, config)
 
     @router.get(
         "/connections/new", include_in_schema=False, dependencies=[AdminRequired]
@@ -93,15 +110,15 @@ def create_connections_router() -> APIRouter:
         name: str = "",
         id: str = "",
     ) -> HTMLResponse:
-        config = stores.config.load_active()[0]
+        adding = {"name": name, "id": id}
         if protocol is None:
-            return _list_page(request, config, adding={"name": name, "id": id})
+            return _list_page(request, await _load_config(stores), adding=adding)
         form = form_for(protocol)
         if not _offered(request, form):
             return _list_page(
                 request,
-                config,
-                adding={"name": name, "id": id},
+                await _load_config(stores),
+                adding=adding,
                 picker_error=PICK_PROTOCOL_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
@@ -129,32 +146,23 @@ def create_connections_router() -> APIRouter:
         if not _offered(request, form):
             return _list_page(
                 request,
-                stores.config.load_active()[0],
+                await _load_config(stores),
                 adding={"name": data.get("name", ""), "id": data.get("id", "")},
                 picker_error=PICK_PROTOCOL_ERROR,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-        errors: dict[str, str] = {}
-        connection: ConnectionConfig | None = None
         try:
             connection = connection_from_form(form, data, existing=None)
+            # Insert-only: the store refuses an ID that is in use or archived,
+            # inside its write transaction, so concurrent creates cannot race.
+            await asyncio.to_thread(stores.config.create_connection, connection)
         except FormErrors as error:
             errors = error.errors
-        new_id = data.get("id", "").strip()
-        if (
-            validate_new_id(new_id) is None
-            and stores.config.get_connection(new_id) is not None
-        ):
-            errors["id"] = DUPLICATE_ID_ERROR
-            connection = None
-        if connection is not None:
-            try:
-                stores.config.upsert_connection(connection)
-            except ConfigurationError as error:
-                errors["form"] = error.message
-            else:
-                flash(request, SAVED_MESSAGE)
-                return _see_other(f"/panel/connections/{connection.id}")
+        except ConfigurationError as error:
+            errors = _store_errors(error)
+        else:
+            flash(request, SAVED_MESSAGE)
+            return _see_other(f"/panel/connections/{connection.id}")
         return _edit_page(
             request,
             form,
@@ -171,7 +179,7 @@ def create_connections_router() -> APIRouter:
     async def edit_connection(
         request: Request, connection_id: str, stores: PanelStores
     ) -> HTMLResponse:
-        existing = stores.config.get_connection(connection_id)
+        existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
         if existing is None:
             return _not_found(request)
         form = form_for(existing.protocol)
@@ -190,14 +198,14 @@ def create_connections_router() -> APIRouter:
     async def save_connection(
         request: Request, connection_id: str, stores: PanelStores
     ) -> Response:
-        existing = stores.config.get_connection(connection_id)
+        existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
         if existing is None:
             return _not_found(request)
         form = form_for(existing.protocol)
         data = await _form_data(request)
         try:
             connection = connection_from_form(form, data, existing=existing)
-            stores.config.upsert_connection(connection)
+            await asyncio.to_thread(stores.config.upsert_connection, connection)
         except FormErrors as error:
             errors = error.errors
         except ConfigurationError as error:
@@ -222,10 +230,10 @@ def create_connections_router() -> APIRouter:
     async def confirm_delete(
         request: Request, connection_id: str, stores: PanelStores
     ) -> HTMLResponse:
-        existing = stores.config.get_connection(connection_id)
+        existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
         if existing is None:
             return _not_found(request)
-        config = stores.config.load_active()[0]
+        config = await _load_config(stores)
         groups = [g for g in config.tag_groups if g.connection_id == connection_id]
         group_ids = {g.id for g in groups}
         tag_count = sum(1 for t in config.tags if t.tag_group_id in group_ids)
@@ -243,7 +251,7 @@ def create_connections_router() -> APIRouter:
         include_in_schema=False,
         dependencies=[AdminRequired, SameSiteRequired],
     )
-    async def delete_connection(
+    def delete_connection(
         request: Request, connection_id: str, stores: PanelStores
     ) -> Response:
         if stores.config.get_connection(connection_id) is None:
@@ -260,36 +268,52 @@ def create_connections_router() -> APIRouter:
     async def test_connection_route(
         request: Request, connection_id: str, stores: PanelStores
     ) -> HTMLResponse:
-        existing = stores.config.get_connection(connection_id)
+        existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
         if existing is None:
-            return _not_found(request)
-        form = form_for(existing.protocol)
-        data = await _form_data(request)
-        try:
-            # Tests what the form would save, so settings can be tried first.
-            candidate = connection_from_form(form, data, existing=existing)
-        except FormErrors as error:
-            return render(
-                request,
-                "_connection_test.html",
-                {
-                    "ok": False,
-                    "message": "Fix the form first: " + " ".join(error.errors.values()),
-                },
+            return _test_result(request, ok=False, message=NOT_FOUND_MESSAGE)
+        lock = test_locks.setdefault(connection_id, asyncio.Lock())
+        if lock.locked():
+            return _test_result(request, ok=False, message=TEST_RUNNING_MESSAGE)
+        async with lock:
+            form = form_for(existing.protocol)
+            data = await _form_data(request)
+            try:
+                # Tests what the form would save, so settings can be tried first.
+                candidate = connection_from_form(form, data, existing=existing)
+            except FormErrors as error:
+                return _test_result(
+                    request,
+                    ok=False,
+                    message="Fix the form first: " + " ".join(error.errors.values()),
+                )
+            config = await _load_config(stores)
+            result = await probe_connection(
+                candidate,
+                _host(request).registry,
+                probe_tag=_probe_tag(config, connection_id),
             )
-        config = stores.config.load_active()[0]
-        result = await probe_connection(
-            candidate,
-            _host(request).registry,
-            probe_tag=_probe_tag(config, connection_id),
-        )
-        return render(
-            request,
-            "_connection_test.html",
-            {"ok": result.ok, "message": result.message},
-        )
+        return _test_result(request, ok=result.ok, message=result.message)
 
     return router
+
+
+async def _load_config(stores: Stores) -> CollectorConfig:
+    config, _ = await asyncio.to_thread(stores.config.load_active)
+    return config
+
+
+def _store_errors(error: ConfigurationError) -> dict[str, str]:
+    if error.code == "duplicate_id":
+        return {"id": DUPLICATE_ID_ERROR}
+    if error.code == "archived_id":
+        return {"id": ARCHIVED_ID_ERROR}
+    return {"form": error.message}
+
+
+def _test_result(request: Request, *, ok: bool, message: str) -> HTMLResponse:
+    # Always 200: htmx does not swap 4xx or 5xx responses by default, and the
+    # message has to reach the page.
+    return render(request, "_connection_test.html", {"ok": ok, "message": message})
 
 
 # Pages

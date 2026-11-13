@@ -59,6 +59,8 @@ async def probe_connection(
         driver = registry.create_driver(connection)
     except CollectorError as error:
         return _finish(connection, elapsed_ms(), _failure_message(error))
+    except Exception as error:
+        return _finish(connection, elapsed_ms(), _unexpected(error))
 
     try:
         try:
@@ -83,19 +85,7 @@ async def probe_connection(
     except CollectorError as error:
         return _finish(connection, elapsed_ms(), _failure_message(error))
     except Exception as error:
-        # The exception text may quote the endpoint with its credentials, so
-        # only the type is shown.
-        code = type(error).__name__
-        return _finish(
-            connection,
-            elapsed_ms(),
-            (
-                False,
-                f"The test failed with an unexpected error ({code}). Check the "
-                "connection settings and the collector log.",
-                code,
-            ),
-        )
+        return _finish(connection, elapsed_ms(), _unexpected(error))
 
     total_ms = elapsed_ms()
     return _finish(
@@ -179,6 +169,18 @@ def _failure_message(error: CollectorError) -> _Outcome:
             "the credentials, and that the server is running."
         )
     return False, text, code
+
+
+def _unexpected(error: Exception) -> _Outcome:
+    # The exception text may quote the endpoint with its credentials, so only
+    # the type is shown.
+    code = type(error).__name__
+    return (
+        False,
+        f"The test failed with an unexpected error ({code}). Check the "
+        "connection settings and the collector log.",
+        code,
+    )
 
 
 def _finish(

@@ -228,3 +228,16 @@ async def test_transient_error_message_text_is_not_shown() -> None:
 
     assert "opcua_connect_failed" in result.message
     assert "pw-in-text" not in result.message
+
+
+async def test_driver_construction_error_reports_type_not_text() -> None:
+    def explode(connection: ConnectionConfig) -> MockDriver:
+        raise RuntimeError("opc.tcp://user:ctor-leak@host")
+
+    registry = build_driver_registry([(MOCK_PROTOCOL, explode)])
+
+    result = await _probe(_connection(), registry, None)
+
+    assert result.ok is False
+    assert "RuntimeError" in result.message
+    assert "ctor-leak" not in result.message

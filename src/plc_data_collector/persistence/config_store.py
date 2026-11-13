@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import Connection, Engine, Row, select, update
+from sqlalchemy import Connection, Engine, Row, Table, select, update
 
 from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.secrets import SecretBox, merge_secrets, split_secrets
@@ -124,6 +124,43 @@ class ConfigStore:
         return None if row is None else row[0] is not None
 
     # Writes
+
+    def create_connection(self, config: ConnectionConfig) -> None:
+        """Insert a new Connection; refuse an ID that is in use or archived.
+
+        Raises ``ConfigurationError`` with code ``duplicate_id`` when an active
+        Connection has the ID, and ``archived_id`` when an archived one has it.
+        Archived IDs are not reused, so a new Connection never inherits the
+        stored history of a deleted one. The check runs under the revision lock,
+        so two concurrent creates of one ID cannot both succeed.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_existing_id(connection, connections, "connection", config.id)
+            self._write_connection(connection, config)
+            self._finish_write(connection, revision)
+
+    def create_tag_group(self, group: TagGroupConfig) -> None:
+        """Insert a new Tag Group; refuse an ID that is in use or archived.
+
+        Same codes as ``create_connection``; its Connection must be active.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_existing_id(connection, tag_groups, "tag_group", group.id)
+            _write_tag_group(connection, group)
+            self._finish_write(connection, revision)
+
+    def create_tag(self, tag: TagConfig) -> None:
+        """Insert a new Tag; refuse an ID that is in use or archived.
+
+        Same codes as ``create_connection``; its Tag Group must be active.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_existing_id(connection, tags, "tag", tag.id)
+            _write_tag(connection, tag)
+            self._finish_write(connection, revision)
 
     def upsert_connection(self, config: ConnectionConfig) -> None:
         """Create or update a Connection, restoring it when archived."""
@@ -320,6 +357,28 @@ def _now() -> datetime:
 def _read_revision(connection: Connection) -> int:
     value = get_setting(connection, CONFIG_REVISION_KEY)
     return value if isinstance(value, int) else 0
+
+
+def _refuse_existing_id(
+    connection: Connection, table: Table, kind: str, item_id: str
+) -> None:
+    row = connection.execute(
+        select(table.c.archived_at).where(table.c.id == item_id)
+    ).first()
+    if row is None:
+        return
+    if row.archived_at is None:
+        raise ConfigurationError(
+            f"A {kind.replace('_', ' ')} with the ID '{item_id}' already exists.",
+            code="duplicate_id",
+            details={kind: item_id},
+        )
+    raise ConfigurationError(
+        f"The ID '{item_id}' belonged to a deleted {kind.replace('_', ' ')}; "
+        "IDs are not reused so stored history stays separate.",
+        code="archived_id",
+        details={kind: item_id},
+    )
 
 
 def _unknown_reference(kind: str, parent_id: str) -> ConfigurationError:
