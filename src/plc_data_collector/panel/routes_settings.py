@@ -103,13 +103,10 @@ def _retention_preview(stores: Stores, raw_days: str) -> dict[str, str | None]:
 
 
 def _retention_form(stores: Stores) -> dict[str, object]:
+    # No preview here: counting old readings can be slow, so the page loads
+    # it afterwards (hx-trigger="load"), and only while retention is on.
     settings = stores.settings.retention()
-    days = str(settings.days)
-    return {
-        "enabled": settings.enabled,
-        "days": days,
-        "preview": _retention_preview(stores, days),
-    }
+    return {"enabled": settings.enabled, "days": str(settings.days), "preview": None}
 
 
 @dataclass(frozen=True)

@@ -410,9 +410,34 @@ def test_panel_preview_count_and_validation(
         "Save retention",
         'hx-get="/panel/settings/retention/preview"',
         'hx-trigger="input changed delay:500ms"',
-        "About 1,234 readings older than 30 days will be deleted after you save.",
     ):
         assert text in page.text, text
+    # Retention is off by default: nothing is counted or loaded.
+    assert "Counting…" not in page.text
+    assert 'hx-trigger="load"' not in page.text
+    assert "will be deleted" not in page.text
+
+
+def test_panel_retention_preview_loads_lazily(
+    signed_in_client: TestClient, fake_host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stores = _stores(fake_host)
+    stores.settings.set_retention(RetentionSettings(enabled=True, days=45))
+
+    def no_count(cutoff: datetime) -> int:
+        raise AssertionError("the page render must not count readings")
+
+    monkeypatch.setattr(stores.readings, "count_older_than", no_count)
+
+    page = signed_in_client.get("/panel/settings")
+
+    assert page.status_code == 200
+    assert "Counting…" in page.text
+    assert (
+        'hx-get="/panel/settings/retention/preview?days=45" hx-trigger="load"'
+        in page.text
+    )
+    assert "will be deleted" not in page.text
 
 
 def test_panel_preview_requires_sign_in(panel_client: TestClient) -> None:

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import logging
+import re
 import socket
 from pathlib import Path
 from typing import Any
