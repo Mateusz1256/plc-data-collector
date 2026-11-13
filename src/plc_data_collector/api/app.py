@@ -133,6 +133,9 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
         login_required_handler,
     )
     from plc_data_collector.panel.auth import CrossSiteRequest, LoginRequired
+    from plc_data_collector.panel.routes_connections import (
+        create_connections_router,
+    )
 
     app.state.panel_web = web
     # SameSite=Strict is the CSRF defence for the Panel's forms.
@@ -149,6 +152,7 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
         name="panel_static",
     )
     app.include_router(create_panel_router(), prefix="/panel")
+    app.include_router(create_connections_router(), prefix="/panel")
     app.add_exception_handler(LoginRequired, login_required_handler)
     app.add_exception_handler(DatabaseNotReady, database_not_ready_handler)
     app.add_exception_handler(CrossSiteRequest, cross_site_request_handler)

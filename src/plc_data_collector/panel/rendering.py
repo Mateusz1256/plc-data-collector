@@ -70,6 +70,42 @@ def format_interval(milliseconds: int | float) -> str:
     return f"{seconds:g} s"
 
 
+def format_age(seconds: float) -> str:
+    """Format how long ago something happened: ``0.4 s``, ``12 s``, ``5 min``."""
+    seconds = max(0.0, seconds)
+    if seconds < 10:
+        return f"{seconds:.1f} s"
+    if seconds < 60:
+        return f"{int(seconds)} s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min"
+    if seconds < 86400:
+        return f"{int(seconds // 3600)} h"
+    return f"{int(seconds // 86400)} d"
+
+
+def plural(count: int, singular: str, plural_form: str | None = None) -> str:
+    """Return ``"1 tag"`` or ``"3 tags"``."""
+    word = singular if count == 1 else (plural_form or f"{singular}s")
+    return f"{count} {word}"
+
+
+FLASH_KEY = "flash"
+
+
+def flash(request: Request, message: str) -> None:
+    """Show ``message`` once, on the next full page this browser loads."""
+    request.session[FLASH_KEY] = message
+
+
+def take_flash(request: Request) -> str | None:
+    """Return and forget the message set by ``flash``, if any."""
+    if "session" not in request.scope:
+        return None
+    message = request.session.pop(FLASH_KEY, None)
+    return message if isinstance(message, str) else None
+
+
 def _build_environment() -> Environment:
     environment = Environment(
         loader=PackageLoader("plc_data_collector.panel", "templates"),
@@ -80,6 +116,8 @@ def _build_environment() -> Environment:
     )
     environment.filters["interval"] = format_interval
     environment.globals["state_badge"] = state_badge
+    environment.globals["take_flash"] = take_flash
+    environment.globals["plural"] = plural
     environment.globals["version"] = get_version()
     return environment
 

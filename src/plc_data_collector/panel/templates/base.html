@@ -33,6 +33,10 @@
 </header>
 {% block banner %}{% endblock %}
 <main class="content{% block content_class %}{% endblock %}">
+{% set flash_message = take_flash(request) %}
+{% if flash_message %}
+<p class="flash" role="status">{{ flash_message }}</p>
+{% endif %}
 {% block main %}
 <h1 class="page-title">{{ title }}</h1>
 {% if message is defined %}

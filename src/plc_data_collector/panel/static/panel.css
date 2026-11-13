@@ -198,3 +198,72 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .login-heading { display: flex; flex-direction: column; gap: 6px; }
 .login-heading h1 { font-size: 26px; line-height: 1.2; }
 .login-heading p { margin: 0; color: var(--ink-muted); }
+
+/* Page heads, flash and shared bits */
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 24px; }
+.page-head-text { flex: 1 1 420px; display: flex; flex-direction: column; gap: 6px; }
+.page-head-stack { display: flex; flex-direction: column; gap: 8px; }
+.breadcrumb { font-size: var(--text-table); color: var(--ink-muted); }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.flash {
+  margin: 0; padding: 10px 12px; font-size: var(--text-table);
+  background: var(--info-band); color: var(--info-band-ink);
+}
+.muted { color: var(--state-disabled-ink); }
+.mono { font-family: var(--font-mono); font-size: var(--text-table); }
+.empty { margin: 0; padding: 24px 16px; color: var(--ink-muted); }
+
+/* Connections list */
+.row-name { font-weight: 600; color: var(--ink); }
+.row-id { margin-top: 2px; color: var(--ink-muted); }
+.tbl td.addr { color: var(--ink-muted); }
+.tbl .actions { text-align: right; }
+.row-failed { background: var(--state-failed-band); }
+.row-failed .row-id, .row-failed .row-detail { color: var(--state-failed-detail); }
+.row-detail { margin-top: 2px; }
+
+/* Add connection picker */
+.add-panel {
+  border-color: var(--action); padding: 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.picker { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px; }
+.picker legend { padding: 0; margin-bottom: 10px; font-size: var(--text-table); font-weight: 600; }
+.picker-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.opt {
+  display: flex; flex-direction: column; gap: 4px; padding: 14px 16px;
+  border: 1px solid var(--field-border); border-radius: var(--radius-control);
+  background: var(--white); cursor: pointer; font-size: var(--text-table); min-height: var(--control-height);
+}
+.opt:has(input:checked) { border: 2px solid var(--action); padding: 13px 15px; }
+.opt-title { display: flex; gap: 8px; align-items: center; font-weight: 600; }
+.opt-title input { accent-color: var(--action); }
+.opt-summary { color: var(--ink-muted); }
+.opt-disabled { cursor: not-allowed; background: var(--surface); }
+.opt-disabled .opt-title { color: var(--state-disabled-ink); }
+.form-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; max-width: 760px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; }
+
+/* Connection settings form */
+.edit-layout { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.form-panel {
+  flex: 1 1 420px; max-width: 520px; padding: 20px;
+  display: flex; flex-direction: column; gap: 18px;
+}
+.field small, .field-help { font-size: var(--text-secondary); font-weight: 400; color: var(--ink-muted); }
+.field-error { font-size: var(--text-secondary); font-weight: 600; color: var(--state-failed); }
+.input[aria-invalid="true"] { border: 2px solid var(--state-failed); }
+.input[readonly], .input:disabled { background: var(--surface-sub); color: var(--ink-muted); }
+.check { display: flex; align-items: center; gap: 10px; min-height: var(--control-height); font-size: var(--text-body); }
+.check input { width: 20px; height: 20px; accent-color: var(--action); }
+.check-small { min-height: 32px; font-size: var(--text-table); font-weight: 400; }
+.form-footer {
+  border-top: 1px solid var(--rule); padding-top: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+}
+.form-footer p { margin: 0; }
+.test-result { margin: 0; padding: 10px 12px; font-size: var(--text-table); line-height: 1.45; background: var(--ground); }
+.confirm-panel { border-color: var(--state-failed); padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.confirm-panel p { margin: 0; }
+.btn-danger-solid { color: var(--white); background: var(--state-failed); border: 0; }
+.btn-danger-solid:hover { color: var(--white); background: var(--state-failed-detail); }
