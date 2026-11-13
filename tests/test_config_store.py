@@ -400,25 +400,26 @@ def test_create_refuses_active_ids(store: ConfigStore) -> None:
     assert existing.protocol_options["username"] == "u"
 
 
-def test_create_refuses_archived_ids(store: ConfigStore) -> None:
+def test_create_restores_archived_ids_with_new_values(store: ConfigStore) -> None:
     _seed(store)
     store.archive_connection("c1")
-    store.create_connection(_connection("c2"))
-    store.create_tag_group(_group("g2", "c2"))
     before = store.revision()
 
-    attempts = (
-        partial(store.create_connection, _connection()),
-        partial(store.create_tag_group, _group("g1", "c2")),
-        partial(store.create_tag, _tag("t1", "g2")),
-    )
-    for attempt in attempts:
-        with pytest.raises(ConfigurationError) as caught:
-            attempt()
-        assert caught.value.code == "archived_id"
+    store.create_connection(_connection(username="new-user"))
 
-    assert store.revision() == before
-    assert store.get_connection("c1") is None
+    restored = store.get_connection("c1")
+    assert restored is not None
+    assert restored.protocol_options == {"username": "new-user"}
+    # Restoring a Connection does not restore its archived children.
+    assert store.get_tag_group("g1") is None
+    assert store.is_archived_tag("t1") is True
+    assert store.revision() == before + 1
+
+    store.create_tag_group(_group())
+    store.create_tag(_tag())
+    config, _ = store.load_active()
+    assert [g.id for g in config.tag_groups] == ["g1"]
+    assert [t.id for t in config.tags] == ["t1"]
 
 
 def test_create_tag_group_needs_active_connection(store: ConfigStore) -> None:

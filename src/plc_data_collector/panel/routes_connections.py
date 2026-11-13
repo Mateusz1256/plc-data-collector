@@ -52,10 +52,6 @@ DELETED_MESSAGE = (
     "from the banner."
 )
 DUPLICATE_ID_ERROR = "A connection with this ID already exists. Choose another ID."
-ARCHIVED_ID_ERROR = (
-    "A deleted connection used this ID. Choose another ID, so its stored "
-    "readings stay separate."
-)
 TEST_RUNNING_MESSAGE = "A test of this connection is already running."
 PICK_PROTOCOL_ERROR = "Choose a protocol that this version supports."
 NOT_FOUND_MESSAGE = "This connection doesn't exist or was deleted."
@@ -153,8 +149,8 @@ def create_connections_router() -> APIRouter:
             )
         try:
             connection = connection_from_form(form, data, existing=None)
-            # Insert-only: the store refuses an ID that is in use or archived,
-            # inside its write transaction, so concurrent creates cannot race.
+            # The store refuses an active ID inside its write transaction, so
+            # concurrent creates cannot race; an archived ID is restored.
             await asyncio.to_thread(stores.config.create_connection, connection)
         except FormErrors as error:
             errors = error.errors
@@ -305,8 +301,6 @@ async def _load_config(stores: Stores) -> CollectorConfig:
 def _store_errors(error: ConfigurationError) -> dict[str, str]:
     if error.code == "duplicate_id":
         return {"id": DUPLICATE_ID_ERROR}
-    if error.code == "archived_id":
-        return {"id": ARCHIVED_ID_ERROR}
     return {"form": error.message}
 
 

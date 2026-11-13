@@ -205,3 +205,25 @@ def test_export_filename() -> None:
     now = datetime(2026, 11, 12, 9, 5, 7, tzinfo=UTC)
 
     assert export_filename(now) == "plc-data-collector-config-20261112-090507.json"
+
+
+@pytest.mark.parametrize(
+    ("section", "field"),
+    [
+        ("connections", "timeout_ms"),
+        ("tag_groups", "interval_ms"),
+        ("tag_groups", "timeout_ms"),
+    ],
+)
+def test_import_refuses_values_beyond_a_database_integer(
+    section: str, field: str
+) -> None:
+    config = _config()
+    exported: dict[str, Any] = export_config(config)
+    exported[section][0][field] = 2_147_483_648
+
+    with pytest.raises(ConfigurationError) as caught:
+        parse_import(json.dumps(exported).encode(), current=config)
+
+    assert caught.value.code == "invalid_configuration"
+    assert "2147483647" in caught.value.message

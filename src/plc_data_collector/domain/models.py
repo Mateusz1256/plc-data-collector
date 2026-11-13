@@ -403,9 +403,15 @@ def _set_optional_stripped(
     object.__setattr__(instance, field_name, stripped or None)
 
 
+# Millisecond fields are stored in 32-bit signed database INTEGER columns.
+MAX_DATABASE_INT = 2_147_483_647
+
+
 def _require_positive_int(value: int, field_name: str) -> None:
     if isinstance(value, bool) or value <= 0:
         raise ConfigurationError(f"{field_name} must be a positive integer.")
+    if value > MAX_DATABASE_INT:
+        raise ConfigurationError(f"{field_name} must be at most {MAX_DATABASE_INT}.")
 
 
 def _require_non_negative_int(value: int, field_name: str) -> None:

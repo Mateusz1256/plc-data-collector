@@ -43,10 +43,6 @@ from plc_data_collector.runtime.connection_worker import WorkerPollResult
 SAVED_FLASH = "Saved changes take effect after you apply them from the banner."
 ID_ERROR = "Use letters, digits, dot, dash or underscore (up to 128)."
 TIMEOUT_ERROR = "Enter a whole number of milliseconds from 1 to 600000."
-ARCHIVED_ID_ERROR = (
-    "A deleted connection used this ID. Choose another ID, so its stored "
-    "readings stay separate."
-)
 PASSWORD = "s3cret-Pa55word"
 NOW = datetime.now(UTC)
 
@@ -441,21 +437,29 @@ def test_create_with_unavailable_protocol_is_refused(
     assert _stores(fake_host).config.load_active()[0].connections == ()
 
 
-def test_create_refuses_archived_id(
+def test_create_after_delete_restores_the_id(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
     stores = _stores(fake_host)
-    stores.config.upsert_connection(_opcua("line1_opcua", name="Old"))
-    stores.config.archive_connection("line1_opcua")
-    before = stores.config.revision()
-
-    response = signed_in_client.post("/panel/connections", data=_create_form())
-
-    assert response.status_code == 400
-    assert ARCHIVED_ID_ERROR in response.text.replace("&#39;", "'")
-    assert 'aria-invalid="true"' in response.text
+    assert (
+        signed_in_client.post("/panel/connections", data=_create_form()).status_code
+        == 303
+    )
+    _add_group_with_tags(stores, "line1_opcua", "fast", 1)
+    deleted = signed_in_client.post("/panel/connections/line1_opcua/delete")
+    assert deleted.status_code == 303
     assert stores.config.get_connection("line1_opcua") is None
-    assert stores.config.revision() == before
+
+    response = signed_in_client.post(
+        "/panel/connections", data=_create_form(name="Line 1 again", password="")
+    )
+
+    assert response.status_code == 303, response.text
+    restored = stores.config.get_connection("line1_opcua")
+    assert restored is not None
+    assert restored.name == "Line 1 again"
+    assert "password" not in restored.protocol_options
+    assert stores.config.get_tag_group("fast") is None
 
 
 def test_create_maps_store_duplicate_to_field_error(
