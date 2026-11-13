@@ -95,8 +95,8 @@
       "copyright_notice": "See package license files.",
       "license": "Apache-2.0 OR BSD-3-Clause",
       "name": "cryptography",
-      "notes": "installed transitively by asyncua and pyOpenSSL. License verified from package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.",
-      "purpose": "transitive asyncua dependency for certificate and encryption support",
+      "notes": "declared directly as a runtime dependency; also installed by asyncua and pyOpenSSL. License verified from package metadata field `License-Expression: Apache-2.0 OR BSD-3-Clause`.",
+      "purpose": "Fernet encryption of Connection secrets at rest; also used by asyncua for certificate and encryption support",
       "source": "https://pypi.org/project/cryptography/50.0.2/",
       "version": "50.0.2"
     },
@@ -142,6 +142,26 @@
     },
     {
       "bundled_in_distribution": true,
+      "copyright_notice": "Copyright 2011 Pallets. See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "itsdangerous",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata classifier `License :: OSI Approved :: BSD License` and the bundled `LICENSE.txt` (BSD 3-Clause text).",
+      "purpose": "signs the Panel session cookie (used by Starlette's session middleware)",
+      "source": "https://pypi.org/project/itsdangerous/2.2.0/",
+      "version": "2.2.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "Copyright 2007 Pallets. See package license file.",
+      "license": "BSD-3-Clause",
+      "name": "Jinja2",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata classifier `License :: OSI Approved :: BSD License` and the bundled `LICENSE.txt` (BSD 3-Clause text).",
+      "purpose": "HTML templates for the Panel",
+      "source": "https://pypi.org/project/Jinja2/3.1.6/",
+      "version": "3.1.6"
+    },
+    {
+      "bundled_in_distribution": true,
       "copyright_notice": "See package license file.",
       "license": "MIT",
       "name": "Mako",
@@ -155,8 +175,8 @@
       "copyright_notice": "See package license file.",
       "license": "BSD-3-Clause",
       "name": "MarkupSafe",
-      "notes": "installed transitively by Mako. License verified from package metadata field `License-Expression: BSD-3-Clause`.",
-      "purpose": "transitive Mako dependency for safe markup handling",
+      "notes": "installed transitively by Mako and Jinja2. License verified from package metadata field `License-Expression: BSD-3-Clause`.",
+      "purpose": "transitive Mako and Jinja2 dependency for safe markup handling",
       "source": "https://pypi.org/project/MarkupSafe/3.0.4/",
       "version": "3.0.4"
     },
@@ -219,6 +239,16 @@
       "purpose": "transitive asyncua dependency for date and time handling",
       "source": "https://pypi.org/project/python-dateutil/4.0.0/",
       "version": "4.0.0"
+    },
+    {
+      "bundled_in_distribution": true,
+      "copyright_notice": "See package license file.",
+      "license": "Apache-2.0",
+      "name": "python-multipart",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: Apache-2.0`.",
+      "purpose": "parses the Panel's HTML form submissions (FastAPI `Form`)",
+      "source": "https://pypi.org/project/python-multipart/0.0.33/",
+      "version": "0.0.33"
     },
     {
       "bundled_in_distribution": true,

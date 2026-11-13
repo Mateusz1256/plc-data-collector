@@ -7,6 +7,78 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-13
+
+### Added
+
+- Panel at `/panel`, a password-protected web UI (FastAPI, Jinja and htmx).
+  Sign-in uses `PLC_DATA_COLLECTOR_ADMIN_PASSWORD`; when it is unset, the
+  Panel is off. Pages: Live (current value, quality, update time and
+  freshness of every Tag, refreshed every second), Connections with "Test
+  connection", Tag Groups and Tags, and Settings. `/` redirects to the Live
+  page.
+- Configuration stored in the database (Connections, Tag Groups and Tags),
+  with a revision that the pending-changes banner compares with the running
+  configuration. ADR 0001 records the decision.
+- "Apply changes": `RuntimeSupervisor` stops the running collection, drains
+  the Reading Queue into the database or the Spool, and starts a new runtime
+  from the saved configuration while the web server keeps serving.
+- Configuration export and import as JSON in Settings. Import shows what will
+  be added, changed and removed before it replaces the configuration.
+- Removed Connections, Tag Groups and Tags are archived (`archived_at`), so
+  their stored readings stay; creating an item with an archived ID restores it.
+  ADR 0002 records the decision.
+- Connection secrets encrypted with Fernet in `connections.secret_options`,
+  with the key from `PLC_DATA_COLLECTOR_SECRET_KEY` or generated once into
+  `secret.key` in the data directory.
+- Read-only data API at `/api/v1`: `/tags`, `/tags/{tag_id}` with current
+  values from an in-memory live value cache, and `/tags/{tag_id}/history`
+  with a time range and a limit.
+- Per-application API keys, created and revoked in Settings, sent in the
+  `X-API-Key` header. A key is shown once; only its SHA-256 hash and prefix
+  are stored, and the last use is recorded.
+- Global retention in Settings (off by default, 1 to 3650 days) that deletes
+  old `tag_readings` and `poll_executions` in batches, hourly and right after
+  the setting is saved.
+- Migration 0003: configuration columns, `app_settings`, `api_keys`, and
+  indexes on `tag_readings` (`received_at`; `tag_id, received_at`) and
+  `poll_executions` (`started_at`).
+- `docs/database-schema.md`, the documented contract for SQL consumers, and
+  a Grafana example in the README.
+- The Docker smoke test signs in to the Panel, creates an API key and reads
+  `/api/v1`.
+
+### Changed
+
+- **Breaking:** the JSON config file is now only imported when the database
+  has no configuration; edit configuration in the Panel or import a file.
+  Environment overrides of Connection fields
+  (`PLC_DATA_COLLECTOR_CONNECTIONS__<ID>__<FIELD>`) apply only to that
+  import.
+- `RuntimeSettings.config_file` is optional, and so are
+  `PLC_DATA_COLLECTOR_CONFIG` and `--config`.
+- A 0.2.0 database is not re-seeded from the file. On first start its
+  plaintext protocol secrets move to the encrypted `secret_options` column,
+  and, when the config file is set and valid, the file becomes the active
+  configuration once: items 0.2.0 kept after they were removed from the file
+  are archived (`configuration_upgrade_reconciled`). Without a valid file
+  nothing changes and `configuration_upgrade_unreconciled` is logged.
+- A failed "Apply changes" restarts collection with the previous
+  configuration and its revision; the banner says the changes could not be
+  applied. Collection stops only when that fallback fails too.
+- Import confirmation uses a single-use server-side token (15 minutes) instead
+  of sending the file back from the review page, and is refused when the
+  configuration changed after the review.
+- Endpoint URL credentials (`user:password@`) are left out of exports, kept
+  on import when the stored endpoint matches, and moved into the user name and
+  encrypted password of OPC UA Connections at startup.
+- The demo stack passes `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` and
+  `PLC_DATA_COLLECTOR_SECRET_KEY` to the collector; `.env.example` documents
+  both.
+- New direct runtime dependencies: `cryptography` (already installed through
+  `asyncua`), `jinja2`, `python-multipart` and `itsdangerous`, plus vendored
+  htmx 2.0.11, all listed in `THIRD_PARTY_NOTICES.md`.
+
 ## [0.2.0] - 2026-11-12
 
 ### Added

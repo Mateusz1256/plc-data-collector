@@ -157,10 +157,12 @@ class ConnectionConfig:
     enabled: bool = True
     timeout_ms: int = 3000
     protocol_options: Mapping[str, object] = field(default_factory=dict)
+    name: str = ""
 
     def __post_init__(self) -> None:
         """Validate connection invariants."""
         _set_stripped(self, "id", self.id)
+        object.__setattr__(self, "name", self.name.strip() or self.id)
         _set_stripped(self, "protocol", self.protocol)
         _set_stripped(self, "endpoint", self.endpoint)
         _require_positive_int(self.timeout_ms, "timeout_ms")
@@ -401,9 +403,15 @@ def _set_optional_stripped(
     object.__setattr__(instance, field_name, stripped or None)
 
 
+# Millisecond fields are stored in 32-bit signed database INTEGER columns.
+MAX_DATABASE_INT = 2_147_483_647
+
+
 def _require_positive_int(value: int, field_name: str) -> None:
     if isinstance(value, bool) or value <= 0:
         raise ConfigurationError(f"{field_name} must be a positive integer.")
+    if value > MAX_DATABASE_INT:
+        raise ConfigurationError(f"{field_name} must be at most {MAX_DATABASE_INT}.")
 
 
 def _require_non_negative_int(value: int, field_name: str) -> None:

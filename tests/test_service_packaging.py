@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import socket
 from pathlib import Path
 from typing import Any
@@ -183,10 +184,12 @@ def test_main_runs_service_with_configurable_paths(
 
 
 @pytest.mark.asyncio
-async def test_service_host_exits_1_without_config(
+async def test_service_host_starts_without_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Without a seed file the service starts with an empty configuration;
+    # configuration is added through the Panel.
     paths = ServicePaths.from_values(
         data_dir=tmp_path / "data",
         log_dir=tmp_path / "logs",
@@ -199,17 +202,32 @@ async def test_service_host_exits_1_without_config(
     )
     # Tests that run Alembic with alembic.ini call fileConfig(), which disables
     # loggers that already exist in this test process.
-    monkeypatch.setattr(
-        logging.getLogger("plc_data_collector.app.service"), "disabled", False
-    )
-
-    exit_code = await run_service_until_stopped(
-        paths=paths, log_level="INFO", environ={}
-    )
-
-    assert exit_code == 1
+    for name in ("plc_data_collector.app.service", "plc_data_collector.app.supervisor"):
+        monkeypatch.setattr(logging.getLogger(name), "disabled", False)
+    stop_event = asyncio.Event()
     assert paths.log_file is not None
-    assert "config_file_required" in paths.log_file.read_text(encoding="utf-8")
+    log_file = paths.log_file
+
+    task = asyncio.create_task(
+        run_service_until_stopped(
+            paths=paths,
+            log_level="INFO",
+            stop_event=stop_event,
+            environ={"PLC_DATA_COLLECTOR_API_PORT": str(free_port())},
+        )
+    )
+    await wait_until(
+        lambda: (
+            log_file.exists()
+            and "configuration_empty" in log_file.read_text(encoding="utf-8")
+        ),
+        timeout_s=10.0,
+    )
+    stop_event.set()
+    exit_code = await asyncio.wait_for(task, timeout=15.0)
+
+    assert exit_code == 0
+    assert "service_start_failed" not in log_file.read_text(encoding="utf-8")
     assert paths.pid_file is not None
     assert not paths.pid_file.exists()
 
@@ -251,3 +269,11 @@ async def wait_until(condition: object, *, timeout_s: float = 1.0) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("condition was not reached before timeout")
+
+
+def test_compose_publishes_the_collector_on_loopback_only() -> None:
+    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    published = re.findall(r'^\s+- "([^"]*:8080)"', compose, re.MULTILINE)
+    assert published == ["127.0.0.1:${COLLECTOR_API_PORT:-8080}:8080"]

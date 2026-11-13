@@ -1,5 +1,11 @@
 """Persistence adapters for relational storage."""
 
+from plc_data_collector.persistence.api_keys import ApiKeyInfo, ApiKeyStore
+from plc_data_collector.persistence.app_settings import (
+    AppSettingsStore,
+    RetentionSettings,
+)
+from plc_data_collector.persistence.config_store import ConfigStore
 from plc_data_collector.persistence.database import (
     create_database_engine,
     create_sqlite_engine,
@@ -7,9 +13,12 @@ from plc_data_collector.persistence.database import (
     wait_for_database,
 )
 from plc_data_collector.persistence.migrate import run_migrations
+from plc_data_collector.persistence.reading_queries import (
+    ReadingQueryRepository,
+    TagReadingRow,
+)
 from plc_data_collector.persistence.records import TagReadingRecord
 from plc_data_collector.persistence.repositories import (
-    ConfigurationRepository,
     ReadingRepository,
     RuntimeStatusRepository,
 )
@@ -26,16 +35,22 @@ from plc_data_collector.persistence.writer import (
 )
 
 __all__ = [
-    "ConfigurationRepository",
+    "ApiKeyInfo",
+    "ApiKeyStore",
+    "AppSettingsStore",
+    "ConfigStore",
     "DatabaseWriter",
     "DatabaseWriterMetrics",
     "DatabaseWriterShutdown",
     "DurableSqliteSpool",
+    "ReadingQueryRepository",
     "ReadingRepository",
+    "RetentionSettings",
     "RuntimeStatusRepository",
     "SpoolEntry",
     "SpoolMetrics",
     "TagReadingRecord",
+    "TagReadingRow",
     "create_database_engine",
     "create_sqlite_engine",
     "initialize_schema",

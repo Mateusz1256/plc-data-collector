@@ -7,11 +7,12 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from typing import Any, Literal, Self
+from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from plc_data_collector.app.secrets import is_sensitive_key
 from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
@@ -22,14 +23,6 @@ from plc_data_collector.domain import (
 )
 
 ENV_PREFIX = "PLC_DATA_COLLECTOR_"
-_SENSITIVE_KEY_FRAGMENTS = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "key",
-    "credential",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +71,7 @@ class ConnectionConfigModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: str = Field(min_length=1)
+    name: str | None = None
     protocol: str = Field(min_length=1)
     endpoint: str = Field(min_length=1)
     enabled: bool = True
@@ -117,6 +111,7 @@ class CollectorConfigModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    format_version: Literal[1] = 1
     connections: list[ConnectionConfigModel] = Field(min_length=1)
     tag_groups: list[TagGroupConfigModel] = Field(min_length=1)
     tags: list[TagConfigModel] = Field(min_length=1)
@@ -151,6 +146,7 @@ class CollectorConfigModel(BaseModel):
                 connections=tuple(
                     ConnectionConfig(
                         id=connection.id,
+                        name=connection.name or "",
                         protocol=connection.protocol,
                         endpoint=connection.endpoint,
                         enabled=connection.enabled,
@@ -199,9 +195,13 @@ def load_collector_config(
     """Load a JSON collector configuration file and apply environment overrides."""
     raw_config = _read_json_object(Path(path))
     _apply_environment_overrides(raw_config, os.environ if environ is None else environ)
+    return parse_collector_config(raw_config)
 
+
+def parse_collector_config(raw: Mapping[str, object]) -> CollectorConfig:
+    """Validate a raw configuration mapping (file contents or an import)."""
     try:
-        model = CollectorConfigModel.model_validate(raw_config)
+        model = CollectorConfigModel.model_validate(raw)
     except ValidationError as error:
         raise ConfigurationError(
             _format_validation_error(error),
@@ -344,6 +344,7 @@ def _format_validation_error(error: ValidationError) -> str:
 def _connection_for_logging(connection: ConnectionConfig) -> dict[str, object]:
     return {
         "id": connection.id,
+        "name": connection.name,
         "protocol": connection.protocol,
         "endpoint": _mask_endpoint(connection.endpoint),
         "enabled": connection.enabled,
@@ -355,7 +356,7 @@ def _connection_for_logging(connection: ConnectionConfig) -> dict[str, object]:
 def _mask_mapping(mapping: Mapping[str, object]) -> dict[str, object]:
     masked: dict[str, object] = {}
     for key, value in mapping.items():
-        if _is_sensitive_key(key):
+        if is_sensitive_key(key):
             masked[key] = "***"
         elif isinstance(value, Mapping):
             masked[key] = _mask_mapping(value)
@@ -374,12 +375,43 @@ def _mask_sequence_item(value: object) -> object:
     return value
 
 
-def _is_sensitive_key(key: str) -> bool:
-    normalized = key.lower()
-    return any(fragment in normalized for fragment in _SENSITIVE_KEY_FRAGMENTS)
-
-
 def _mask_endpoint(endpoint: str) -> str:
+    return _replace_userinfo(endpoint, "***@")
+
+
+def strip_endpoint_userinfo(endpoint: str) -> str:
+    """Return ``endpoint`` without its ``user:password@`` part.
+
+    An endpoint that cannot be parsed loses everything up to the last ``@``
+    of its authority, so credentials never survive in the result.
+    """
+    try:
+        return _replace_userinfo(endpoint, "")
+    except ValueError:
+        scheme, separator, rest = endpoint.partition("://")
+        authority, slash, path = rest.partition("/")
+        if not separator or "@" not in authority:
+            return endpoint
+        return f"{scheme}://{authority.rsplit('@', 1)[1]}{slash}{path}"
+
+
+def endpoint_userinfo(endpoint: str) -> tuple[str | None, str | None]:
+    """Return the decoded user name and password in ``endpoint``, if any."""
+    try:
+        split = urlsplit(endpoint)
+    except ValueError:
+        return None, None
+    if "@" not in split.netloc:
+        return None, None
+    userinfo = split.netloc.rsplit("@", 1)[0]
+    user, has_password, password = userinfo.partition(":")
+    return (
+        unquote(user) or None,
+        unquote(password) if has_password and password else None,
+    )
+
+
+def _replace_userinfo(endpoint: str, replacement: str) -> str:
     split = urlsplit(endpoint)
     if "@" not in split.netloc:
         return endpoint
@@ -387,7 +419,7 @@ def _mask_endpoint(endpoint: str) -> str:
     return urlunsplit(
         SplitResult(
             scheme=split.scheme,
-            netloc=f"***@{host}",
+            netloc=f"{replacement}{host}",
             path=split.path,
             query=split.query,
             fragment=split.fragment,

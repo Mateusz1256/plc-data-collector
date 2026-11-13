@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ title | default("Panel") }}{% endblock %} · PLC Data Collector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap">
+<link rel="stylesheet" href="/panel/static/panel.css?v={{ version }}">
+<script src="/panel/static/htmx.min.js?v={{ version }}" defer></script>
+{# The Live body replaces itself every second, so outerHTML is the default swap. #}
+<meta name="htmx-config" content='{"defaultSwapStyle":"outerHTML"}'>
+</head>
+<body>
+{% block page %}
+<div class="page">
+<header class="site-header">
+<div class="site-header-inner">
+<a class="brand" href="/panel/live">PLC Data Collector</a>
+{% if show_nav %}
+<nav class="site-nav" aria-label="Main">
+{% for key, label in (("live", "Live"), ("connections", "Connections"), ("settings", "Settings")) %}
+<a href="/panel/{{ key }}"{% if nav == key %} aria-current="page"{% endif %}>{{ label }}</a>
+{% endfor %}
+</nav>
+<div class="site-user">
+<span>admin</span>
+<form method="post" action="/panel/sign-out">
+<button type="submit" class="link-button">Sign out</button>
+</form>
+</div>
+{% endif %}
+</div>
+</header>
+{% block banner %}{% include "_banner.html" %}{% endblock %}
+<main class="content{% block content_class %}{% endblock %}">
+{% set flash_message = take_flash(request) %}
+{% if flash_message %}
+<p class="flash" role="status">{{ flash_message }}</p>
+{% endif %}
+{% block main %}
+<h1 class="page-title">{{ title }}</h1>
+{% if message is defined %}
+<p class="lead">{{ message }}</p>
+{% endif %}
+{% endblock %}
+</main>
+</div>
+{% endblock %}
+</body>
+</html>

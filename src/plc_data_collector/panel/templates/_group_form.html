@@ -1,0 +1,39 @@
+{% from "_protocol_fields.html" import field_error %}
+{% set errors = ui.errors %}
+{% set values = ui.values %}
+<form class="inline-form" method="post" action="{{ '/panel/groups/' ~ ui.target_id if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/groups' }}" aria-label="{{ 'Edit tag group' if ui.mode == 'edit' else 'New tag group' }}" novalidate>
+<h3>{{ "Edit tag group" if ui.mode == "edit" else "New tag group" }}</h3>
+{% if errors.get("form") %}<p class="alert alert-failed" role="alert">{{ errors.form }}</p>{% endif %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="group-id">ID</label>
+{% if ui.mode == "edit" %}
+<input class="input mono" type="text" id="group-id" value="{{ ui.target_id }}" readonly>
+{% else %}
+<input class="input mono" type="text" name="id" id="group-id" value="{{ values.get('id', '') }}" required spellcheck="false" autocapitalize="off"{% if errors.get('id') %} aria-invalid="true" aria-describedby="field-id-error"{% endif %}>
+{{ field_error("id", errors) }}
+{% endif %}
+</div>
+<div class="field">
+<label for="group-interval">Read every (ms)</label>
+<input class="input mono" type="text" inputmode="numeric" name="interval_ms" id="group-interval" value="{{ values.get('interval_ms', '') }}"{% if errors.get('interval_ms') %} aria-invalid="true" aria-describedby="field-interval_ms-error"{% endif %}>
+{{ field_error("interval_ms", errors) }}
+</div>
+<div class="field">
+<label for="group-timeout">Timeout (ms)</label>
+<input class="input mono" type="text" inputmode="numeric" name="timeout_ms" id="group-timeout" value="{{ values.get('timeout_ms', '') }}"{% if errors.get('timeout_ms') %} aria-invalid="true" aria-describedby="field-timeout_ms-error"{% endif %}>
+{{ field_error("timeout_ms", errors) }}
+</div>
+</div>
+<label class="check"><input type="checkbox" name="enabled"{% if values.get('enabled') %} checked{% endif %}>Read this tag group</label>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Save tag group</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+</form>
+{% if ui.mode == "edit" %}
+<form class="inline-form-delete" method="post" action="/panel/groups/{{ ui.target_id }}/delete">
+<p class="secondary">Deleting this tag group also deletes its {{ plural(tag_count, "tag") }}. Stored readings are kept.</p>
+<button type="submit" class="btn btn-danger">Delete tag group</button>
+</form>
+{% endif %}

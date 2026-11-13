@@ -5,117 +5,23 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from sqlalchemy import Connection, Engine, func, select
-from sqlalchemy.dialects.postgresql import dml as postgresql_dml
-from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.dialects.sqlite import dml as sqlite_dml
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import CursorResult
-from sqlalchemy.sql.schema import Table
 
 from plc_data_collector.domain import (
-    ConnectionConfig,
     PollExecution,
     RuntimeComponentStatus,
     StorageError,
-    TagConfig,
-    TagGroupConfig,
     TagValue,
 )
 from plc_data_collector.persistence.records import TagReadingRecord
 from plc_data_collector.persistence.schema import (
-    connections,
     poll_executions,
     runtime_components,
-    tag_groups,
     tag_readings,
     tags,
 )
+from plc_data_collector.persistence.sql import insert_for as _insert
 from plc_data_collector.runtime import WorkerPollResult
-
-
-class ConfigurationRepository:
-    """Repository for persisted configuration tables."""
-
-    def __init__(self, engine: Engine) -> None:
-        """Create a configuration repository."""
-        self._engine = engine
-
-    def upsert_connections(self, configs: Iterable[ConnectionConfig]) -> None:
-        """Insert or update connection configurations."""
-        with self._engine.begin() as connection:
-            for config in configs:
-                statement = _insert(connection, connections).values(
-                    id=config.id,
-                    protocol=config.protocol,
-                    endpoint=config.endpoint,
-                    enabled=config.enabled,
-                    timeout_ms=config.timeout_ms,
-                    protocol_options=dict(config.protocol_options),
-                )
-                connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=[connections.c.id],
-                        set_={
-                            "protocol": statement.excluded.protocol,
-                            "endpoint": statement.excluded.endpoint,
-                            "enabled": statement.excluded.enabled,
-                            "timeout_ms": statement.excluded.timeout_ms,
-                            "protocol_options": statement.excluded.protocol_options,
-                        },
-                    )
-                )
-
-    def upsert_tag_groups(self, configs: Iterable[TagGroupConfig]) -> None:
-        """Insert or update tag group configurations."""
-        with self._engine.begin() as connection:
-            for config in configs:
-                statement = _insert(connection, tag_groups).values(
-                    id=config.id,
-                    connection_id=config.connection_id,
-                    interval_ms=config.interval_ms,
-                    timeout_ms=config.timeout_ms,
-                    overlap_policy=config.overlap_policy.value,
-                    enabled=config.enabled,
-                )
-                connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=[tag_groups.c.id],
-                        set_={
-                            "connection_id": statement.excluded.connection_id,
-                            "interval_ms": statement.excluded.interval_ms,
-                            "timeout_ms": statement.excluded.timeout_ms,
-                            "overlap_policy": statement.excluded.overlap_policy,
-                            "enabled": statement.excluded.enabled,
-                        },
-                    )
-                )
-
-    def upsert_tags(self, configs: Iterable[TagConfig]) -> None:
-        """Insert or update tag configurations."""
-        with self._engine.begin() as connection:
-            for config in configs:
-                statement = _insert(connection, tags).values(
-                    id=config.id,
-                    tag_group_id=config.tag_group_id,
-                    name=config.name,
-                    address=config.address,
-                    value_type=config.value_type.value,
-                    enabled=config.enabled,
-                    metadata_json=dict(config.metadata),
-                )
-                connection.execute(
-                    statement.on_conflict_do_update(
-                        index_elements=[tags.c.id],
-                        set_={
-                            "tag_group_id": statement.excluded.tag_group_id,
-                            "name": statement.excluded.name,
-                            "address": statement.excluded.address,
-                            "value_type": statement.excluded.value_type,
-                            "enabled": statement.excluded.enabled,
-                            "metadata_json": statement.excluded.metadata_json,
-                        },
-                    )
-                )
 
 
 class ReadingRepository:
@@ -202,15 +108,6 @@ class RuntimeStatusRepository:
                     },
                 )
             )
-
-
-def _insert(
-    connection: Connection, table: Table
-) -> sqlite_dml.Insert | postgresql_dml.Insert:
-    # SQLite and PostgreSQL expose the same ON CONFLICT API on separate classes.
-    if connection.dialect.name == "postgresql":
-        return postgresql_insert(table)
-    return sqlite_insert(table)
 
 
 def _reading_values(

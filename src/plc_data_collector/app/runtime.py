@@ -1,4 +1,4 @@
-"""Composition root that wires configuration, workers and storage together."""
+"""Collector runtime: wires a configuration's workers and storage together."""
 
 from __future__ import annotations
 
@@ -8,10 +8,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import Engine
-from sqlalchemy.engine import make_url
 
 from plc_data_collector.api.state import RuntimeApiState
-from plc_data_collector.app.config import CollectorConfig, load_collector_config
+from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.domain import (
     CollectorError,
@@ -20,13 +19,9 @@ from plc_data_collector.domain import (
     TagGroupConfig,
 )
 from plc_data_collector.persistence import (
-    ConfigurationRepository,
     DatabaseWriter,
     DurableSqliteSpool,
     ReadingRepository,
-    create_database_engine,
-    run_migrations,
-    wait_for_database,
 )
 from plc_data_collector.persistence.writer import PollResultRepository
 from plc_data_collector.protocols import DriverRegistry, default_driver_registry
@@ -36,10 +31,10 @@ from plc_data_collector.runtime import (
     ReadingQueue,
     WorkerPollResult,
 )
+from plc_data_collector.runtime.live_values import LiveValueCache
 
 LOGGER = logging.getLogger(__name__)
 RepositoryFactory = Callable[[Engine], PollResultRepository]
-DATABASE_PROBE_INTERVAL_S = 1.0
 
 
 class _StoppableRepository:
@@ -69,23 +64,32 @@ class _ScheduledGroup:
 
 
 class CollectorRuntime:
-    """Run the collector: poll enabled Tag Groups and store their Poll Results."""
+    """Run the collector: poll enabled Tag Groups and store their Poll Results.
+
+    The runtime receives a migrated database engine and a configuration; it
+    does not own either. The ``RuntimeSupervisor`` prepares the database,
+    loads the configuration and replaces the runtime on "Apply changes".
+    """
 
     def __init__(
         self,
         settings: RuntimeSettings,
+        engine: Engine,
+        config: CollectorConfig,
         *,
         registry: DriverRegistry | None = None,
         repository_factory: RepositoryFactory | None = None,
+        live_values: LiveValueCache | None = None,
     ) -> None:
         """Create a runtime; nothing connects until ``start()``."""
         self._settings = settings
+        self._engine = engine
+        self._config = config
         self._registry = registry or default_driver_registry()
         self._repository_factory: RepositoryFactory = (
             repository_factory or ReadingRepository
         )
-        self._engine: Engine | None = None
-        self._config: CollectorConfig | None = None
+        self._live_values = live_values if live_values is not None else LiveValueCache()
         self._workers: tuple[ConnectionWorker, ...] = ()
         self._schedule: dict[str, _ScheduledGroup] = {}
         self._queue: ReadingQueue | None = None
@@ -103,7 +107,7 @@ class CollectorRuntime:
         self._stopped = asyncio.Event()
 
     async def start(self) -> None:
-        """Prepare the database and configuration, then start polling.
+        """Connect the workers and start polling and writing.
 
         A failure leaves nothing running: every resource created so far is
         released before the error propagates.
@@ -112,14 +116,6 @@ class CollectorRuntime:
             raise RuntimeError("CollectorRuntime can only be started once.")
         self._phase = "starting"
         settings = self._settings
-        LOGGER.info(
-            "runtime_starting",
-            extra={
-                "database_url": _mask_database_url(settings.database_url),
-                "config_file": str(settings.config_file),
-                "data_dir": str(settings.data_dir),
-            },
-        )
         # The startup steps run in their own task so stop() can cancel them
         # without cancelling the caller of start().
         self._startup_task = asyncio.create_task(
@@ -136,13 +132,15 @@ class CollectorRuntime:
                 and isinstance(error, asyncio.CancelledError)
                 and not (current is not None and current.cancelling())
             )
-            if aborted:
+            # A cancelled caller (the supervisor stopping during start) is a
+            # clean abort too, not a failure, so every cancellation logs this.
+            if isinstance(error, asyncio.CancelledError):
                 LOGGER.info("runtime_start_aborted")
             else:
                 LOGGER.error(
                     "runtime_start_failed",
                     extra={
-                        "error_code": _error_code(error),
+                        "error_code": error_code(error),
                         "error_type": type(error).__name__,
                     },
                 )
@@ -167,11 +165,7 @@ class CollectorRuntime:
         )
 
     async def _startup(self) -> None:
-        await self._prepare_database()
-        config = load_collector_config(self._settings.config_file)
-        await asyncio.to_thread(self._upsert_configuration, config)
-        self._config = config
-        self._build_components(config)
+        self._build_components(self._config)
         await self._connect_workers()
         self._start_tasks()
 
@@ -201,7 +195,7 @@ class CollectorRuntime:
         """Return a fresh snapshot of the runtime for the API."""
         writer_metrics = None if self._writer is None else self._writer.metrics()
         return RuntimeApiState(
-            configuration_loaded=self._config is not None,
+            configuration_loaded=self._phase != "idle",
             storage_available=(
                 writer_metrics is not None and writer_metrics.last_error is None
             ),
@@ -212,56 +206,7 @@ class CollectorRuntime:
             spool_metrics=None if self._spool is None else self._spool.metrics(),
         )
 
-    async def _prepare_database(self) -> None:
-        settings = self._settings
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
-        self._engine = create_database_engine(settings.database_url)
-        await self._wait_for_database(self._engine)
-        try:
-            await asyncio.to_thread(run_migrations, settings.database_url)
-        except Exception as error:
-            # Alembic and SQLAlchemy errors may quote the database URL, so only
-            # the error type leaves this block.
-            raise StorageError(
-                "Database migration failed.",
-                code="database_migration_failed",
-                details={"error_type": type(error).__name__},
-            ) from None
-
-    async def _wait_for_database(self, engine: Engine) -> None:
-        """Probe the database until it answers or the wait timeout expires.
-
-        Each probe is a single attempt in a thread, and the waiting happens on
-        the event loop, so stop() can abort the wait between probes.
-        """
-        timeout_s = self._settings.database_wait_timeout_s
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_s
-        while True:
-            try:
-                await asyncio.to_thread(wait_for_database, engine, timeout_s=0)
-                return
-            except StorageError as error:
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    raise StorageError(
-                        f"Database did not become available within {timeout_s:g}s.",
-                        code="database_unavailable",
-                        details=error.details,
-                    ) from None
-            await asyncio.sleep(min(DATABASE_PROBE_INTERVAL_S, remaining))
-
-    def _upsert_configuration(self, config: CollectorConfig) -> None:
-        if self._engine is None:
-            raise RuntimeError("Database engine is not created.")
-        repository = ConfigurationRepository(self._engine)
-        repository.upsert_connections(config.connections)
-        repository.upsert_tag_groups(config.tag_groups)
-        repository.upsert_tags(config.tags)
-
     def _build_components(self, config: CollectorConfig) -> None:
-        if self._engine is None:
-            raise RuntimeError("Database engine is not created.")
         settings = self._settings
         groups_by_connection = _enabled_groups_with_tags(config)
         workers: list[ConnectionWorker] = []
@@ -315,7 +260,7 @@ class CollectorRuntime:
                     "runtime_connection_unavailable",
                     extra={
                         "connection_id": worker.connection.id,
-                        "error_code": _error_code(result),
+                        "error_code": error_code(result),
                     },
                 )
 
@@ -334,6 +279,7 @@ class CollectorRuntime:
             raise RuntimeError("Reading Queue is not created.")
         scheduled = self._schedule[group.id]
         result = await scheduled.worker.poll_group(group, scheduled.tags)
+        self._live_values.update(result)
         await self._queue.put(result)
 
     async def _release(self, *, timeout_s: float) -> None:
@@ -345,8 +291,6 @@ class CollectorRuntime:
             await self._stop_scheduler()
             await self._stop_writer(deadline)
             await self._disconnect_workers()
-            if self._engine is not None:
-                self._engine.dispose()
         finally:
             self._phase = "stopped"
             self._stopped.set()
@@ -405,7 +349,7 @@ class CollectorRuntime:
                 "runtime_queue_spool_failed",
                 extra={
                     "poll_results": len(remaining),
-                    "error_code": _error_code(error),
+                    "error_code": error_code(error),
                 },
             )
         else:
@@ -422,7 +366,7 @@ class CollectorRuntime:
                     "runtime_disconnect_failed",
                     extra={
                         "connection_id": worker.connection.id,
-                        "error_code": _error_code(error),
+                        "error_code": error_code(error),
                     },
                 )
 
@@ -443,14 +387,8 @@ def _enabled_groups_with_tags(
     return groups
 
 
-def _mask_database_url(database_url: str) -> str:
-    try:
-        return make_url(database_url).render_as_string(hide_password=True)
-    except Exception:
-        return "<invalid database URL>"
-
-
-def _error_code(error: BaseException) -> str:
+def error_code(error: BaseException) -> str:
+    """Return the error code of a CollectorError, else the exception type name."""
     if isinstance(error, CollectorError) and error.code:
         return error.code
     return type(error).__name__

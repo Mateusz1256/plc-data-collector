@@ -193,3 +193,20 @@ def test_scheduler_ignores_disabled_groups() -> None:
 
 async def _unused_handler(_: TagGroupConfig) -> None:
     return None
+
+
+async def test_scheduler_with_no_groups_idles_without_spinning() -> None:
+    # An empty configuration (no Tag Groups) must not busy-loop or crash.
+    clock = ManualClock()
+
+    async def handler(_: TagGroupConfig) -> None:
+        raise AssertionError("no group should be polled")
+
+    sleeper = AdvancingSleeper(clock, stop_after=3)
+    scheduler = PollScheduler([], handler, clock=clock, sleep=sleeper)
+    sleeper.stop = scheduler.stop
+
+    await scheduler.run()
+
+    assert sleeper.delays == [0.1, 0.1, 0.1]
+    assert scheduler.snapshot().groups == ()
