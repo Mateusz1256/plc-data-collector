@@ -32,21 +32,28 @@
 <thead><tr><th scope="col">Application</th><th scope="col">Key</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
 <tbody>
 {% for key in api_keys %}
-<tr{% if key.revoked %} class="row-muted"{% endif %}>
+{% if key.revoked %}
+{#- Revoked: muted name and dates, the revoke date under Last used, no actions. -#}
+<tr class="row-muted">
+<td class="strong muted-name">{{ key.name }}</td>
+<td class="addr">{{ key.prefix }}…</td>
+<td class="num">{{ key.created }}</td>
+<td class="secondary">Revoked {{ key.revoked }}</td>
+<td class="actions"></td>
+</tr>
+{% else %}
+<tr>
 <td class="strong">{{ key.name }}</td>
 <td class="addr">{{ key.prefix }}…</td>
 <td class="num">{{ key.created }}</td>
-<td{% if key.last_used == "Never" or key.revoked %} class="secondary"{% else %} class="num"{% endif %}>{{ key.last_used }}</td>
+<td{% if key.last_used == "Never" %} class="secondary"{% else %} class="num"{% endif %}>{{ key.last_used }}</td>
 <td class="actions">
-{% if key.revoked %}
-Revoked {{ key.revoked }}
-{% else %}
 <form method="post" action="/panel/settings/api-keys/{{ key.id }}/revoke">
 <button type="submit" class="btn btn-danger" aria-label="Revoke {{ key.name }}">Revoke</button>
 </form>
-{% endif %}
 </td>
 </tr>
+{% endif %}
 {% else %}
 <tr><td colspan="5" class="secondary">No API keys yet.</td></tr>
 {% endfor %}

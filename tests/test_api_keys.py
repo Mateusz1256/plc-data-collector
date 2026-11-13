@@ -188,8 +188,15 @@ def test_panel_revoke(signed_in_client: TestClient, fake_host: FakeHost) -> None
     assert response.headers["location"] == "/panel/settings"
     assert fake_host.stores.api_keys.authenticate(key) is None
     page = signed_in_client.get("/panel/settings")
-    assert "Revoked " in page.text
     assert f"/api-keys/{info.id}/revoke" not in page.text
+    row = re.search(r"<tr[^>]*>(?:(?!</tr>).)*oee(?:(?!</tr>).)*</tr>", page.text, re.S)
+    assert row is not None
+    cells = re.findall(r"<td([^>]*)>(.*?)</td>", row.group(0), re.S)
+    assert len(cells) == 5
+    # Name muted, "Revoked <date>" under Last used, Actions empty.
+    assert "muted" in cells[0][0]
+    assert re.fullmatch(r"Revoked \d{1,2} \w{3} \d{4}", cells[3][1].strip())
+    assert cells[4][1].strip() == ""
 
 
 def test_panel_cross_site_refused(

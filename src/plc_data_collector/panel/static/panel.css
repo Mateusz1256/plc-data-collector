@@ -358,6 +358,7 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .tbl td.actions { text-align: right; }
 .tbl td.actions form { margin: 0; display: inline; }
 .tbl tr.row-muted td { color: var(--ink-muted); }
+.tbl tr.row-muted td.muted-name { color: var(--ink-muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 /* Settings: data retention */
