@@ -29,7 +29,7 @@ from plc_data_collector.domain import (
     ValueType,
 )
 from plc_data_collector.persistence import DurableSqliteSpool, create_database_engine
-from plc_data_collector.persistence.schema import connections, tag_readings
+from plc_data_collector.persistence.schema import connections, tag_readings, tags
 
 SECRET = "s3cr3t"
 
@@ -324,16 +324,14 @@ def _alembic_config(url: str) -> Config:
     return config
 
 
-async def test_supervisor_upgrades_0_2_0_database(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    caplog.set_level(logging.DEBUG)
-    settings = make_settings(
-        tmp_path, mock_config(tag_ids=("line_1_pressure",), password="other")
-    )
-    settings.data_dir.mkdir(parents=True)
-    # A 0.2.0 database: schema at 0002, configuration rows with a plaintext
-    # password, as the 0.2.0 runtime upserted them from the file.
+def _seed_0_2_0_database(settings: RuntimeSettings) -> None:
+    """Create a 0.2.0 database: schema at 0002 and configuration rows.
+
+    The rows hold a plaintext password, as the 0.2.0 runtime upserted them
+    from the file, and a stale Tag ``line_1_old`` that the file no longer has
+    (0.2.0 never removed rows).
+    """
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     command.upgrade(_alembic_config(settings.database_url), "0002")
     options = mock_config(password=SECRET)["connections"][0]["protocol_options"]  # type: ignore[index]
     engine = create_database_engine(settings.database_url)
@@ -354,28 +352,62 @@ async def test_supervisor_upgrades_0_2_0_database(
                     "('fast', 'line_1', 50, 500, 'skip', 1)"
                 )
             )
-            connection.execute(
-                text(
-                    "INSERT INTO tags (id, tag_group_id, name, address, value_type, "
-                    "enabled, metadata_json) VALUES ('line_1_temperature', 'fast', "
-                    "'T', 'mock://line_1_temperature', 'numeric', 1, '{}')"
+            for tag_id in ("line_1_temperature", "line_1_old"):
+                connection.execute(
+                    text(
+                        "INSERT INTO tags (id, tag_group_id, name, address, "
+                        "value_type, enabled, metadata_json) VALUES (:id, 'fast', "
+                        "'T', :address, 'numeric', 1, '{}')"
+                    ),
+                    {"id": tag_id, "address": f"mock://{tag_id}"},
                 )
-            )
     finally:
         engine.dispose()
 
-    supervisor = RuntimeSupervisor(settings)
-    await supervisor.start()
+
+def _tag_archived(settings: RuntimeSettings) -> dict[str, bool]:
+    engine = create_database_engine(settings.database_url)
     try:
-        assert "configuration_seed_skipped" in caplog.text
+        with engine.connect() as connection:
+            rows = connection.execute(select(tags.c.id, tags.c.archived_at)).all()
+    finally:
+        engine.dispose()
+    return {row.id: row.archived_at is not None for row in rows}
+
+
+async def test_supervisor_upgrades_0_2_0_database(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    # The file has no password: the stored one is kept, as an import keeps it.
+    settings = make_settings(tmp_path, mock_config())
+    _seed_0_2_0_database(settings)
+
+    supervisor = RuntimeSupervisor(settings)
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    try:
+        reconciled = [
+            r
+            for r in caplog.records
+            if r.getMessage() == "configuration_upgrade_reconciled"
+        ]
+        assert len(reconciled) == 1
+        assert reconciled[0].archived_tags == 1  # type: ignore[attr-defined]
+        assert reconciled[0].tags == 1  # type: ignore[attr-defined]
         config = supervisor.running_config
         assert config is not None
         assert [tag.id for tag in config.tags] == ["line_1_temperature"]
         assert config.connections[0].protocol_options["password"] == SECRET
+        assert supervisor.running_revision is not None
+        assert supervisor.running_revision >= 1
         await wait_until(lambda: readings_for(settings, "line_1_temperature") >= 2)
     finally:
-        await supervisor.stop()
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
 
+    assert _tag_archived(settings) == {
+        "line_1_temperature": False,
+        "line_1_old": True,
+    }
     engine = create_database_engine(settings.database_url)
     try:
         with engine.connect() as connection:
@@ -388,6 +420,66 @@ async def test_supervisor_upgrades_0_2_0_database(
     assert row.secret_options is not None
     assert SECRET not in row.secret_options
     assert SECRET not in captured_logs(caplog)
+
+    # Reconciled once: the next start finds a revision and leaves rows alone.
+    caplog.clear()
+    again = RuntimeSupervisor(settings)
+    await asyncio.wait_for(again.start(), timeout=10)
+    await asyncio.wait_for(again.stop(), timeout=10)
+    assert "configuration_upgrade_reconciled" not in caplog.text
+    assert "configuration_seed_skipped" in caplog.text
+
+
+async def test_upgrade_without_config_file_changes_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    settings = make_settings(tmp_path)
+    assert settings.config_file is None
+    _seed_0_2_0_database(settings)
+
+    supervisor = RuntimeSupervisor(settings)
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    try:
+        warnings = [
+            r
+            for r in caplog.records
+            if r.getMessage() == "configuration_upgrade_unreconciled"
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].levelno == logging.WARNING
+        assert warnings[0].tags == 2  # type: ignore[attr-defined]
+        assert warnings[0].connections == 1  # type: ignore[attr-defined]
+        config = supervisor.running_config
+        assert config is not None
+        assert sorted(tag.id for tag in config.tags) == [
+            "line_1_old",
+            "line_1_temperature",
+        ]
+        assert config.connections[0].protocol_options["password"] == SECRET
+    finally:
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
+    assert _tag_archived(settings) == {
+        "line_1_temperature": False,
+        "line_1_old": False,
+    }
+
+
+async def test_upgrade_with_invalid_config_file_changes_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    settings = make_settings(tmp_path, mock_config())
+    assert settings.config_file is not None
+    settings.config_file.write_text("{not json", encoding="utf-8")
+    _seed_0_2_0_database(settings)
+
+    supervisor = RuntimeSupervisor(settings)
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    await asyncio.wait_for(supervisor.stop(), timeout=10)
+
+    assert "configuration_upgrade_unreconciled" in caplog.text
+    assert _tag_archived(settings)["line_1_old"] is False
 
 
 # Apply

@@ -78,6 +78,15 @@ class ConfigStore:
         with self._engine.connect() as connection:
             return _read_revision(connection)
 
+    def has_revision(self) -> bool:
+        """Return whether the revision row exists; 0.2.0 databases have none.
+
+        Every configuration write creates the row, so its absence next to
+        Connection rows means a database that 0.3.0 has never written.
+        """
+        with self._engine.connect() as connection:
+            return get_setting(connection, CONFIG_REVISION_KEY) is not None
+
     def has_any_connection_rows(self) -> bool:
         """Return whether any Connection row exists, archived ones included."""
         with self._engine.connect() as connection:

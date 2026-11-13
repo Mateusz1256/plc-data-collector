@@ -5,18 +5,24 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from pathlib import Path
 
 from sqlalchemy import Engine
 from sqlalchemy.engine import make_url
 
 from plc_data_collector.api.state import RuntimeApiState
 from plc_data_collector.app.config import CollectorConfig, load_collector_config
+from plc_data_collector.app.config_transfer import keep_stored_values
 from plc_data_collector.app.retention import RetentionJob
 from plc_data_collector.app.runtime import CollectorRuntime, error_code
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.app.stores import Stores, build_stores
-from plc_data_collector.domain import CollectorError, StorageError
+from plc_data_collector.domain import (
+    CollectorError,
+    ConfigurationError,
+    StorageError,
+)
 from plc_data_collector.persistence import (
     ConfigStore,
     create_database_engine,
@@ -400,13 +406,20 @@ class RuntimeSupervisor:
             ) from None
 
     def _prepare_configuration(self, store: ConfigStore) -> None:
-        """Encrypt legacy secrets and seed from the file once; runs in a thread."""
+        """Encrypt legacy secrets and seed from the file once; runs in a thread.
+
+        A 0.2.0 database (Connection rows but no revision) is reconciled with
+        the file once instead of being seeded.
+        """
         encrypted = store.encrypt_plaintext_secrets()
         if encrypted:
             LOGGER.info(
                 "configuration_secrets_encrypted", extra={"connections": encrypted}
             )
         config_file = self._settings.config_file
+        if store.has_any_connection_rows() and not store.has_revision():
+            _reconcile_upgrade(store, config_file)
+            return
         if config_file is None:
             return
         # Archived rows count: a database that ever had configuration is never
@@ -484,6 +497,53 @@ class RuntimeSupervisor:
                 self._engine.dispose()
             self._phase = "stopped"
             self._stopped.set()
+
+
+def _reconcile_upgrade(store: ConfigStore, config_file: Path | None) -> None:
+    """Make the file the active configuration of a database 0.2.0 wrote.
+
+    0.2.0 upserted the file on every start and never removed rows, so items
+    deleted from the file stayed in the database. Running ``replace_all`` once
+    archives them (their history is kept) and keeps stored secrets the file
+    leaves out. Without a readable file nothing changes and a warning says so.
+    Runs after ``encrypt_plaintext_secrets``; ``load_active`` decrypts.
+    """
+    current, _ = store.load_active()
+    active = _counts(current)
+    if config_file is None:
+        LOGGER.warning(
+            "configuration_upgrade_unreconciled",
+            extra={"reason": "no_config_file", **active},
+        )
+        return
+    try:
+        config = keep_stored_values(load_collector_config(config_file), current=current)
+        store.replace_all(config)
+    except ConfigurationError as error:
+        LOGGER.warning(
+            "configuration_upgrade_unreconciled",
+            extra={"reason": error.code, **active},
+        )
+        return
+    archived = {
+        f"archived_{kind}": len(
+            {item.id for item in getattr(current, kind)}
+            - {item.id for item in getattr(config, kind)}
+        )
+        for kind in ("connections", "tag_groups", "tags")
+    }
+    LOGGER.info(
+        "configuration_upgrade_reconciled",
+        extra={"config_file": str(config_file), **_counts(config), **archived},
+    )
+
+
+def _counts(config: CollectorConfig) -> dict[str, int]:
+    return {
+        "connections": len(config.connections),
+        "tag_groups": len(config.tag_groups),
+        "tags": len(config.tags),
+    }
 
 
 def _mask_database_url(database_url: str) -> str:

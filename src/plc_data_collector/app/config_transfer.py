@@ -158,10 +158,20 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
             details={"location": "$"},
         )
 
-    parsed = parse_collector_config(loaded)
+    return keep_stored_values(parse_collector_config(loaded), current=current)
+
+
+def keep_stored_values(
+    config: CollectorConfig, *, current: CollectorConfig
+) -> CollectorConfig:
+    """Return ``config`` with what files leave out taken from ``current``.
+
+    For Connection IDs that exist in ``current``, secrets the file omits are
+    kept; the file's own values win.
+    """
     existing = {connection.id: connection for connection in current.connections}
     connections = []
-    for connection in parsed.connections:
+    for connection in config.connections:
         known = existing.get(connection.id)
         if known is not None:
             secrets = split_secrets(known.protocol_options)[1]
@@ -169,7 +179,7 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
             options = merge_secrets(secrets, connection.protocol_options)
             connection = replace(connection, protocol_options=options)
         connections.append(connection)
-    return replace(parsed, connections=tuple(connections))
+    return replace(config, connections=tuple(connections))
 
 
 def export_filename(now: datetime) -> str:
