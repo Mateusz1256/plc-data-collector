@@ -1,4 +1,20 @@
-{#- Data retention section; Task 14 fills it. -#}
 <section aria-labelledby="ret-h" class="panel settings-section">
+<div class="settings-head">
 <h2 class="section-title" id="ret-h">Data retention</h2>
+<p class="lead">Delete old readings automatically to keep the database small. Connections, tags and settings are never deleted.</p>
+</div>
+{#- novalidate: the server checks the days and shows the message next to the field. -#}
+<form class="retention-form" method="post" action="/panel/settings/retention" aria-label="Data retention" novalidate>
+<label class="check"><input type="checkbox" name="enabled" value="on" id="field-retention-enabled"{% if retention.enabled %} checked{% endif %}>Delete old readings</label>
+<div class="retention-on">
+<div class="field retention-days">
+<label for="field-retention-days">Keep readings for</label>
+<input class="input num" type="number" name="days" id="field-retention-days" min="1" max="3650" step="1" inputmode="numeric" value="{{ retention.days }}" aria-describedby="retention-preview"{% if retention.preview.error %} aria-invalid="true"{% endif %} hx-get="/panel/settings/retention/preview" hx-trigger="input changed delay:500ms" hx-target="#retention-preview" hx-swap="innerHTML">
+</div>
+<span class="retention-unit">days</span>
+<p class="secondary num retention-preview" id="retention-preview" aria-live="polite">{% with preview = retention.preview %}{% include "_retention.html" %}{% endwith %}</p>
+</div>
+<p class="secondary retention-off">Readings are kept until you delete them yourself.</p>
+<div><button type="submit" class="btn btn-primary">Save retention</button></div>
+</form>
 </section>

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Engine, Row, RowMapping, delete, func, select
+from sqlalchemy import Column, Engine, Row, RowMapping, Table, delete, func, select
 
 from plc_data_collector.domain import Quality, TagValue, ValueType
-from plc_data_collector.persistence.schema import tag_readings
+from plc_data_collector.persistence.schema import poll_executions, tag_readings
 
 _VALUE_COLUMNS = {
     ValueType.NUMERIC: "numeric_value",
@@ -31,10 +32,11 @@ class TagReadingRow:
 
 
 class ReadingQueryRepository:
-    """Range queries and batched deletes over ``tag_readings``.
+    """Range queries over ``tag_readings`` and batched deletes for retention.
 
     Every query filters on ``received_at`` (and ``tag_id`` for history), so the
-    ``(tag_id, received_at)`` and ``received_at`` indexes serve it.
+    ``(tag_id, received_at)`` and ``received_at`` indexes serve it. Poll
+    executions are pruned by ``started_at``, which has its own index.
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -91,29 +93,78 @@ class ReadingQueryRepository:
                 or 0
             )
 
-    def delete_older_than(self, cutoff: datetime, batch_size: int = 10_000) -> int:
+    def delete_older_than(
+        self,
+        cutoff: datetime,
+        batch_size: int = 10_000,
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> int:
         """Delete readings received before ``cutoff`` and return how many.
 
         Deletes ``batch_size`` rows per transaction, so locks stay short and a
-        large backlog never runs as one huge transaction.
+        large backlog never runs as one huge transaction. ``should_stop`` is
+        checked before each batch; when it returns True the delete ends early.
         """
-        _require_aware(cutoff, "cutoff")
-        if batch_size < 1:
-            raise ValueError("batch_size must be at least 1.")
-        batch = (
-            select(tag_readings.c.event_id)
-            .where(tag_readings.c.received_at < cutoff)
-            .limit(batch_size)
-            .scalar_subquery()
+        return _delete_in_batches(
+            self._engine,
+            tag_readings,
+            tag_readings.c.event_id,
+            tag_readings.c.received_at,
+            cutoff,
+            batch_size,
+            should_stop,
         )
-        statement = delete(tag_readings).where(tag_readings.c.event_id.in_(batch))
-        total = 0
-        while True:
-            with self._engine.begin() as connection:
-                deleted = connection.execute(statement).rowcount or 0
-            total += deleted
-            if deleted < batch_size:
-                return total
+
+    def delete_poll_executions_older_than(
+        self,
+        cutoff: datetime,
+        batch_size: int = 10_000,
+        *,
+        should_stop: Callable[[], bool] | None = None,
+    ) -> int:
+        """Delete poll executions started before ``cutoff`` and return how many.
+
+        Batched like ``delete_older_than``.
+        """
+        return _delete_in_batches(
+            self._engine,
+            poll_executions,
+            poll_executions.c.execution_id,
+            poll_executions.c.started_at,
+            cutoff,
+            batch_size,
+            should_stop,
+        )
+
+
+def _delete_in_batches(
+    engine: Engine,
+    table: Table,
+    key: Column[str],
+    timestamp: Column[datetime],
+    cutoff: datetime,
+    batch_size: int,
+    should_stop: Callable[[], bool] | None,
+) -> int:
+    """Delete rows with ``timestamp < cutoff``, one transaction per batch.
+
+    ``DELETE ... WHERE key IN (SELECT key ... LIMIT n)`` works on SQLite and
+    PostgreSQL alike.
+    """
+    _require_aware(cutoff, "cutoff")
+    if batch_size < 1:
+        raise ValueError("batch_size must be at least 1.")
+    batch = select(key).where(timestamp < cutoff).limit(batch_size).scalar_subquery()
+    statement = delete(table).where(key.in_(batch))
+    total = 0
+    while should_stop is None or not should_stop():
+        with engine.begin() as connection:
+            deleted = connection.execute(statement).rowcount or 0
+        total += deleted
+        if deleted < batch_size:
+            break
+    return total
 
 
 def _require_aware(value: datetime, name: str) -> None:

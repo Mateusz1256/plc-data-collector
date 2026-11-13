@@ -356,3 +356,14 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .tbl td.actions form { margin: 0; display: inline; }
 .tbl tr.row-muted td { color: var(--ink-muted); }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Settings: data retention */
+.retention-form { display: flex; flex-direction: column; gap: 16px; margin: 0; }
+.retention-on { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.retention-days { width: 160px; }
+.retention-unit { font-size: var(--text-body); padding-bottom: 12px; }
+.retention-preview { margin: 0 0 12px; flex: 1 1 280px; font-size: var(--text-table); }
+.retention-off { margin: 0; }
+/* The toggle shows either the days field or the "kept" note, without script. */
+.retention-form:has(#field-retention-enabled:not(:checked)) .retention-on,
+.retention-form:has(#field-retention-enabled:checked) .retention-off { display: none; }

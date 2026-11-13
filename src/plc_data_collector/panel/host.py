@@ -57,6 +57,10 @@ class CollectorHost(Protocol):
         """Return a fresh runtime snapshot."""
         ...
 
+    def trigger_retention(self) -> None:
+        """Run retention now in the background; call it on the event loop."""
+        ...
+
     async def apply(self) -> None:
         """Restart collection with the configuration saved in the database."""
         ...

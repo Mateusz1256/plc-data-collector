@@ -49,10 +49,15 @@ class FakeHost:
         self.runtime_state = RuntimeApiState()
         self.apply_calls = 0
         self.apply_error: BaseException | None = None
+        self.retention_triggers = 0
 
     def api_state(self) -> RuntimeApiState:
         """Return the scripted runtime snapshot."""
         return self.runtime_state
+
+    def trigger_retention(self) -> None:
+        """Count the request; retention itself is tested in test_retention."""
+        self.retention_triggers += 1
 
     async def apply(self) -> None:
         """Record the call, then fail as scripted or adopt the stored config."""

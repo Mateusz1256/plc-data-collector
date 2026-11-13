@@ -11,6 +11,7 @@ from sqlalchemy.engine import make_url
 
 from plc_data_collector.api.state import RuntimeApiState
 from plc_data_collector.app.config import CollectorConfig, load_collector_config
+from plc_data_collector.app.retention import RetentionJob
 from plc_data_collector.app.runtime import CollectorRuntime, error_code
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
@@ -28,6 +29,7 @@ from plc_data_collector.runtime.live_values import LiveValueCache
 LOGGER = logging.getLogger(__name__)
 DATABASE_PROBE_INTERVAL_S = 1.0
 RuntimeFactory = Callable[..., CollectorRuntime]
+RetentionJobFactory = Callable[[Stores], RetentionJob]
 
 
 class RuntimeSupervisor:
@@ -38,7 +40,9 @@ class RuntimeSupervisor:
     configuration and starts the runtime. ``apply()`` stops the runtime (its
     Reading Queue drains into the database or the Spool) and starts a new one
     from the database, while the API keeps serving. The engine and the live
-    value cache outlive every runtime.
+    value cache outlive every runtime, and so does the retention job, which
+    starts once the database is prepared and stops before the engine is
+    disposed.
     """
 
     def __init__(
@@ -47,11 +51,15 @@ class RuntimeSupervisor:
         *,
         registry: DriverRegistry | None = None,
         runtime_factory: RuntimeFactory = CollectorRuntime,
+        retention_job_factory: RetentionJobFactory = RetentionJob,
     ) -> None:
         """Create a supervisor; nothing touches the database until ``start()``."""
         self._settings = settings
         self._registry = registry or default_driver_registry()
         self._runtime_factory = runtime_factory
+        self._retention_job_factory = retention_job_factory
+        self._retention_job: RetentionJob | None = None
+        self._retention_task: asyncio.Task[None] | None = None
         self._engine: Engine | None = None
         self._stores: Stores | None = None
         self._live_values = LiveValueCache()
@@ -98,6 +106,19 @@ class RuntimeSupervisor:
     def applying(self) -> bool:
         """Return whether an apply is in progress."""
         return self._applying
+
+    @property
+    def retention_task(self) -> asyncio.Task[None] | None:
+        """Return the running retention task, or None before start or after stop."""
+        return self._retention_task
+
+    def trigger_retention(self) -> None:
+        """Run retention now instead of at the next interval, if it is running.
+
+        Call it on the event loop thread; it returns at once.
+        """
+        if self._retention_job is not None:
+            self._retention_job.trigger()
 
     @property
     def registry(self) -> DriverRegistry:
@@ -279,7 +300,36 @@ class RuntimeSupervisor:
         secret_box = await asyncio.to_thread(SecretBox.from_settings, settings)
         self._stores = build_stores(self._engine, secret_box)
         await asyncio.to_thread(self._prepare_configuration, self._stores.config)
+        self._start_retention(self._stores)
         await self._start_runtime()
+
+    def _start_retention(self, stores: Stores) -> None:
+        """Start the retention job; it keeps running across applies."""
+        job = self._retention_job_factory(stores)
+        self._retention_job = job
+        self._retention_task = asyncio.create_task(job.run(), name="retention")
+
+    async def _stop_retention(self) -> None:
+        """Cancel the retention job and wait until its current batch ends."""
+        task, self._retention_task = self._retention_task, None
+        self._retention_job = None
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
+        except Exception as error:
+            LOGGER.error(
+                "retention_stop_failed",
+                extra={
+                    "error_code": error_code(error),
+                    "error_type": type(error).__name__,
+                },
+            )
 
     async def _wait_for_database(self, engine: Engine) -> None:
         """Probe the database until it answers or the wait timeout expires.
@@ -376,9 +426,14 @@ class RuntimeSupervisor:
         """Stop the runtime and dispose the engine; used by stop() and failed starts."""
         self._phase = "stopping"
         try:
-            runtime, self._runtime = self._runtime, None
-            if runtime is not None:
-                await runtime.stop(timeout_s=timeout_s)
+            try:
+                runtime, self._runtime = self._runtime, None
+                if runtime is not None:
+                    await runtime.stop(timeout_s=timeout_s)
+            finally:
+                # Before the engine is disposed: a delete in progress finishes
+                # its current batch first.
+                await self._stop_retention()
         finally:
             self._running_revision = None
             self._running_config = None
