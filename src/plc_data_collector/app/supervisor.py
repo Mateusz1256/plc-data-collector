@@ -357,15 +357,22 @@ class RuntimeSupervisor:
         self._retention_job = job
         self._retention_task = asyncio.create_task(job.run(), name="retention")
 
-    async def _stop_retention(self) -> None:
-        """Cancel the retention job and wait until its current batch ends."""
+    async def _stop_retention(self, timeout_s: float) -> None:
+        """Cancel the retention job and wait until its current batch ends.
+
+        The wait is bounded by ``timeout_s``: a batch that does not end in
+        time is logged as ``retention_stop_timeout`` and left behind, so
+        shutdown never hangs on it.
+        """
         task, self._retention_task = self._retention_task, None
         self._retention_job = None
         if task is None:
             return
         task.cancel()
         try:
-            await task
+            await asyncio.wait_for(task, timeout=timeout_s)
+        except TimeoutError:
+            LOGGER.warning("retention_stop_timeout", extra={"timeout_s": timeout_s})
         except asyncio.CancelledError:
             current = asyncio.current_task()
             if current is not None and current.cancelling():
@@ -519,7 +526,7 @@ class RuntimeSupervisor:
             finally:
                 # Before the engine is disposed: a delete in progress finishes
                 # its current batch first.
-                await self._stop_retention()
+                await self._stop_retention(timeout_s)
         finally:
             self._running_revision = None
             self._running_config = None

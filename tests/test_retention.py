@@ -366,6 +366,46 @@ async def test_supervisor_stop_during_start_leaves_no_retention_task(
     assert [t for t in asyncio.all_tasks() if t is not current] == []
 
 
+async def test_supervisor_stop_bounds_the_retention_wait(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    cancelled = asyncio.Event()
+
+    class StubbornJob:
+        """A retention job whose current delete batch does not end."""
+
+        def __init__(self, stores: Stores) -> None:
+            pass
+
+        def trigger(self) -> None:
+            pass
+
+        async def run(self) -> None:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await asyncio.Event().wait()
+
+    supervisor = RuntimeSupervisor(
+        _supervisor_settings(tmp_path),
+        retention_job_factory=StubbornJob,  # type: ignore[arg-type]
+    )
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+
+    await asyncio.wait_for(supervisor.stop(timeout_s=0.5), timeout=5)
+
+    assert loop.time() - started < 3
+    assert cancelled.is_set()
+    assert "retention_stop_timeout" in caplog.text
+    assert supervisor.retention_task is None
+    current = asyncio.current_task()
+    assert [t for t in asyncio.all_tasks() if t is not current] == []
+
+
 # Panel
 
 
