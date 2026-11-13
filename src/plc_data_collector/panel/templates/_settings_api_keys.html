@@ -1,4 +1,56 @@
-{#- API keys section; Task 12 fills it. -#}
-<section aria-labelledby="keys-h" class="panel settings-section">
+<section aria-labelledby="keys-h" class="panel settings-section keys-section">
+<div class="keys-head">
+<div class="settings-head">
 <h2 class="section-title" id="keys-h">API keys</h2>
+<p class="lead">Give each application that reads collected data its own key, so you can revoke one without affecting the others. Keys can read data only.</p>
+</div>
+<form class="keys-create" method="post" action="/panel/settings/api-keys" aria-label="Create API key">
+<div class="field">
+<label for="field-key-name">Application name</label>
+<input class="input" type="text" name="name" id="field-key-name" maxlength="128" required value="{{ key_name | default('') }}">
+</div>
+<button type="submit" class="btn btn-primary">Create key</button>
+</form>
+</div>
+{% if key_error %}
+<p class="alert alert-failed" role="alert">{{ key_error }}</p>
+{% endif %}
+{% if revealed %}
+<div class="key-reveal" role="status">
+<p class="key-reveal-title">Key for {{ revealed.name }} created. Copy it now: it won't be shown again.</p>
+<div class="key-reveal-row">
+<input class="input mono" type="text" readonly id="new-api-key" aria-label="New API key" value="{{ revealed.key }}">
+<button type="button" class="btn btn-secondary" id="copy-key" data-copy-from="new-api-key" hidden>Copy key</button>
+<a class="btn btn-quiet" href="/panel/settings">Done</a>
+</div>
+<p class="secondary">Send it in the <span class="addr">X-API-Key</span> header.</p>
+</div>
+<script src="/panel/static/copy-key.js?v={{ version }}" defer></script>
+{% endif %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Application</th><th scope="col">Key</th><th scope="col">Created</th><th scope="col">Last used</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{% for key in api_keys %}
+<tr{% if key.revoked %} class="row-muted"{% endif %}>
+<td class="strong">{{ key.name }}</td>
+<td class="addr">{{ key.prefix }}…</td>
+<td class="num">{{ key.created }}</td>
+<td{% if key.last_used == "Never" or key.revoked %} class="secondary"{% else %} class="num"{% endif %}>{{ key.last_used }}</td>
+<td class="actions">
+{% if key.revoked %}
+Revoked {{ key.revoked }}
+{% else %}
+<form method="post" action="/panel/settings/api-keys/{{ key.id }}/revoke">
+<button type="submit" class="btn btn-danger" aria-label="Revoke {{ key.name }}">Revoke</button>
+</form>
+{% endif %}
+</td>
+</tr>
+{% else %}
+<tr><td colspan="5" class="secondary">No API keys yet.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
 </section>

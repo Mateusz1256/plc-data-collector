@@ -1,5 +1,6 @@
 """Persistence adapters for relational storage."""
 
+from plc_data_collector.persistence.api_keys import ApiKeyInfo, ApiKeyStore
 from plc_data_collector.persistence.app_settings import (
     AppSettingsStore,
     RetentionSettings,
@@ -30,6 +31,8 @@ from plc_data_collector.persistence.writer import (
 )
 
 __all__ = [
+    "ApiKeyInfo",
+    "ApiKeyStore",
     "AppSettingsStore",
     "ConfigStore",
     "DatabaseWriter",

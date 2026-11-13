@@ -334,3 +334,25 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .settings-column .subsection-title { margin: 0; }
 .settings-column .secondary { margin: 0; }
 .settings-column .field { width: 100%; }
+
+/* Settings: API keys */
+.keys-section { padding: 0; gap: 0; overflow: hidden; }
+.keys-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 24px; padding: 20px; }
+.keys-head .settings-head { flex: 1 1 380px; }
+.keys-create { flex: 1 1 320px; display: flex; gap: 8px; align-items: flex-end; margin: 0; }
+.keys-create .field { flex: 1; }
+.keys-section > .alert { margin: 0 20px 20px; }
+.key-reveal {
+  margin: 0 20px 20px; padding: 16px; background: var(--white);
+  border: 1px solid var(--action); border-radius: var(--radius-control);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.key-reveal-title { margin: 0; font-size: var(--text-body); font-weight: 600; }
+.key-reveal-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.key-reveal-row .input { flex: 1 1 360px; width: auto; }
+.key-reveal .secondary { margin: 0; }
+.tbl td.strong { font-weight: 600; }
+.tbl td.actions { text-align: right; }
+.tbl td.actions form { margin: 0; display: inline; }
+.tbl tr.row-muted td { color: var(--ink-muted); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
