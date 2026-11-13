@@ -9,16 +9,21 @@ from pathlib import Path
 
 import httpx
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import Engine, select
 
 from plc_data_collector.api import RuntimeApiState, create_api_app
-from plc_data_collector.app.runtime import CollectorRuntime
+from plc_data_collector.app.config import CollectorConfig, parse_collector_config
+from plc_data_collector.app.runtime import CollectorRuntime, RepositoryFactory
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
-from plc_data_collector.domain import CollectorError, ConfigurationError, StorageError
+from plc_data_collector.domain import ConfigurationError, StorageError
 from plc_data_collector.persistence import (
+    ConfigStore,
     DurableSqliteSpool,
     ReadingRepository,
     create_database_engine,
+    run_migrations,
 )
 from plc_data_collector.persistence.schema import poll_executions
 from plc_data_collector.runtime import WorkerPollResult
@@ -101,15 +106,8 @@ def single_mock_config() -> dict[str, object]:
     }
 
 
-def make_settings(
-    tmp_path: Path,
-    config: Mapping[str, object],
-    **overrides: object,
-) -> RuntimeSettings:
-    config_file = tmp_path / "collector.config.json"
-    config_file.write_text(json.dumps(config), encoding="utf-8")
+def make_settings(tmp_path: Path, **overrides: object) -> RuntimeSettings:
     values: dict[str, object] = {
-        "config_file": config_file,
         "data_dir": tmp_path / "data",
         "database_wait_timeout_s": 2.0,
         "writer_batch_size": 2,
@@ -131,9 +129,35 @@ async def wait_until(condition: Callable[[], bool], *, timeout_s: float = 5.0) -
     raise AssertionError("condition was not reached before timeout")
 
 
-def reading_repository(settings: RuntimeSettings) -> tuple[Engine, ReadingRepository]:
+def prepare_database(
+    settings: RuntimeSettings, config: Mapping[str, object] | CollectorConfig
+) -> tuple[Engine, CollectorConfig]:
+    """Migrate the database and store ``config`` in it, as the supervisor does."""
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    run_migrations(settings.database_url)
     engine = create_database_engine(settings.database_url)
-    return engine, ReadingRepository(engine)
+    parsed = (
+        config
+        if isinstance(config, CollectorConfig)
+        else parse_collector_config(config)
+    )
+    ConfigStore(engine, SecretBox(Fernet.generate_key())).replace_all(parsed)
+    return engine, parsed
+
+
+def build_runtime(
+    tmp_path: Path,
+    config: Mapping[str, object] | CollectorConfig,
+    *,
+    repository_factory: RepositoryFactory | None = None,
+    **overrides: object,
+) -> tuple[CollectorRuntime, RuntimeSettings, Engine, ReadingRepository]:
+    settings = make_settings(tmp_path, **overrides)
+    engine, parsed = prepare_database(settings, config)
+    runtime = CollectorRuntime(
+        settings, engine, parsed, repository_factory=repository_factory
+    )
+    return runtime, settings, engine, ReadingRepository(engine)
 
 
 def captured_logs(caplog: pytest.LogCaptureFixture) -> str:
@@ -147,16 +171,32 @@ def other_tasks() -> list[asyncio.Task[object]]:
 
 
 async def test_runtime_collects_readings_end_to_end(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path, single_mock_config())
-    runtime = CollectorRuntime(settings)
+    runtime, _settings, engine, repository = build_runtime(
+        tmp_path, single_mock_config()
+    )
     await runtime.start()
-    engine, repository = reading_repository(settings)
     try:
         await wait_until(lambda: repository.count_tag_readings() >= 3)
         assert runtime.api_state().workers[0].state.value == "running"
     finally:
         await runtime.stop()
         engine.dispose()
+
+
+async def test_runtime_runs_with_empty_config(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    engine, _ = prepare_database(settings, CollectorConfig((), (), ()))
+    runtime = CollectorRuntime(settings, engine, CollectorConfig((), (), ()))
+    await runtime.start()
+    try:
+        await asyncio.sleep(0.3)
+        state = runtime.api_state()
+        assert state.workers == ()
+        assert state.configuration_loaded is True
+    finally:
+        await runtime.stop()
+        engine.dispose()
+    assert other_tasks() == []
 
 
 def completed_polls(runtime: CollectorRuntime) -> int:
@@ -182,15 +222,13 @@ def pending_in_writer(runtime: CollectorRuntime) -> int:
 async def test_stop_drains_queue_to_database(tmp_path: Path) -> None:
     # A large batch and a long flush interval keep every Poll Result in memory
     # until stop(), so only the drain on stop can persist them.
-    settings = make_settings(
+    runtime, settings, engine, repository = build_runtime(
         tmp_path,
         single_mock_config(),
         writer_batch_size=1000,
         writer_flush_interval_s=60.0,
     )
-    runtime = CollectorRuntime(settings)
     await runtime.start()
-    engine, repository = reading_repository(settings)
     try:
         await wait_until(lambda: pending_in_writer(runtime) >= 3)
         assert repository.count_poll_executions() == 0
@@ -210,17 +248,16 @@ async def test_stop_drains_queue_to_database(tmp_path: Path) -> None:
 
 
 async def test_stop_spools_queue_when_writer_exceeds_budget(tmp_path: Path) -> None:
-    settings = make_settings(
+    hanging = HangingRepository()
+    runtime, settings, engine, repository = build_runtime(
         tmp_path,
         single_mock_config(),
+        repository_factory=lambda _engine: hanging,
         writer_batch_size=2,
         writer_flush_interval_s=0.05,
         storage_timeout_s=0.2,
     )
-    hanging = HangingRepository()
-    runtime = CollectorRuntime(settings, repository_factory=lambda _engine: hanging)
     await runtime.start()
-    engine, repository = reading_repository(settings)
     loop = asyncio.get_running_loop()
     try:
         # The writer is stuck on a stalled batch while the queue keeps filling.
@@ -244,15 +281,12 @@ async def test_stop_spools_queue_when_writer_exceeds_budget(tmp_path: Path) -> N
 async def test_stop_with_database_down_spools_pending_results(tmp_path: Path) -> None:
     # A long flush interval and a large batch keep Poll Results pending in the
     # Database Writer, so only the shutdown path can move them to the Spool.
-    settings = make_settings(
+    runtime, settings, engine, _repository = build_runtime(
         tmp_path,
         single_mock_config(),
+        repository_factory=lambda _engine: AlwaysFailingRepository(),
         writer_batch_size=1000,
         writer_flush_interval_s=60.0,
-    )
-    runtime = CollectorRuntime(
-        settings,
-        repository_factory=lambda _engine: AlwaysFailingRepository(),
     )
     await runtime.start()
 
@@ -266,6 +300,7 @@ async def test_stop_with_database_down_spools_pending_results(tmp_path: Path) ->
         assert DurableSqliteSpool(settings.spool_path, max_items=10).count() == 0
     finally:
         await runtime.stop()
+        engine.dispose()
 
     spool = DurableSqliteSpool(settings.data_dir / "spool.db", max_items=10)
     assert spool.count() > 0
@@ -291,10 +326,8 @@ async def test_runtime_skips_disabled_items(tmp_path: Path) -> None:
             tag("line_2_temperature", "disabled_connection_group"),
         ],
     }
-    settings = make_settings(tmp_path, config)
-    runtime = CollectorRuntime(settings)
+    runtime, _settings, engine, repository = build_runtime(tmp_path, config)
     await runtime.start()
-    engine, repository = reading_repository(settings)
     try:
         await wait_until(lambda: repository.count_tag_readings() >= 3)
         workers = runtime.api_state().workers
@@ -340,8 +373,7 @@ async def test_runtime_survives_unreachable_connection(tmp_path: Path) -> None:
             },
         ],
     }
-    settings = make_settings(tmp_path, config)
-    runtime = CollectorRuntime(settings)
+    runtime, _settings, engine, _repository = build_runtime(tmp_path, config)
     await runtime.start()
 
     def successes(component_id: str) -> int:
@@ -360,96 +392,7 @@ async def test_runtime_survives_unreachable_connection(tmp_path: Path) -> None:
         assert states["connection-worker:unreachable"] in {"failed", "degraded"}
     finally:
         await runtime.stop()
-
-
-async def test_runtime_waits_for_database_then_fails_cleanly(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        single_mock_config(),
-        database_url="postgresql+pg8000://u:p@127.0.0.1:1/x",
-        database_wait_timeout_s=0.5,
-    )
-    runtime = CollectorRuntime(settings)
-
-    with pytest.raises(StorageError) as error:
-        await runtime.start()
-
-    assert error.value.code == "database_unavailable"
-    assert other_tasks() == []
-    await runtime.stop()
-
-
-async def test_stop_during_database_wait_aborts_start(tmp_path: Path) -> None:
-    settings = make_settings(
-        tmp_path,
-        single_mock_config(),
-        database_url="postgresql+pg8000://u:p@127.0.0.1:1/x",
-        database_wait_timeout_s=10.0,
-    )
-    runtime = CollectorRuntime(settings)
-    start_task = asyncio.create_task(runtime.start())
-    await asyncio.sleep(0.3)
-    loop = asyncio.get_running_loop()
-
-    started = loop.time()
-    await asyncio.wait_for(runtime.stop(), timeout=5.0)
-    elapsed = loop.time() - started
-
-    with pytest.raises(CollectorError) as error:
-        await asyncio.wait_for(start_task, timeout=5.0)
-    assert error.value.code == "runtime_start_aborted"
-    assert elapsed < 1.0
-    assert other_tasks() == []
-    await asyncio.wait_for(runtime.stop(), timeout=0.1)
-    assert other_tasks() == []
-
-
-async def test_database_wait_failure_does_not_leak_database_password(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    caplog.set_level(logging.DEBUG)
-    settings = make_settings(
-        tmp_path,
-        single_mock_config(),
-        database_url=f"postgresql+pg8000://u:{SECRET}@127.0.0.1:1/x",
-        database_wait_timeout_s=0.2,
-    )
-
-    with pytest.raises(StorageError) as error:
-        await CollectorRuntime(settings).start()
-
-    assert SECRET not in captured_logs(caplog)
-    assert SECRET not in str(error.value)
-    assert SECRET not in repr(error.value.details)
-
-
-async def test_migration_failure_does_not_leak_database_password(
-    tmp_path: Path,
-    caplog: pytest.LogCaptureFixture,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    caplog.set_level(logging.DEBUG)
-    settings = make_settings(tmp_path, single_mock_config())
-
-    def failing_migrations(database_url: str) -> None:
-        raise RuntimeError(f"could not migrate {database_url} (password {SECRET})")
-
-    monkeypatch.setattr(
-        "plc_data_collector.app.runtime.run_migrations", failing_migrations
-    )
-    runtime = CollectorRuntime(settings)
-
-    with pytest.raises(StorageError) as error:
-        await runtime.start()
-
-    assert error.value.code == "database_migration_failed"
-    assert error.value.__cause__ is None
-    assert error.value.__suppress_context__ is True
-    assert SECRET not in captured_logs(caplog)
-    assert SECRET not in str(error.value)
-    assert other_tasks() == []
-    await runtime.stop()
+        engine.dispose()
 
 
 async def test_runtime_logs_do_not_leak_secrets(
@@ -478,8 +421,7 @@ async def test_runtime_logs_do_not_leak_secrets(
             }
         ],
     }
-    settings = make_settings(tmp_path, config)
-    runtime = CollectorRuntime(settings)
+    runtime, _settings, engine, _repository = build_runtime(tmp_path, config)
     app = create_api_app(runtime.api_state)
     await runtime.start()
     try:
@@ -494,6 +436,7 @@ async def test_runtime_logs_do_not_leak_secrets(
             components = (await client.get("/api/runtime/components")).json()
     finally:
         await runtime.stop()
+        engine.dispose()
 
     assert workers["workers"][0]["component_id"] == "connection-worker:secured"
     assert SECRET not in captured_logs(caplog)
@@ -503,17 +446,6 @@ async def test_runtime_logs_do_not_leak_secrets(
 
 def test_settings_config_file_is_optional() -> None:
     assert RuntimeSettings.from_env({}).config_file is None
-
-
-async def test_runtime_start_requires_config_file(tmp_path: Path) -> None:
-    settings = RuntimeSettings.from_env({}, data_dir=tmp_path / "data")
-    runtime = CollectorRuntime(settings)
-
-    with pytest.raises(ConfigurationError) as error:
-        await runtime.start()
-
-    assert error.value.code == "config_file_required"
-    assert "PLC_DATA_COLLECTOR_CONFIG" in str(error.value)
 
 
 def test_settings_read_environment_and_overrides(tmp_path: Path) -> None:

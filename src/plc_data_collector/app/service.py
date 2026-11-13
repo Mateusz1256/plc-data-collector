@@ -182,8 +182,8 @@ async def _run_runtime_and_api(
 ) -> int:
     # Imported here: settings imports ServicePaths from this module.
     from plc_data_collector.api import create_api_app
-    from plc_data_collector.app.runtime import CollectorRuntime
     from plc_data_collector.app.settings import RuntimeSettings
+    from plc_data_collector.app.supervisor import RuntimeSupervisor
 
     try:
         settings = RuntimeSettings.from_env(
@@ -196,22 +196,23 @@ async def _run_runtime_and_api(
         _log_start_failed(error)
         return 1
 
-    runtime = CollectorRuntime(settings)
+    supervisor = RuntimeSupervisor(settings)
     server = _ServiceApiServer(
         uvicorn.Config(
-            create_api_app(runtime.api_state),
+            create_api_app(supervisor.api_state),
             host=settings.api_host,
             port=settings.api_port,
             log_config=None,
-            # Bounds in-flight requests so runtime.stop() still fits in
+            # Bounds in-flight requests so supervisor.stop() still fits in
             # Docker's stop grace period.
             timeout_graceful_shutdown=5,
         )
     )
-    # The API serves while the runtime starts, so /health/live answers and
-    # /health/ready reports 503 until the runtime is running.
+    # The API serves while the supervisor prepares the database and starts the
+    # runtime, so /health/live answers and /health/ready reports 503 until the
+    # runtime is running.
     server_task = asyncio.create_task(_serve_api(server), name="service-api")
-    runtime_task = asyncio.create_task(runtime.start(), name="service-runtime")
+    runtime_task = asyncio.create_task(supervisor.start(), name="service-runtime")
     stop_task = asyncio.create_task(stop_event.wait(), name="service-stop")
     exit_code = 0
     try:
@@ -230,7 +231,7 @@ async def _run_runtime_and_api(
         stop_task.cancel()
         server.should_exit = True
         await asyncio.gather(server_task, return_exceptions=True)
-        await runtime.stop()
+        await supervisor.stop()
         # A stop during start() makes start() raise runtime_start_aborted,
         # which is a clean shutdown, not a failure.
         await asyncio.gather(runtime_task, return_exceptions=True)

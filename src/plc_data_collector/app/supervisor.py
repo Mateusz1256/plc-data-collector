@@ -1,0 +1,394 @@
+"""Supervisor that owns the database and a replaceable collector runtime."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable
+
+from sqlalchemy import Engine
+from sqlalchemy.engine import make_url
+
+from plc_data_collector.api.state import RuntimeApiState
+from plc_data_collector.app.config import CollectorConfig, load_collector_config
+from plc_data_collector.app.runtime import CollectorRuntime, error_code
+from plc_data_collector.app.secrets import SecretBox
+from plc_data_collector.app.settings import RuntimeSettings
+from plc_data_collector.app.stores import Stores, build_stores
+from plc_data_collector.domain import CollectorError, StorageError
+from plc_data_collector.persistence import (
+    ConfigStore,
+    create_database_engine,
+    run_migrations,
+    wait_for_database,
+)
+from plc_data_collector.protocols import DriverRegistry, default_driver_registry
+from plc_data_collector.runtime.live_values import LiveValueCache
+
+LOGGER = logging.getLogger(__name__)
+DATABASE_PROBE_INTERVAL_S = 1.0
+RuntimeFactory = Callable[..., CollectorRuntime]
+
+
+class RuntimeSupervisor:
+    """Own the database and run a ``CollectorRuntime`` that "Apply changes" replaces.
+
+    ``start()`` waits for the database, migrates it, encrypts legacy plaintext
+    secrets, seeds the configuration once from the JSON file, loads the active
+    configuration and starts the runtime. ``apply()`` stops the runtime (its
+    Reading Queue drains into the database or the Spool) and starts a new one
+    from the database, while the API keeps serving. The engine and the live
+    value cache outlive every runtime.
+    """
+
+    def __init__(
+        self,
+        settings: RuntimeSettings,
+        *,
+        registry: DriverRegistry | None = None,
+        runtime_factory: RuntimeFactory = CollectorRuntime,
+    ) -> None:
+        """Create a supervisor; nothing touches the database until ``start()``."""
+        self._settings = settings
+        self._registry = registry or default_driver_registry()
+        self._runtime_factory = runtime_factory
+        self._engine: Engine | None = None
+        self._stores: Stores | None = None
+        self._live_values = LiveValueCache()
+        self._runtime: CollectorRuntime | None = None
+        self._running_revision: int | None = None
+        self._running_config: CollectorConfig | None = None
+        self._last_error_code: str | None = None
+        self._apply_lock = asyncio.Lock()
+        self._apply_task: asyncio.Task[None] | None = None
+        self._applying = False
+        # Lifecycle: idle -> starting -> running -> stopping -> stopped.
+        self._phase = "idle"
+        self._stop_requested = False
+        self._startup_task: asyncio.Task[None] | None = None
+        self._start_finished = asyncio.Event()
+        self._stopped = asyncio.Event()
+
+    @property
+    def stores(self) -> Stores | None:
+        """Return the database stores, or None before the secret key is loaded."""
+        return self._stores
+
+    @property
+    def live_values(self) -> LiveValueCache:
+        """Return the live value cache; the same object across applies."""
+        return self._live_values
+
+    @property
+    def running_revision(self) -> int | None:
+        """Return the configuration revision the runtime runs, or None."""
+        return self._running_revision
+
+    @property
+    def running_config(self) -> CollectorConfig | None:
+        """Return the configuration the runtime runs, or None."""
+        return self._running_config
+
+    @property
+    def last_error_code(self) -> str | None:
+        """Return the code of the last failed start or apply, if any."""
+        return self._last_error_code
+
+    @property
+    def applying(self) -> bool:
+        """Return whether an apply is in progress."""
+        return self._applying
+
+    @property
+    def registry(self) -> DriverRegistry:
+        """Return the protocol driver registry the runtimes use."""
+        return self._registry
+
+    async def start(self) -> None:
+        """Prepare the database and configuration, then start the runtime.
+
+        A failure leaves nothing running: the runtime and the engine are
+        released before the error propagates. A stop() during start() aborts
+        it, and start() then raises ``CollectorError(code="runtime_start_aborted")``.
+        """
+        if self._phase != "idle":
+            raise RuntimeError("RuntimeSupervisor can only be started once.")
+        self._phase = "starting"
+        settings = self._settings
+        LOGGER.info(
+            "runtime_starting",
+            extra={
+                "database_url": _mask_database_url(settings.database_url),
+                "config_file": (
+                    None if settings.config_file is None else str(settings.config_file)
+                ),
+                "data_dir": str(settings.data_dir),
+            },
+        )
+        # The startup steps run in their own task so stop() can cancel them
+        # without cancelling the caller of start().
+        self._startup_task = asyncio.create_task(
+            self._startup(), name="supervisor-startup"
+        )
+        try:
+            await self._startup_task
+            if self._stop_requested:
+                raise asyncio.CancelledError
+        except BaseException as error:
+            current = asyncio.current_task()
+            aborted = (
+                self._stop_requested
+                and isinstance(error, asyncio.CancelledError)
+                and not (current is not None and current.cancelling())
+            )
+            if aborted:
+                LOGGER.info("runtime_start_aborted")
+            else:
+                self._last_error_code = error_code(error)
+                LOGGER.error(
+                    "supervisor_start_failed",
+                    extra={
+                        "error_code": error_code(error),
+                        "error_type": type(error).__name__,
+                    },
+                )
+            await self._release(timeout_s=settings.storage_timeout_s)
+            self._start_finished.set()
+            if aborted:
+                raise CollectorError(
+                    "Runtime start was aborted by stop().",
+                    code="runtime_start_aborted",
+                ) from None
+            raise
+        finally:
+            self._startup_task = None
+        self._phase = "running"
+        self._start_finished.set()
+        LOGGER.info("supervisor_started", extra={"revision": self._running_revision})
+
+    async def apply(self) -> None:
+        """Replace the runtime with one built from the database configuration.
+
+        The current runtime stops first, so its pending Poll Results are stored
+        (or spooled) before the new runtime starts. On a failed start no runtime
+        runs, readiness reports the error code, and a later apply() retries.
+        The swap runs in its own task, so a cancelled caller cannot leave it
+        half done.
+        """
+        if self._apply_lock.locked():
+            raise CollectorError(
+                "Changes are already being applied.", code="apply_in_progress"
+            )
+        if self._phase != "running":
+            raise CollectorError(
+                "The collector is not running, so changes cannot be applied now.",
+                code="runtime_not_running",
+            )
+        # Uncontended, acquire() returns without yielding, so the check above
+        # and taking the lock cannot interleave with another apply().
+        await self._apply_lock.acquire()
+        self._applying = True
+        task = asyncio.create_task(self._apply(), name="runtime-apply")
+        self._apply_task = task
+        # The caller sees the error; this keeps a cancelled caller from leaving
+        # an "exception was never retrieved" warning behind.
+        task.add_done_callback(_consume_result)
+        await asyncio.shield(task)
+
+    async def _apply(self) -> None:
+        try:
+            LOGGER.info("runtime_apply_started")
+            runtime, self._runtime = self._runtime, None
+            self._running_revision = None
+            self._running_config = None
+            try:
+                if runtime is not None:
+                    await runtime.stop(timeout_s=self._settings.storage_timeout_s * 2)
+                await self._start_runtime()
+            except Exception as error:
+                self._running_revision = None
+                self._last_error_code = error_code(error)
+                LOGGER.error(
+                    "runtime_apply_failed",
+                    extra={
+                        "error_code": error_code(error),
+                        "error_type": type(error).__name__,
+                    },
+                )
+                raise
+            self._last_error_code = None
+            LOGGER.info("runtime_applied", extra={"revision": self._running_revision})
+        finally:
+            self._applying = False
+            self._apply_task = None
+            self._apply_lock.release()
+
+    async def stop(self, timeout_s: float = 10.0) -> None:
+        """Stop the runtime, then dispose the database engine.
+
+        ``timeout_s`` bounds the runtime's drain. An apply in progress finishes
+        first. A stop() during start() aborts the start. Calling stop() again,
+        or before start(), does nothing.
+        """
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive.")
+        self._stop_requested = True
+        if self._phase == "starting":
+            task = self._startup_task
+            if task is not None:
+                task.cancel()
+            await self._start_finished.wait()
+            return
+        if self._phase == "running":
+            self._phase = "stopping"
+            async with self._apply_lock:
+                await self._release(timeout_s=timeout_s)
+        elif self._phase == "stopping":
+            await self._stopped.wait()
+
+    def api_state(self) -> RuntimeApiState:
+        """Return a fresh snapshot for the API."""
+        if self._applying:
+            return RuntimeApiState(
+                configuration_loaded=False,
+                critical_errors=("applying_changes",),
+            )
+        runtime = self._runtime
+        if runtime is None:
+            return RuntimeApiState(
+                configuration_loaded=False,
+                storage_available=False,
+                critical_errors=(
+                    () if self._last_error_code is None else (self._last_error_code,)
+                ),
+            )
+        return runtime.api_state()
+
+    async def _startup(self) -> None:
+        settings = self._settings
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        self._engine = create_database_engine(settings.database_url)
+        await self._wait_for_database(self._engine)
+        await self._migrate()
+        secret_box = await asyncio.to_thread(SecretBox.from_settings, settings)
+        self._stores = build_stores(self._engine, secret_box)
+        await asyncio.to_thread(self._prepare_configuration, self._stores.config)
+        await self._start_runtime()
+
+    async def _wait_for_database(self, engine: Engine) -> None:
+        """Probe the database until it answers or the wait timeout expires.
+
+        Each probe is a single attempt in a thread, and the waiting happens on
+        the event loop, so stop() can abort the wait between probes.
+        """
+        timeout_s = self._settings.database_wait_timeout_s
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while True:
+            try:
+                await asyncio.to_thread(wait_for_database, engine, timeout_s=0)
+                return
+            except StorageError as error:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise StorageError(
+                        f"Database did not become available within {timeout_s:g}s.",
+                        code="database_unavailable",
+                        details=error.details,
+                    ) from None
+            await asyncio.sleep(min(DATABASE_PROBE_INTERVAL_S, remaining))
+
+    async def _migrate(self) -> None:
+        try:
+            await asyncio.to_thread(run_migrations, self._settings.database_url)
+        except Exception as error:
+            # Alembic and SQLAlchemy errors may quote the database URL, so only
+            # the error type leaves this block.
+            raise StorageError(
+                "Database migration failed.",
+                code="database_migration_failed",
+                details={"error_type": type(error).__name__},
+            ) from None
+
+    def _prepare_configuration(self, store: ConfigStore) -> None:
+        """Encrypt legacy secrets and seed from the file once; runs in a thread."""
+        encrypted = store.encrypt_plaintext_secrets()
+        if encrypted:
+            LOGGER.info(
+                "configuration_secrets_encrypted", extra={"connections": encrypted}
+            )
+        config_file = self._settings.config_file
+        if config_file is None:
+            return
+        # Archived rows count: a database that ever had configuration is never
+        # re-seeded, so the database stays the source of truth.
+        if store.has_any_connection_rows():
+            LOGGER.info(
+                "configuration_seed_skipped", extra={"config_file": str(config_file)}
+            )
+            return
+        config = load_collector_config(config_file)
+        store.replace_all(config)
+        LOGGER.info(
+            "configuration_seeded",
+            extra={
+                "config_file": str(config_file),
+                "connections": len(config.connections),
+                "tag_groups": len(config.tag_groups),
+                "tags": len(config.tags),
+            },
+        )
+
+    async def _start_runtime(self) -> None:
+        """Load the active configuration and start a runtime for it."""
+        if self._engine is None or self._stores is None:
+            raise RuntimeError("The database is not prepared.")
+        config, revision = await asyncio.to_thread(self._stores.config.load_active)
+        if not config.connections:
+            LOGGER.warning("configuration_empty")
+        runtime = self._runtime_factory(
+            self._settings,
+            self._engine,
+            config,
+            registry=self._registry,
+            live_values=self._live_values,
+        )
+        self._runtime = runtime
+        try:
+            await runtime.start()
+        except BaseException:
+            self._runtime = None
+            raise
+        self._running_revision = revision
+        self._running_config = config
+        self._live_values.retain(
+            {tag.id for tag in config.tags},
+            {group.id for group in config.tag_groups},
+        )
+
+    async def _release(self, *, timeout_s: float) -> None:
+        """Stop the runtime and dispose the engine; used by stop() and failed starts."""
+        self._phase = "stopping"
+        try:
+            runtime, self._runtime = self._runtime, None
+            if runtime is not None:
+                await runtime.stop(timeout_s=timeout_s)
+        finally:
+            self._running_revision = None
+            self._stores = None
+            if self._engine is not None:
+                self._engine.dispose()
+            self._phase = "stopped"
+            self._stopped.set()
+
+
+def _mask_database_url(database_url: str) -> str:
+    try:
+        return make_url(database_url).render_as_string(hide_password=True)
+    except Exception:
+        return "<invalid database URL>"
+
+
+def _consume_result(task: asyncio.Task[None]) -> None:
+    if not task.cancelled():
+        task.exception()

@@ -14,6 +14,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from cryptography.fernet import Fernet
 from sqlalchemy import (
     BigInteger,
     Engine,
@@ -26,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.domain import (
     ConfigurationError,
@@ -40,7 +42,7 @@ from plc_data_collector.domain import (
     ValueType,
 )
 from plc_data_collector.persistence import (
-    ConfigurationRepository,
+    ConfigStore,
     ReadingRepository,
     create_database_engine,
     run_migrations,
@@ -151,32 +153,7 @@ def test_writer_round_trip_on_postgres(postgres_url: str) -> None:
     engine = create_database_engine(postgres_url)
     wait_for_database(engine, timeout_s=10)
     now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
-    config_repository = ConfigurationRepository(engine)
-    config_repository.upsert_connections(
-        [
-            ConnectionConfig(
-                id="mock_connection",
-                protocol="mock",
-                endpoint="mock://local",
-                protocol_options={"driver": "mock"},
-            )
-        ]
-    )
-    config_repository.upsert_tag_groups(
-        [TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)]
-    )
-    config_repository.upsert_tags(
-        [
-            TagConfig(
-                id="temperature",
-                tag_group_id="fast",
-                name="Temperature",
-                address="mock://temperature",
-                value_type=ValueType.NUMERIC,
-                metadata={"unit": "C"},
-            )
-        ]
-    )
+    _seed_mock_configuration(engine)
     run_id = uuid.uuid4().hex
     values = [
         TagValue.numeric(20.5),
@@ -500,31 +477,27 @@ def _column_type(engine: Engine, table: str, column: str) -> object:
 
 
 def _seed_mock_configuration(engine: Engine) -> None:
-    config_repository = ConfigurationRepository(engine)
-    config_repository.upsert_connections(
-        [
-            ConnectionConfig(
-                id="mock_connection",
-                protocol="mock",
-                endpoint="mock://local",
-                protocol_options={"driver": "mock"},
-            )
-        ]
+    store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
+    store.upsert_connection(
+        ConnectionConfig(
+            id="mock_connection",
+            protocol="mock",
+            endpoint="mock://local",
+            protocol_options={"driver": "mock"},
+        )
     )
-    config_repository.upsert_tag_groups(
-        [TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)]
+    store.upsert_tag_group(
+        TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)
     )
-    config_repository.upsert_tags(
-        [
-            TagConfig(
-                id="temperature",
-                tag_group_id="fast",
-                name="Temperature",
-                address="mock://temperature",
-                value_type=ValueType.NUMERIC,
-                metadata={"unit": "C"},
-            )
-        ]
+    store.upsert_tag(
+        TagConfig(
+            id="temperature",
+            tag_group_id="fast",
+            name="Temperature",
+            address="mock://temperature",
+            value_type=ValueType.NUMERIC,
+            metadata={"unit": "C"},
+        )
     )
 
 

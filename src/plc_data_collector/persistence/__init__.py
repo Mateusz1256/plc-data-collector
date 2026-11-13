@@ -14,7 +14,6 @@ from plc_data_collector.persistence.database import (
 from plc_data_collector.persistence.migrate import run_migrations
 from plc_data_collector.persistence.records import TagReadingRecord
 from plc_data_collector.persistence.repositories import (
-    ConfigurationRepository,
     ReadingRepository,
     RuntimeStatusRepository,
 )
@@ -33,7 +32,6 @@ from plc_data_collector.persistence.writer import (
 __all__ = [
     "AppSettingsStore",
     "ConfigStore",
-    "ConfigurationRepository",
     "DatabaseWriter",
     "DatabaseWriterMetrics",
     "DatabaseWriterShutdown",
