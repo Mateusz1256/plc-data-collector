@@ -601,3 +601,71 @@ def test_history_postgres(postgres_engine: Engine) -> None:
     assert readings.count_older_than(cutoff) == 3  # count 0, 1 and the blob
     assert readings.delete_older_than(cutoff, batch_size=2) == 3
     assert readings.count_older_than(cutoff) == 0
+
+
+def test_tags_endpoints_read_no_secrets(
+    api_client: TestClient,
+    api_key: str,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = _stores(fake_host)
+    _seed_config(stores)
+    stores.config.upsert_connection(
+        ConnectionConfig(
+            id="line2", name="Line 2", protocol="opcua", endpoint="opc.tcp://p2:4840"
+        )
+    )
+    stores.config.upsert_tag_group(
+        TagGroupConfig(id="slow", connection_id="line2", interval_ms=60000)
+    )
+    stores.config.upsert_tag(
+        TagConfig(
+            id="level",
+            tag_group_id="slow",
+            name="Level",
+            address="ns=2;s=level",
+            value_type=ValueType.NUMERIC,
+        )
+    )
+    stores.config.archive_tag("recipe")
+
+    def no_full_load() -> object:
+        raise AssertionError("the data API must not load the whole configuration")
+
+    def no_decrypt(token: str) -> object:
+        raise AssertionError("the data API must not decrypt secrets")
+
+    monkeypatch.setattr(stores.config, "load_active", no_full_load)
+    monkeypatch.setattr(stores.config._box, "decrypt", no_decrypt)
+
+    listed = api_client.get("/api/v1/tags", headers={"X-API-Key": api_key})
+    assert listed.status_code == 200
+    tags = {tag["id"]: tag for tag in listed.json()["tags"]}
+    assert sorted(tags) == ["blob", "count", "level", "running", "temperature"]
+    assert tags["level"]["connection_id"] == "line2"
+    assert tags["temperature"]["unit"] == "°C"
+    one = api_client.get("/api/v1/tags/level", headers={"X-API-Key": api_key})
+    assert one.status_code == 200
+    assert one.json()["connection_id"] == "line2"
+    gone = api_client.get("/api/v1/tags/recipe", headers={"X-API-Key": api_key})
+    assert gone.status_code == 404
+
+
+def test_history_breaks_received_at_ties_by_event_id(fake_host: FakeHost) -> None:
+    stores = _stores(fake_host)
+    _seed_config(stores)
+    at = NOW - timedelta(minutes=1)
+    ReadingRepository(fake_host.engine).save_tag_readings(
+        TagReadingRecord(
+            event_id=event_id,
+            connection_id="line1",
+            tag_group_id="fast",
+            result=_good("count", TagValue.integer(value), at),
+        )
+        for event_id, value in (("e-c", 3), ("e-a", 1), ("e-b", 2))
+    )
+
+    rows, _ = stores.readings.history("count", at, NOW, 10)
+
+    assert [row.value.raw for row in rows if row.value is not None] == [1, 2, 3]

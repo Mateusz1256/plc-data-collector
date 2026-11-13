@@ -72,7 +72,8 @@ class ReadingQueryRepository:
                 tag_readings.c.received_at >= start,
                 tag_readings.c.received_at < end,
             )
-            .order_by(tag_readings.c.received_at)
+            # event_id breaks ties, so pages are stable for equal timestamps.
+            .order_by(tag_readings.c.received_at, tag_readings.c.event_id)
             .limit(limit + 1)
         )
         with self._engine.connect() as connection:

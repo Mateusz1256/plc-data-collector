@@ -128,6 +128,25 @@ class ConfigStore:
             ).first()
         return None if row is None else _tag_from_row(row)
 
+    def active_tags(self, tag_id: str | None = None) -> list[tuple[TagConfig, str]]:
+        """Return active Tags with the ID of their Connection, ordered by ID.
+
+        Reads only Tags joined to their active Tag Groups, so no Connection
+        row is read and no secret is decrypted. With ``tag_id``, returns at
+        most that Tag.
+        """
+        statement = (
+            select(tags, tag_groups.c.connection_id.label("group_connection_id"))
+            .join(tag_groups, tags.c.tag_group_id == tag_groups.c.id)
+            .where(tags.c.archived_at.is_(None), tag_groups.c.archived_at.is_(None))
+            .order_by(tags.c.id)
+        )
+        if tag_id is not None:
+            statement = statement.where(tags.c.id == tag_id)
+        with self._engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return [(_tag_from_row(row), row.group_connection_id) for row in rows]
+
     def is_archived_tag(self, tag_id: str) -> bool | None:
         """Return whether the Tag is archived, or None when it is unknown."""
         with self._engine.connect() as connection:

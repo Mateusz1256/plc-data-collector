@@ -160,15 +160,12 @@ def create_data_v1_router() -> APIRouter:
     async def list_tags(request: Request) -> TagListOut:
         """Return every active Tag with its current value."""
         stores = _stores(request)
-        config, _ = await asyncio.to_thread(stores.config.load_active)
+        active = await asyncio.to_thread(stores.config.active_tags)
         live = _host(request).live_values.values()
-        group_connections = {
-            group.id: group.connection_id for group in config.tag_groups
-        }
         return TagListOut(
             tags=[
-                _tag_out(tag, group_connections[tag.tag_group_id], live.get(tag.id))
-                for tag in config.tags
+                _tag_out(tag, connection_id, live.get(tag.id))
+                for tag, connection_id in active
             ]
         )
 
@@ -180,10 +177,10 @@ def create_data_v1_router() -> APIRouter:
     async def get_tag(request: Request, tag_id: str) -> TagOut:
         """Return one active Tag with its current value."""
         stores = _stores(request)
-        found = await asyncio.to_thread(_active_tag, stores, tag_id)
-        if found is None:
+        found = await asyncio.to_thread(stores.config.active_tags, tag_id)
+        if not found:
             raise HTTPException(status.HTTP_404_NOT_FOUND, TAG_NOT_FOUND_MESSAGE)
-        tag, connection_id = found
+        tag, connection_id = found[0]
         return _tag_out(tag, connection_id, _host(request).live_values.get(tag_id))
 
     @router.get(
@@ -240,16 +237,6 @@ def create_data_v1_router() -> APIRouter:
         )
 
     return router
-
-
-def _active_tag(stores: Stores, tag_id: str) -> tuple[TagConfig, str] | None:
-    tag = stores.config.get_tag(tag_id)
-    if tag is None:
-        return None
-    group = stores.config.get_tag_group(tag.tag_group_id)
-    if group is None:
-        return None
-    return tag, group.connection_id
 
 
 def _tag_out(tag: TagConfig, connection_id: str, live: LiveValue | None) -> TagOut:
