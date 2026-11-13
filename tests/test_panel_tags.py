@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +17,7 @@ from plc_data_collector.domain import (
     TagConfig,
     TagGroupConfig,
     TagResult,
+    TagValue,
     ValueType,
 )
 from plc_data_collector.panel.tag_forms import generate_tag_id
@@ -483,3 +484,50 @@ def test_cross_site_posts_are_refused(
 def test_tag_routes_require_sign_in(panel_client: TestClient) -> None:
     assert panel_client.get("/panel/tags/t1/edit").status_code == 303
     assert panel_client.post("/panel/tags/t1", data={}).status_code == 303
+
+
+def test_tag_last_read_marks_old_good_values_stale(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    stores.config.upsert_tag(_tag("t_old"))
+    stores.config.upsert_tag(_tag("t_new"))
+    now = datetime.now(UTC)
+    old = now - timedelta(seconds=30)
+    fake_host.live_values.update(
+        WorkerPollResult(
+            execution=PollExecution(
+                execution_id="p2",
+                connection_id="line1_opcua",
+                tag_group_id="fast",
+                status=PollStatus.SUCCESS,
+                started_at=now,
+                finished_at=now,
+                requested_tags=2,
+                successful_tags=2,
+                failed_tags=0,
+            ),
+            results=(
+                TagResult.success(
+                    tag_id="t_old",
+                    value=TagValue.numeric(1.0),
+                    source_timestamp=old,
+                    received_at=old,
+                ),
+                TagResult.success(
+                    tag_id="t_new",
+                    value=TagValue.numeric(2.0),
+                    source_timestamp=now,
+                    received_at=now,
+                ),
+            ),
+        )
+    )
+
+    page = signed_in_client.get("/panel/connections/line1_opcua").text
+
+    old_row = re.search(r'<tr[^>]*data-tag="t_old"[^>]*>.*?</tr>', page, re.DOTALL)
+    new_row = re.search(r'<tr[^>]*data-tag="t_new"[^>]*>.*?</tr>', page, re.DOTALL)
+    assert old_row is not None and new_row is not None
+    assert "state-degraded" in old_row.group(0) and "Stale" in old_row.group(0)
+    assert "state-normal" in new_row.group(0) and "Good" in new_row.group(0)

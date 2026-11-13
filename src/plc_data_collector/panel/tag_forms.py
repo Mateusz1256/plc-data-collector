@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Literal
 
 from plc_data_collector.app.config import CollectorConfig
@@ -29,6 +30,7 @@ from plc_data_collector.panel.protocol_forms import (
     validate_new_id,
 )
 from plc_data_collector.panel.rendering import StateBadge, format_interval, state_badge
+from plc_data_collector.runtime.live_values import freshness
 
 DEFAULT_GROUP_INTERVAL_MS = 1000
 DEFAULT_GROUP_TIMEOUT_MS = 800
@@ -95,8 +97,13 @@ def build_tag_section(
     *,
     group_ui: FormUi | None = None,
     tag_ui: FormUi | None = None,
+    now: datetime | None = None,
 ) -> TagSection:
-    """Collect the Tag Groups and Tags of one Connection for display."""
+    """Collect the Tag Groups and Tags of one Connection for display.
+
+    ``now`` (default: the current time) decides which good values are stale.
+    """
+    now = now or datetime.now(UTC)
     groups = [g for g in config.tag_groups if g.connection_id == connection_id]
     group_ids = {g.id for g in groups}
     tags_by_group: dict[str, list[TagConfig]] = defaultdict(list)
@@ -104,12 +111,11 @@ def build_tag_section(
         if tag.tag_group_id in group_ids:
             tags_by_group[tag.tag_group_id].append(tag)
     labels = dict(group_choices(config, connection_id))
-    group_enabled = {g.id: g.enabled for g in groups}
     return TagSection(
         connection_id=connection_id,
         group_rows=[GroupRow(g, len(tags_by_group[g.id])) for g in groups],
         tag_rows=[
-            _tag_row(host, tag, connection_id, labels[g.id], group_enabled[g.id])
+            _tag_row(host, tag, connection_id, labels[g.id], g, now)
             for g in groups
             for tag in tags_by_group[g.id]
         ],
@@ -133,9 +139,10 @@ def _tag_row(
     tag: TagConfig,
     connection_id: str,
     group_label: str,
-    group_enabled: bool,
+    group: TagGroupConfig,
+    now: datetime,
 ) -> TagRow:
-    if not tag.enabled or not group_enabled:
+    if not tag.enabled or not group.enabled:
         return TagRow(tag, group_label, state_badge("disabled"), None)
     live = host.live_values.get(tag.id)
     if live is None or live.connection_id != connection_id:
@@ -145,6 +152,11 @@ def _tag_row(
     message = None
     if result.quality is not Quality.GOOD:
         message = result.error_message or result.error_code
+    else:
+        # Same rule as the Live page: older than two intervals is stale.
+        age_s = max(0.0, (now - result.received_at).total_seconds())
+        if freshness(age_s, max(group.interval_ms, 1) / 1000).stale:
+            badge = state_badge("stale")
     return TagRow(tag, group_label, badge, message)
 
 
