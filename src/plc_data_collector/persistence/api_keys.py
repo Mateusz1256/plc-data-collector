@@ -12,7 +12,7 @@ import secrets
 import threading
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Engine, and_, select, update
@@ -126,16 +126,21 @@ class ApiKeyStore:
             ).all()
         return [_info(row) for row in rows]
 
-    def revoke(self, key_id: str) -> None:
-        """Revoke a key; revoking an unknown or revoked key does nothing."""
+    def revoke(self, key_id: str) -> ApiKeyInfo | None:
+        """Revoke a key and return it; an unknown or revoked key gives None."""
+        active = and_(api_keys.c.id == key_id, api_keys.c.revoked_at.is_(None))
+        revoked: ApiKeyInfo | None = None
         with self._engine.begin() as connection:
-            connection.execute(
-                update(api_keys)
-                .where(and_(api_keys.c.id == key_id, api_keys.c.revoked_at.is_(None)))
-                .values(revoked_at=self._clock())
-            )
+            row = connection.execute(select(api_keys).where(active)).first()
+            if row is not None:
+                now = self._clock()
+                connection.execute(
+                    update(api_keys).where(active).values(revoked_at=now)
+                )
+                revoked = replace(_info(row), revoked_at=now)
         with self._lock:
             self._last_written.pop(key_id, None)
+        return revoked
 
     def authenticate(self, key: str) -> ApiKeyInfo | None:
         """Return the active key matching ``key``, or None."""

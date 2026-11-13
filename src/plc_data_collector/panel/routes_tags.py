@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
+from plc_data_collector.panel import audit
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
 from plc_data_collector.panel.protocol_forms import FormErrors
 from plc_data_collector.panel.rendering import flash, render
@@ -108,6 +109,9 @@ def create_tags_router() -> APIRouter:
         except ConfigurationError as error:
             errors = _group_store_errors(error)
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed, stores, "tag_group", group.id, "created"
+            )
             flash(request, SAVED_MESSAGE)
             return _back_to(connection_id)
         ui = FormUi("new", None, group_values_from_data(data), errors)
@@ -141,6 +145,9 @@ def create_tags_router() -> APIRouter:
         except ConfigurationError as error:
             errors = _group_store_errors(error)
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed, stores, "tag_group", group.id, "updated"
+            )
             flash(request, SAVED_MESSAGE)
             return _back_to(existing.connection_id)
         ui = FormUi("edit", existing.id, group_values_from_data(data), errors)
@@ -162,6 +169,7 @@ def create_tags_router() -> APIRouter:
         if group is None:
             return _not_found(request, GROUP_NOT_FOUND)
         stores.config.archive_tag_group(group_id)
+        audit.configuration_changed(stores, "tag_group", group_id, "deleted")
         flash(request, GROUP_DELETED_MESSAGE)
         return _back_to(group.connection_id)
 
@@ -259,6 +267,9 @@ def create_tags_router() -> APIRouter:
         except ConfigurationError as error:
             errors = {"form": error.message}
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed, stores, "tag", tag.id, "updated"
+            )
             flash(request, SAVED_MESSAGE)
             return _back_to(connection_id)
         ui = FormUi("edit", existing.id, tag_values_from_data(data), errors)
@@ -281,6 +292,7 @@ def create_tags_router() -> APIRouter:
         if tag is None or group is None:
             return _not_found(request, TAG_NOT_FOUND)
         stores.config.archive_tag(tag_id)
+        audit.configuration_changed(stores, "tag", tag_id, "deleted")
         flash(request, TAG_DELETED_MESSAGE)
         return _back_to(group.connection_id)
 
@@ -332,6 +344,9 @@ async def _create_with_generated_id(
             if error.code != "duplicate_id" or attempt == ID_ATTEMPTS - 1:
                 raise
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed, stores, "tag", tag.id, "created"
+            )
             return
 
 

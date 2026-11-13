@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import logging
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,7 +38,7 @@ from plc_data_collector.domain import (
     TagValue,
     ValueType,
 )
-from plc_data_collector.panel import auth
+from plc_data_collector.panel import audit, auth
 from plc_data_collector.panel.app import (
     AdminRequired,
     PanelStores,
@@ -63,7 +64,9 @@ from plc_data_collector.panel.routes_connections import (
 from plc_data_collector.panel.tag_forms import UNIT_KEY
 from plc_data_collector.runtime.live_values import LiveValue, freshness
 
+LOGGER = logging.getLogger(__name__)
 APPLIED_MESSAGE = "Changes applied. Collection restarted."
+APPLY_FAILED_MESSAGE = "Changes could not be applied."
 APPLY_IN_PROGRESS_MESSAGE = "Changes are already being applied. Wait a few seconds."
 APPLY_NOT_RUNNING_MESSAGE = (
     "Collection is starting or stopping, so changes cannot be applied now. "
@@ -526,6 +529,7 @@ def create_live_router() -> APIRouter:
     )
     async def apply_changes(request: Request) -> RedirectResponse:
         host = auth.web_options(request).host
+        LOGGER.info("apply_requested")
         try:
             await host.apply()
         except CollectorError as error:
@@ -533,11 +537,17 @@ def create_live_router() -> APIRouter:
                 flash(request, APPLY_IN_PROGRESS_MESSAGE)
             elif error.code == "runtime_not_running":
                 flash(request, APPLY_NOT_RUNNING_MESSAGE)
-            # Any other failure leaves collection stopped; the banner says so.
-        except Exception:
-            # The supervisor logs the failure with its error code, and the
-            # banner shows collection stopped with that code.
-            pass
+            elif host.last_error_code is None:
+                flash(request, APPLY_FAILED_MESSAGE)
+            # Otherwise the banner shows the failure with its error code.
+        except Exception as error:
+            # The supervisor logs the failure with its error code; the banner
+            # shows it when the host kept one.
+            LOGGER.error(
+                "apply_request_failed", extra={"error_type": type(error).__name__}
+            )
+            if host.last_error_code is None:
+                flash(request, APPLY_FAILED_MESSAGE)
         else:
             flash(request, APPLIED_MESSAGE)
         return RedirectResponse("/panel/live", status_code=status.HTTP_303_SEE_OTHER)
@@ -564,6 +574,7 @@ def create_live_router() -> APIRouter:
             )
         if not existing.enabled:
             stores.config.upsert_connection(dataclasses.replace(existing, enabled=True))
+            audit.configuration_changed(stores, "connection", connection_id, "enabled")
         flash(request, ENABLED_MESSAGE)
         return RedirectResponse(
             f"/panel/live#{connection_id}", status_code=status.HTTP_303_SEE_OTHER

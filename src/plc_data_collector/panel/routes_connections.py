@@ -24,7 +24,7 @@ from plc_data_collector.domain import (
     TagConfig,
     TagGroupConfig,
 )
-from plc_data_collector.panel import auth
+from plc_data_collector.panel import audit, auth
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
 from plc_data_collector.panel.host import CollectorHost
 from plc_data_collector.panel.protocol_forms import (
@@ -162,6 +162,13 @@ def create_connections_router() -> APIRouter:
         except ConfigurationError as error:
             errors = _store_errors(error)
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed,
+                stores,
+                "connection",
+                connection.id,
+                "created",
+            )
             flash(request, SAVED_MESSAGE)
             return _see_other(f"/panel/connections/{connection.id}")
         return _edit_page(
@@ -203,6 +210,13 @@ def create_connections_router() -> APIRouter:
         except ConfigurationError as error:
             errors = {"form": error.message}
         else:
+            await asyncio.to_thread(
+                audit.configuration_changed,
+                stores,
+                "connection",
+                connection_id,
+                "updated",
+            )
             flash(request, SAVED_MESSAGE)
             return _see_other(f"/panel/connections/{connection_id}")
         return _edit_page(
@@ -251,6 +265,7 @@ def create_connections_router() -> APIRouter:
         if stores.config.get_connection(connection_id) is None:
             return _not_found(request)
         stores.config.archive_connection(connection_id)
+        audit.configuration_changed(stores, "connection", connection_id, "deleted")
         flash(request, DELETED_MESSAGE)
         return _see_other("/panel/connections")
 

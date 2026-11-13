@@ -87,6 +87,7 @@ def create_panel_router(throttle: LoginThrottle | None = None) -> APIRouter:
                 request, next_path=next_path, error="throttled", status_code=429
             )
         if not auth.password_matches(options.admin_password, password):
+            LOGGER.warning("panel_sign_in_failed", extra={"client": client})
             login_throttle.record_failure(client)
             await auth.failure_sleep(auth.FAILURE_DELAY_S)
             return _login(

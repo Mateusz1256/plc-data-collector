@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import secrets
 import threading
@@ -43,12 +44,13 @@ from plc_data_collector.app.config_transfer import (
 )
 from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import ConfigurationError
-from plc_data_collector.panel import auth
+from plc_data_collector.panel import audit, auth
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
 from plc_data_collector.panel.rendering import flash, format_age, render
 from plc_data_collector.panel.routes_live import diff_sections, utc_now
 from plc_data_collector.persistence import ApiKeyInfo, RetentionSettings
 
+LOGGER = logging.getLogger(__name__)
 IMPORTED_MESSAGE = "Configuration imported. Apply changes to start using it."
 IMPORT_EXPIRED_MESSAGE = "This import has expired. Upload the file again."
 IMPORT_CHANGED_MESSAGE = (
@@ -266,6 +268,7 @@ def create_settings_router() -> APIRouter:
                 key_name=name,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
+        LOGGER.info("api_key_created", extra={"id": info.id, "prefix": info.prefix})
         return _settings_page(request, stores, revealed={"name": info.name, "key": key})
 
     @router.post(
@@ -274,7 +277,11 @@ def create_settings_router() -> APIRouter:
         dependencies=[AdminRequired, SameSiteRequired],
     )
     def revoke_api_key(request: Request, stores: PanelStores, key_id: str) -> Response:
-        stores.api_keys.revoke(key_id)
+        revoked = stores.api_keys.revoke(key_id)
+        if revoked is not None:
+            LOGGER.info(
+                "api_key_revoked", extra={"id": revoked.id, "prefix": revoked.prefix}
+            )
         flash(
             request, "API key revoked. Applications using it can no longer read data."
         )
@@ -451,6 +458,7 @@ def create_settings_router() -> APIRouter:
                 import_error=IMPORT_CHANGED_MESSAGE,
                 status_code=status.HTTP_409_CONFLICT,
             )
+        audit.configuration_imported(stores)
         flash(request, IMPORTED_MESSAGE)
         return RedirectResponse(
             "/panel/settings", status_code=status.HTTP_303_SEE_OTHER
