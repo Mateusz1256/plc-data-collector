@@ -116,13 +116,22 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 }
 .content.narrow { max-width: var(--content-max-narrow); }
 
-/* Pending-changes banner (filled in by the Live tags work) */
+/* Pending-changes banner */
 .banner { background: var(--info-band); border-bottom: 1px solid var(--info-band-rule); }
 .banner-inner {
   max-width: var(--content-max); margin: 0 auto; padding: 12px var(--gutter);
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px;
 }
 .banner p { margin: 0; color: var(--info-band-ink); flex: 1 1 420px; }
+.banner-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.banner-actions form { margin: 0; }
+.banner-link {
+  display: inline-flex; align-items: center; min-height: var(--control-height);
+  padding: 0 16px; color: var(--info-band-ink);
+}
+/* Collection stopped is abnormal, so this banner takes the failed colours. */
+.banner-failed { background: var(--state-failed-band); border-bottom-color: var(--state-failed); }
+.banner-failed p, .banner-failed .banner-link { color: var(--state-failed-detail); }
 
 /* Panels and tables */
 .panel { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-panel); }
@@ -283,3 +292,35 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .inline-form-delete { margin: -4px 16px 16px; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .inline-form-delete p { margin: 0; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Live tags */
+.live-layout { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
+.live-aside { flex: 1 1 260px; max-width: 320px; display: flex; flex-direction: column; gap: 16px; }
+.live-index { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--rule); }
+.live-index li { border-bottom: 1px solid var(--rule); }
+.live-index a {
+  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 4px;
+  text-decoration: none; color: var(--ink);
+}
+.live-index .state { font-size: var(--text-secondary); }
+.live-index-name { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.live-main { flex: 999 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.live-connection { overflow: hidden; }
+.live-connection-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; padding: 16px 16px 12px;
+}
+.live-connection-head .secondary { font-size: var(--text-table); }
+.live-connection-state { margin-left: auto; font-size: var(--text-table); }
+.live-note { margin: 0 16px 12px; }
+.live-disabled {
+  margin: 0; padding: 0 16px 16px; display: flex; flex-wrap: wrap; align-items: center;
+  gap: 8px 16px; font-size: var(--text-table); color: var(--ink-muted);
+}
+.live-disabled p { margin: 0; }
+.live-group { border-top: 1px solid var(--rule); }
+.live-group-head { display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 10px 16px; }
+.live-group-name { font-weight: 600; color: var(--ink); }
+.col-tag { width: 30%; }
+.col-value { width: 26%; }
+.col-fresh { width: 96px; }
+.live-value.muted { color: var(--field-border); }

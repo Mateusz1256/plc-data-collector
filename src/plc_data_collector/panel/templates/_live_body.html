@@ -1,0 +1,70 @@
+{% from "_state.html" import state_marker %}
+<div id="live-body" class="live-layout" hx-get="/panel/live/body" hx-trigger="every 1s" hx-swap="outerHTML">
+<aside class="live-aside">
+<h1 class="page-title">Live tags</h1>
+<p class="lead num">{{ view.intro }}</p>
+{% if view.connections %}
+<ul class="live-index">
+{% for item in view.connections %}
+<li><a id="index-{{ item.connection.id }}" href="#{{ item.connection.id }}">
+<span class="live-index-name"><span class="row-name">{{ item.connection.name }}</span><span class="secondary">{{ item.protocol_label }}</span></span>
+{{ state_marker(item.badge) }}
+</a></li>
+{% endfor %}
+</ul>
+{% endif %}
+</aside>
+<div class="live-main">
+{% for item in view.connections %}
+{% set connection = item.connection %}
+<section id="{{ connection.id }}" class="panel live-connection" aria-label="{{ connection.name }}">
+<div class="live-connection-head">
+<h2 class="section-title">{{ connection.name }}</h2>
+<span class="secondary">{{ item.protocol_label }}</span>
+<span class="addr secondary">{{ item.address }}</span>
+<span class="live-connection-state">{{ state_marker(item.badge) }}</span>
+</div>
+{% if item.detail %}
+<p class="alert alert-failed live-note">{{ item.detail }}</p>
+{% endif %}
+{% if not connection.enabled %}
+<form class="live-disabled" method="post" action="/panel/connections/{{ connection.id }}/enable">
+<p>Not collecting. Its {{ item.tag_count }} {{ "tag is" if item.tag_count == 1 else "tags are" }} kept in the configuration.</p>
+<button type="submit" class="btn" id="enable-{{ connection.id }}">Enable connection<span class="visually-hidden"> {{ connection.name }}</span></button>
+</form>
+{% endif %}
+{% for view_group in item.groups %}
+<div class="live-group">
+<div class="group-header live-group-head num">
+<span class="live-group-name">{{ view_group.group.id }}</span>
+<span>Every {{ view_group.interval }}</span>
+<span>{{ view_group.last_poll }}</span>
+</div>
+{% if view_group.rows %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col" class="col-tag">Tag</th><th scope="col" class="col-value">Value</th><th scope="col">Quality</th><th scope="col">Updated</th><th scope="col" class="col-fresh">Freshness</th></tr></thead>
+<tbody>
+{% for row in view_group.rows %}
+<tr data-tag="{{ row.tag.id }}">
+<td><div class="row-name">{{ row.tag.name }}</div><div class="addr row-id">{{ row.tag.address }}</div></td>
+<td class="num"><span class="live-value{% if row.dim_value %} muted{% endif %}">{{ row.value }}</span>{% if row.unit %} <span class="secondary">{{ row.unit }}</span>{% endif %}</td>
+<td>{{ state_marker(row.badge) }}{% if row.detail %}<div class="secondary">{{ row.detail }}</div>{% endif %}</td>
+<td class="num secondary">{{ row.updated }}</td>
+<td>{% if row.bar_width is not none %}<div class="bar-track" aria-hidden="true"><div id="bar-{{ row.tag.id }}" class="bar{% if row.stale %} stale{% endif %}" style="width: {{ row.bar_width }}%"></div></div>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+</div>
+{% endfor %}
+</section>
+{% else %}
+<section class="panel">
+<p class="empty">No connections yet. <a href="/panel/connections">Add a connection</a> to start collecting.</p>
+</section>
+{% endfor %}
+</div>
+</div>

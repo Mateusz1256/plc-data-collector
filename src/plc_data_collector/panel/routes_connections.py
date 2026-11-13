@@ -403,8 +403,8 @@ def _edit_page(
                 group_ui=group_ui,
                 tag_ui=tag_ui,
             )
-        workers = _workers(_host(request))
-        badge, detail = _connection_status(existing, workers)
+        workers = worker_statuses(_host(request))
+        badge, detail = connection_status(existing, workers)
         saved_secrets = {
             field.name
             for field in form.fields
@@ -454,7 +454,7 @@ def _not_found(request: Request) -> HTMLResponse:
 def _connection_rows(
     host: CollectorHost, config: CollectorConfig
 ) -> list[ConnectionRow]:
-    workers = _workers(host)
+    workers = worker_statuses(host)
     live = host.live_values.values()
     now = datetime.now(UTC)
     groups_by_connection: dict[str, list[TagGroupConfig]] = defaultdict(list)
@@ -468,7 +468,7 @@ def _connection_rows(
     for connection in config.connections:
         groups = groups_by_connection[connection.id]
         all_tags = [t for g in groups for t in tags_by_group[g.id]]
-        badge, detail = _connection_status(connection, workers)
+        badge, detail = connection_status(connection, workers)
         if not connection.enabled:
             collected = f"Not collecting ({plural(len(all_tags), 'tag')})"
             last_poll, last_poll_failed = "None", False
@@ -527,10 +527,11 @@ def _poll_time(execution: PollExecution) -> datetime:
     return execution.finished_at or execution.started_at
 
 
-def _connection_status(
+def connection_status(
     connection: ConnectionConfig,
     workers: Mapping[str, RuntimeComponentStatus],
 ) -> tuple[StateBadge, str | None]:
+    """Return a Connection's state badge and, when it failed, the reason."""
     if not connection.enabled:
         return state_badge("disabled"), None
     worker = workers.get(f"{WORKER_PREFIX}{connection.id}")
@@ -544,7 +545,8 @@ def _connection_status(
     return badge, detail
 
 
-def _workers(host: CollectorHost) -> dict[str, RuntimeComponentStatus]:
+def worker_statuses(host: CollectorHost) -> dict[str, RuntimeComponentStatus]:
+    """Return the runtime's worker states keyed by component ID."""
     return {worker.component_id: worker for worker in host.api_state().workers}
 
 

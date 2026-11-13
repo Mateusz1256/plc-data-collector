@@ -93,11 +93,6 @@ def create_panel_router(throttle: LoginThrottle | None = None) -> APIRouter:
         auth.sign_out(request)
         return RedirectResponse(auth.LOGIN_PATH, status_code=status.HTTP_303_SEE_OTHER)
 
-    @router.get("/live", include_in_schema=False, dependencies=[AdminRequired])
-    def live(request: Request, stores: PanelStores) -> HTMLResponse:
-        # The page shell; the Live tags work fills in the content.
-        return render(request, "base.html", {"nav": "live", "title": "Live tags"})
-
     return router
 
 

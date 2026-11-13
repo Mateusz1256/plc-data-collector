@@ -135,9 +135,15 @@ def render(
     """Render a Panel template into an HTML response.
 
     Every template gets ``request``, ``nav`` (the current top navigation
-    item, or None) and ``show_nav`` (False hides navigation and sign-out).
+    item, or None), ``show_nav`` (False hides navigation and sign-out) and
+    ``pending`` (the pending-changes banner, prepared for full pages by the
+    ``attach_pending_changes`` dependency; None hides it).
     """
-    values: dict[str, object] = {"nav": None, "show_nav": True}
+    values: dict[str, object] = {
+        "nav": None,
+        "show_nav": True,
+        "pending": getattr(request.state, "pending_changes", None),
+    }
     values.update(context or {})
     values["request"] = request
     html = ENVIRONMENT.get_template(template).render(values)
