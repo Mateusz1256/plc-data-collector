@@ -77,7 +77,7 @@ docker compose up
 
 Replace the clone URL with the address of your copy of this repository. The `.env` file holds demo credentials; change the passwords for anything beyond a local demo.
 
-When the log shows the collector polling, open the Panel at `http://localhost:8080/` and sign in with the password set in `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` in `.env`. The Live page shows the four Tags of the demo Connection `line1_opcua`, updated every second. The port comes from `COLLECTOR_API_PORT` in `.env`, default `8080`.
+When the log shows the collector polling, open the Panel at `http://localhost:8080/` and sign in with the password set in `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` in `.env`. The Live page shows the four Tags of the demo Connection `line1_opcua`, updated every second. The port comes from `COLLECTOR_API_PORT` in `.env`, default `8080`, and is published on 127.0.0.1 only; the comment in `docker-compose.yml` explains how to expose it to other hosts deliberately.
 
 Other endpoints to check:
 

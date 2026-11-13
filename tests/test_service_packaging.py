@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import socket
 from pathlib import Path
@@ -268,3 +269,11 @@ async def wait_until(condition: object, *, timeout_s: float = 1.0) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError("condition was not reached before timeout")
+
+
+def test_compose_publishes_the_collector_on_loopback_only() -> None:
+    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    published = re.findall(r'^\s+- "([^"]*:8080)"', compose, re.MULTILINE)
+    assert published == ["127.0.0.1:${COLLECTOR_API_PORT:-8080}:8080"]

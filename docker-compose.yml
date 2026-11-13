@@ -41,7 +41,11 @@ services:
     restart: unless-stopped # also covers the case where the DB wait times out
     stop_grace_period: 30s # leave time to drain the Reading Queue and spool on SIGTERM
     ports:
-      - "${COLLECTOR_API_PORT:-8080}:8080" # Panel (/panel), data API (/api/v1), /health/*, /api/*
+      # Panel (/panel), data API (/api/v1), /health/* and /api/*, published on
+      # this machine only. To reach it from other hosts, change 127.0.0.1 to
+      # 0.0.0.0 (or a LAN address) deliberately, ideally behind a TLS reverse
+      # proxy, and set a strong PLC_DATA_COLLECTOR_ADMIN_PASSWORD first.
+      - "127.0.0.1:${COLLECTOR_API_PORT:-8080}:8080"
     environment:
       # Seed file: imported only on the first start, while the database has no configuration.
       # After that the database is the source of truth; edit configuration in the Panel.
