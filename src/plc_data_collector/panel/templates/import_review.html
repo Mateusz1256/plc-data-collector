@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content_class %} narrow{% endblock %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/settings">Settings</a> / {{ title }}</nav>
+<h1 class="page-title">{{ title }}</h1>
+</div>
+{% if sections %}
+{% include "_diff_sections.html" %}
+{% else %}
+<section class="panel"><p class="empty">This file matches the saved configuration. Nothing will change.</p></section>
+{% endif %}
+<form method="post" action="/panel/settings/import/confirm" class="form-actions">
+<textarea name="config_json" hidden>{{ config_json }}</textarea>
+<button type="submit" class="btn btn-primary">Replace configuration</button>
+<a class="btn btn-quiet" href="/panel/settings">Cancel</a>
+</form>
+{% endblock %}

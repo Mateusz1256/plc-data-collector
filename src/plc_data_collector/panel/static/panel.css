@@ -324,3 +324,13 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .col-value { width: 26%; }
 .col-fresh { width: 96px; }
 .live-value.muted { color: var(--field-border); }
+
+/* Settings */
+.settings-section { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.settings-head { display: flex; flex-direction: column; gap: 6px; }
+.settings-head .section-title, .settings-section > .section-title { margin: 0; }
+.settings-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+.settings-column { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; margin: 0; }
+.settings-column .subsection-title { margin: 0; }
+.settings-column .secondary { margin: 0; }
+.settings-column .field { width: 100%; }

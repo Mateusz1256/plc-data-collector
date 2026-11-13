@@ -410,6 +410,21 @@ def _last_poll_text(
     return f"Last poll {age} ago, {good} of {plural(total, 'tag')} good"
 
 
+def diff_sections(
+    diff: ConfigDiff,
+) -> list[tuple[str, list[tuple[str, ConfigChange]]]]:
+    """Group a diff into Added / Changed / Removed sections for the templates."""
+    sections: list[tuple[str, list[tuple[str, ConfigChange]]]] = []
+    for heading, changes in (
+        ("Added", diff.added),
+        ("Changed", diff.changed),
+        ("Removed", diff.removed),
+    ):
+        if changes:
+            sections.append((heading, [(_KIND_LABELS[c.kind], c) for c in changes]))
+    return sections
+
+
 # Routes
 
 
@@ -432,17 +447,7 @@ def create_live_router() -> APIRouter:
     @router.get("/changes", include_in_schema=False, dependencies=[AdminRequired])
     async def review_changes(request: Request, stores: PanelStores) -> HTMLResponse:
         pending = await load_pending_changes(request)
-        sections: list[tuple[str, list[tuple[str, ConfigChange]]]] = []
-        if pending is not None:
-            for heading, changes in (
-                ("Added", pending.diff.added),
-                ("Changed", pending.diff.changed),
-                ("Removed", pending.diff.removed),
-            ):
-                if changes:
-                    sections.append(
-                        (heading, [(_KIND_LABELS[c.kind], c) for c in changes])
-                    )
+        sections = diff_sections(pending.diff) if pending is not None else []
         return render(
             request,
             "changes.html",
