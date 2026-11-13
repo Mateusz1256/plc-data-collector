@@ -5,10 +5,15 @@ from __future__ import annotations
 import re
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 from panel_support import FakeHost
 
-from plc_data_collector.panel.auth import LoginThrottle
+from plc_data_collector.panel.auth import (
+    CrossSiteRequest,
+    LoginThrottle,
+    require_same_site,
+)
 
 WRONG_PASSWORD_COPY = (
     "That password doesn't match. Check "
@@ -384,3 +389,67 @@ def test_state_marker_macro_renders_shape_and_word() -> None:
     assert "state-failed" in bad and "<rect" in bad and "Bad" in bad
     assert "state-disabled" in disabled and "Disabled" in disabled
     assert state_badge("something-new").kind == "failed"
+
+
+def _same_site_request(headers: dict[str, str], scheme: str = "http") -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "scheme": scheme,
+            "path": "/panel/login",
+            "headers": [
+                (name.lower().encode("latin-1"), value.encode("latin-1"))
+                for name, value in headers.items()
+            ],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        # A TLS-terminating proxy: the browser saw https, the app sees http.
+        {"Origin": "https://h", "Host": "h"},
+        {"Origin": "https://H", "Host": "h:443"},
+        {"Origin": "http://h", "Host": "h:80"},
+        {"Origin": "https://h:443", "Host": "h"},
+        {"Origin": "http://h:8000", "Host": "H:8000"},
+        {"Origin": "http://[::1]:8000", "Host": "[::1]:8000"},
+    ],
+)
+def test_same_site_origin_matches_host_without_request_scheme(
+    headers: dict[str, str],
+) -> None:
+    require_same_site(_same_site_request(headers, scheme="http"))
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Origin": "null"},
+        {"Origin": "null", "Host": "h"},
+        {"Origin": "not a url", "Host": "h"},
+        {"Origin": "https://h"},
+        {"Origin": "https://h:8443", "Host": "h"},
+        {"Origin": "https://evil.example", "Host": "h"},
+        {"Origin": "http://h:99999", "Host": "h"},
+    ],
+)
+def test_same_site_refuses_undeterminable_or_other_origin(
+    headers: dict[str, str],
+) -> None:
+    with pytest.raises(CrossSiteRequest):
+        require_same_site(_same_site_request(headers))
+
+
+def test_post_with_https_origin_behind_proxy_is_accepted(
+    panel_client: TestClient,
+) -> None:
+    response = panel_client.post(
+        "/panel/login",
+        data={"password": "pw"},
+        headers={"Origin": "https://testserver"},
+    )
+
+    assert response.status_code == 303

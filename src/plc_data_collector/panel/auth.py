@@ -171,42 +171,57 @@ def require_same_site(request: Request) -> None:
 
     A second layer on top of the SameSite=Strict session cookie. The request
     is refused when ``Sec-Fetch-Site`` is ``cross-site``, or when ``Origin`` is
-    present and its host:port differs from ``Host``. Requests with neither
+    present and its host and port differ from ``Host``. Requests with neither
     header (non-browser clients, older browsers) pass.
+
+    The request's own scheme is not used: behind a TLS-terminating proxy the
+    browser sends ``Origin: https://h`` while the app sees plain http. The
+    Origin's default port follows the Origin's scheme, and ``Host`` drops a
+    trailing ``:80`` or ``:443``. An Origin that names no host (``null``) or
+    cannot be parsed is refused, as is an Origin without a ``Host`` header.
     """
     if request.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
         raise CrossSiteRequest
     origin = request.headers.get("Origin")
     if origin is None:
         return
-    host = request.headers.get("Host", "")
-    if _origin_authority(origin) != _authority(host, request.url.scheme):
+    origin_authority = _origin_authority(origin)
+    if origin_authority is None or origin_authority != _host_authority(
+        request.headers.get("Host")
+    ):
         raise CrossSiteRequest
 
 
-def _origin_authority(origin: str) -> str | None:
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin_authority(origin: str) -> tuple[str, int | None] | None:
+    """Return ``(host, port)`` of an Origin; the scheme's default port is None."""
     try:
-        parts = urlsplit(origin)
-        if not parts.scheme or not parts.hostname:
-            return None
-        return _authority(parts.netloc, parts.scheme)
+        parts = urlsplit(origin.strip())
+        hostname = parts.hostname
+        port = parts.port
     except ValueError:
         return None
+    default_port = _DEFAULT_PORTS.get(parts.scheme.lower())
+    if default_port is None or not hostname:
+        return None
+    return hostname.lower(), None if port == default_port else port
 
 
-def _authority(netloc: str, scheme: str) -> str | None:
-    """Return ``host:port`` in lower case with the scheme's default port filled in."""
+def _host_authority(host: str | None) -> tuple[str, int | None] | None:
+    """Return ``(host, port)`` of a Host header; ports 80 and 443 become None."""
+    if not host:
+        return None
     try:
-        parts = urlsplit(f"//{netloc}")
+        parts = urlsplit(f"//{host.strip()}")
         hostname = parts.hostname
         port = parts.port
     except ValueError:
         return None
     if not hostname:
         return None
-    if port is None:
-        port = 443 if scheme in ("https", "wss") else 80
-    return f"{hostname.lower()}:{port}"
+    return hostname.lower(), None if port in _DEFAULT_PORTS.values() else port
 
 
 def _return_path(request: Request) -> str:
