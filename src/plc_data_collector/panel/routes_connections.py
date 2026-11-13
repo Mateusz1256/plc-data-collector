@@ -45,6 +45,11 @@ from plc_data_collector.panel.rendering import (
     render,
     state_badge,
 )
+from plc_data_collector.panel.tag_forms import (
+    VALUE_TYPE_CHOICES,
+    FormUi,
+    build_tag_section,
+)
 
 SAVED_MESSAGE = "Saved changes take effect after you apply them from the banner."
 DELETED_MESSAGE = (
@@ -175,16 +180,7 @@ def create_connections_router() -> APIRouter:
     async def edit_connection(
         request: Request, connection_id: str, stores: PanelStores
     ) -> HTMLResponse:
-        existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
-        if existing is None:
-            return _not_found(request)
-        form = form_for(existing.protocol)
-        return _edit_page(
-            request,
-            form,
-            values=_values_from_connection(form, existing),
-            existing=existing,
-        )
+        return await render_connection_page(request, stores, connection_id)
 
     @router.post(
         "/connections/{connection_id}",
@@ -214,6 +210,7 @@ def create_connections_router() -> APIRouter:
             form,
             values=_values_from_data(form, data),
             existing=existing,
+            config=await _load_config(stores),
             errors=errors,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -239,6 +236,7 @@ def create_connections_router() -> APIRouter:
             form,
             values=_values_from_connection(form, existing),
             existing=existing,
+            config=config,
             confirm_delete={"groups": len(groups), "tags": tag_count},
         )
 
@@ -291,6 +289,38 @@ def create_connections_router() -> APIRouter:
         return _test_result(request, ok=result.ok, message=result.message)
 
     return router
+
+
+async def render_connection_page(
+    request: Request,
+    stores: Stores,
+    connection_id: str,
+    *,
+    group_ui: FormUi | None = None,
+    tag_ui: FormUi | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Render the edit page of a saved Connection, optionally with an open form.
+
+    ``group_ui`` and ``tag_ui`` open the inline Tag Group or Tag form, for
+    pages that must show it again with its errors. Unknown Connections get
+    the 404 page.
+    """
+    existing = await asyncio.to_thread(stores.config.get_connection, connection_id)
+    if existing is None:
+        return _not_found(request)
+    config = await _load_config(stores)
+    form = form_for(existing.protocol)
+    return _edit_page(
+        request,
+        form,
+        values=_values_from_connection(form, existing),
+        existing=existing,
+        config=config,
+        group_ui=group_ui,
+        tag_ui=tag_ui,
+        status_code=status_code,
+    )
 
 
 async def _load_config(stores: Stores) -> CollectorConfig:
@@ -353,6 +383,9 @@ def _edit_page(
     *,
     values: Mapping[str, object],
     existing: ConnectionConfig | None = None,
+    config: CollectorConfig | None = None,
+    group_ui: FormUi | None = None,
+    tag_ui: FormUi | None = None,
     errors: Mapping[str, str] | None = None,
     confirm_delete: Mapping[str, int] | None = None,
     status_code: int = 200,
@@ -360,7 +393,16 @@ def _edit_page(
     badge: StateBadge | None = None
     detail: str | None = None
     saved_secrets: set[str] = set()
+    tag_section = None
     if existing is not None:
+        if config is not None:
+            tag_section = build_tag_section(
+                _host(request),
+                config,
+                existing.id,
+                group_ui=group_ui,
+                tag_ui=tag_ui,
+            )
         workers = _workers(_host(request))
         badge, detail = _connection_status(existing, workers)
         saved_secrets = {
@@ -386,6 +428,8 @@ def _edit_page(
             "id_help": ID_HELP,
             "saved_note": SAVED_MESSAGE,
             "confirm_delete": confirm_delete,
+            "tag_section": tag_section,
+            "value_types": VALUE_TYPE_CHOICES,
         },
         status_code=status_code,
     )

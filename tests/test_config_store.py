@@ -195,6 +195,14 @@ def test_upsert_restores_archived_id(store: ConfigStore) -> None:
     assert store.is_archived_tag("t1") is False
 
 
+def test_all_tag_ids_includes_archived(store: ConfigStore) -> None:
+    _seed(store)
+    store.upsert_tag(_tag("t2"))
+    store.archive_tag("t2")
+
+    assert store.all_tag_ids() == {"t1", "t2"}
+
+
 def test_upsert_tag_rejects_archived_group(store: ConfigStore) -> None:
     _seed(store)
     store.archive_tag_group("g1")

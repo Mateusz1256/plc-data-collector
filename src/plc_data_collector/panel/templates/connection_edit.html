@@ -74,7 +74,12 @@ Stored readings are kept. Collection stops after you apply changes.
 <p class="secondary">{{ saved_note }}</p>
 </div>
 </form>
-{# Tag Groups and Tags of this Connection go here. #}
+{% if tag_section %}
+<div class="tag-stack">
+{% include "_tag_groups.html" %}
+{% include "_tags.html" %}
+</div>
+{% endif %}
 </div>
 
 {% if existing and confirm_delete is none %}

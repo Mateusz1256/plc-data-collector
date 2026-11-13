@@ -123,6 +123,11 @@ class ConfigStore:
             ).first()
         return None if row is None else row[0] is not None
 
+    def all_tag_ids(self) -> set[str]:
+        """Return every Tag ID, archived ones included."""
+        with self._engine.connect() as connection:
+            return {row[0] for row in connection.execute(select(tags.c.id))}
+
     # Writes
 
     def create_connection(self, config: ConnectionConfig) -> None:

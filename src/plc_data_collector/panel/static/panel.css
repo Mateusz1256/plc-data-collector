@@ -267,3 +267,19 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 .confirm-panel p { margin: 0; }
 .btn-danger-solid { color: var(--white); background: var(--state-failed); border: 0; }
 .btn-danger-solid:hover { color: var(--white); background: var(--state-failed-detail); }
+
+/* Tag Groups and Tags on the Connection page */
+.tag-stack { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
+.section-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 16px; }
+.section-head .section-title { margin: 0; }
+.section-head p { margin: 0; flex: 1 1 260px; }
+.inline-form {
+  margin: 0 16px 16px; padding: 16px; background: var(--white);
+  border: 1px solid var(--action); border-radius: var(--radius-control);
+  display: flex; flex-direction: column; gap: 14px;
+}
+.inline-form h3 { margin: 0; font-size: var(--text-subsection); }
+.inline-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.inline-form-delete { margin: -4px 16px 16px; padding: 0 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.inline-form-delete p { margin: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
