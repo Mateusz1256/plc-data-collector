@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block page %}
+<div class="login-page">
+<form class="login-form panel" method="post" action="/panel/login" aria-label="Sign in">
+<div class="login-heading">
+<h1>PLC Data Collector</h1>
+<p>Sign in to manage connections and see live tags.</p>
+</div>
+{% if panel_off %}
+<p role="alert" class="alert alert-failed">The Panel is turned off. Set <span class="addr">PLC_DATA_COLLECTOR_ADMIN_PASSWORD</span> in the server's .env file and restart the collector.</p>
+{% else %}
+{% if error == "wrong_password" %}
+<p role="alert" class="alert alert-failed">That password doesn't match. Check <span class="addr">PLC_DATA_COLLECTOR_ADMIN_PASSWORD</span> in the server's .env file.</p>
+{% elif error == "throttled" %}
+<p role="alert" class="alert alert-failed">Too many failed sign-ins. Wait 5 minutes and try again.</p>
+{% endif %}
+<input type="hidden" name="next" value="{{ next }}">
+<label class="field">Admin password
+<input class="input" type="password" name="password" autocomplete="current-password" required autofocus>
+</label>
+<button type="submit" class="btn btn-primary">Sign in</button>
+{% endif %}
+</form>
+</div>
+{% endblock %}

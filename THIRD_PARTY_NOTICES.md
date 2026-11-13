@@ -197,6 +197,31 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by AnyIO. License verified from package
   metadata field `License-Expression: BSD-3-Clause`.
 
+### itsdangerous
+
+- Version: 2.2.0
+- Purpose: signs the Panel session cookie (used by Starlette's session
+  middleware)
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/itsdangerous/2.2.0/
+- Copyright notice: Copyright 2011 Pallets. See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata classifier `License :: OSI Approved :: BSD License` and the
+  bundled `LICENSE.txt` (BSD 3-Clause text).
+
+### Jinja2
+
+- Version: 3.1.6
+- Purpose: HTML templates for the Panel
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/Jinja2/3.1.6/
+- Copyright notice: Copyright 2007 Pallets. See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata classifier `License :: OSI Approved :: BSD License` and the
+  bundled `LICENSE.txt` (BSD 3-Clause text).
+
 ### Mako
 
 - Version: 1.4.3
@@ -211,13 +236,13 @@ regenerated from a lockfile once dependency locking is introduced.
 ### MarkupSafe
 
 - Version: 3.0.4
-- Purpose: transitive Mako dependency for safe markup handling
+- Purpose: transitive Mako and Jinja2 dependency for safe markup handling
 - License: BSD-3-Clause
 - Source: https://pypi.org/project/MarkupSafe/3.0.4/
 - Copyright notice: See package license file.
 - Bundled in distribution: yes
-- Notes: installed transitively by Mako. License verified from package metadata
-  field `License-Expression: BSD-3-Clause`.
+- Notes: installed transitively by Mako and Jinja2. License verified from
+  package metadata field `License-Expression: BSD-3-Clause`.
 
 ### pydantic
 
@@ -283,6 +308,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Bundled in distribution: yes
 - Notes: installed transitively by asyncua. License verified from package
   metadata field `License-Expression: BSD-3-Clause`.
+
+### python-multipart
+
+- Version: 0.0.33
+- Purpose: parses the Panel's HTML form submissions (FastAPI `Form`)
+- License: Apache-2.0
+- Source: https://pypi.org/project/python-multipart/0.0.33/
+- Copyright notice: See package license file.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: Apache-2.0`.
 
 ### pytz
 
@@ -589,6 +625,25 @@ introduced.
 - Copyright notice: See package license file.
 - Bundled in distribution: no
 - Notes: installed transitively in the `dev` extra.
+
+## Vendored Assets
+
+Files copied into the package rather than installed by pip. They are not in
+`credits.json`, which lists Python packages only.
+
+### htmx
+
+- Version: 2.0.11
+- Purpose: partial page updates in the Panel
+  (`src/plc_data_collector/panel/static/htmx.min.js`)
+- License: 0BSD (BSD Zero-Clause License)
+- Source: https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js
+- Copyright notice: none required by the license. See
+  https://unpkg.com/htmx.org@2.0.11/LICENSE.
+- Bundled in distribution: yes
+- Notes: vendored unmodified apart from a one-line header comment naming the
+  version and source. License verified from the npm package metadata
+  (`"license": "0BSD"`) and the `LICENSE` file of htmx.org 2.0.11.
 
 ## Credits Generation
 

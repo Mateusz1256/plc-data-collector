@@ -20,7 +20,10 @@ dependencies = [
   "SQLAlchemy==2.0.44",
   "uvicorn==0.35.0",
   "pydantic==2.11.3",
-  "cryptography==50.0.2"
+  "cryptography==50.0.2",
+  "jinja2==3.1.6",
+  "python-multipart==0.0.33",
+  "itsdangerous==2.2.0"
 ]
 
 [project.optional-dependencies]
@@ -46,6 +49,8 @@ plc_data_collector = [
   "persistence/migrations/*.py",
   "persistence/migrations/versions/*.py",
   "persistence/migrations/script.py.mako",
+  "panel/templates/*.html",
+  "panel/static/*",
 ]
 
 [tool.setuptools]

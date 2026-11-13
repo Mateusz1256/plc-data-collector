@@ -181,7 +181,8 @@ async def _run_runtime_and_api(
     api_overrides: Mapping[str, object],
 ) -> int:
     # Imported here: settings imports ServicePaths from this module.
-    from plc_data_collector.api import create_api_app
+    from plc_data_collector.api import WebOptions, create_api_app
+    from plc_data_collector.app.secrets import SecretBox
     from plc_data_collector.app.settings import RuntimeSettings
     from plc_data_collector.app.supervisor import RuntimeSupervisor
 
@@ -192,14 +193,22 @@ async def _run_runtime_and_api(
             config_file=paths.config_file,
             **api_overrides,
         )
-    except CollectorError as error:
+        # Runs before the supervisor, so a generated secret key file exists
+        # once and both read the same key.
+        secret_box = SecretBox.from_settings(settings)
+    except (CollectorError, OSError) as error:
         _log_start_failed(error)
         return 1
 
     supervisor = RuntimeSupervisor(settings)
+    web = WebOptions(
+        host=supervisor,
+        admin_password=settings.admin_password,
+        session_secret=secret_box.derive(b"panel-session"),
+    )
     server = _ServiceApiServer(
         uvicorn.Config(
-            create_api_app(supervisor.api_state),
+            create_api_app(supervisor.api_state, web=web),
             host=settings.api_host,
             port=settings.api_port,
             log_config=None,
