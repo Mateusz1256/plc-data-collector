@@ -13,6 +13,10 @@ from plc_data_collector.persistence.database import (
     wait_for_database,
 )
 from plc_data_collector.persistence.migrate import run_migrations
+from plc_data_collector.persistence.reading_queries import (
+    ReadingQueryRepository,
+    TagReadingRow,
+)
 from plc_data_collector.persistence.records import TagReadingRecord
 from plc_data_collector.persistence.repositories import (
     ReadingRepository,
@@ -39,12 +43,14 @@ __all__ = [
     "DatabaseWriterMetrics",
     "DatabaseWriterShutdown",
     "DurableSqliteSpool",
+    "ReadingQueryRepository",
     "ReadingRepository",
     "RetentionSettings",
     "RuntimeStatusRepository",
     "SpoolEntry",
     "SpoolMetrics",
     "TagReadingRecord",
+    "TagReadingRow",
     "create_database_engine",
     "create_sqlite_engine",
     "initialize_schema",

@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from sqlalchemy import Engine
 
 from plc_data_collector.app.secrets import SecretBox
-from plc_data_collector.persistence import ApiKeyStore, AppSettingsStore, ConfigStore
+from plc_data_collector.persistence import (
+    ApiKeyStore,
+    AppSettingsStore,
+    ConfigStore,
+    ReadingQueryRepository,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +22,7 @@ class Stores:
     config: ConfigStore
     settings: AppSettingsStore
     api_keys: ApiKeyStore
+    readings: ReadingQueryRepository
 
 
 def build_stores(engine: Engine, secret_box: SecretBox) -> Stores:
@@ -25,4 +31,5 @@ def build_stores(engine: Engine, secret_box: SecretBox) -> Stores:
         config=ConfigStore(engine, secret_box),
         settings=AppSettingsStore(engine),
         api_keys=ApiKeyStore(engine),
+        readings=ReadingQueryRepository(engine),
     )

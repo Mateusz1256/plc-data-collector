@@ -45,8 +45,9 @@ def create_api_app(
 
     ``state`` is either a fixed snapshot or a callable that returns a fresh
     snapshot; a callable is invoked on every request. With ``web``, the app
-    also serves the Panel at ``/panel`` and redirects ``/`` to it; without
-    it, the app serves only the read-only runtime endpoints.
+    also serves the Panel at ``/panel``, redirects ``/`` to it and serves the
+    data API at ``/api/v1``; without it, the app serves only the read-only
+    runtime endpoints.
     """
     app = FastAPI(
         title="PLC Data Collector",
@@ -125,6 +126,7 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     from fastapi.staticfiles import StaticFiles
     from starlette.middleware.sessions import SessionMiddleware
 
+    from plc_data_collector.api.data_v1 import create_data_v1_router
     from plc_data_collector.panel.app import (
         DatabaseNotReady,
         create_panel_router,
@@ -167,6 +169,8 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
         create_settings_router(),
     ):
         app.include_router(router, prefix="/panel", dependencies=banner)
+    # The data API needs no session; it authenticates each request by API key.
+    app.include_router(create_data_v1_router())
     app.add_exception_handler(LoginRequired, login_required_handler)
     app.add_exception_handler(DatabaseNotReady, database_not_ready_handler)
     app.add_exception_handler(CrossSiteRequest, cross_site_request_handler)
