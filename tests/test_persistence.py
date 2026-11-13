@@ -3,10 +3,12 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from cryptography.fernet import Fernet
-from sqlalchemy import Engine, inspect, select
+from sqlalchemy import Engine, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.domain import (
@@ -26,6 +28,7 @@ from plc_data_collector.persistence import (
     ReadingRepository,
     RuntimeStatusRepository,
     TagReadingRecord,
+    create_database_engine,
     create_sqlite_engine,
     initialize_schema,
 )
@@ -211,3 +214,20 @@ def test_runtime_status_repository_upserts_component_status() -> None:
         row = connection.execute(select(runtime_components)).mappings().one()
     assert row["state"] == "degraded"
     assert row["error_code"] == "timeout"
+
+
+def test_engines_hide_statement_parameters(tmp_path: Path) -> None:
+    sqlite = create_database_engine(f"sqlite:///{tmp_path / 'p.db'}")
+    postgres = create_database_engine("postgresql+pg8000://u:p@127.0.0.1:1/x")
+    try:
+        assert sqlite.hide_parameters is True
+        assert postgres.hide_parameters is True
+        with sqlite.begin() as connection:
+            connection.execute(text("CREATE TABLE t (v TEXT UNIQUE)"))
+            connection.execute(text("INSERT INTO t VALUES (:v)"), {"v": "secret-v"})
+        with pytest.raises(IntegrityError) as error, sqlite.begin() as connection:
+            connection.execute(text("INSERT INTO t VALUES (:v)"), {"v": "secret-v"})
+        assert "secret-v" not in str(error.value)
+    finally:
+        sqlite.dispose()
+        postgres.dispose()

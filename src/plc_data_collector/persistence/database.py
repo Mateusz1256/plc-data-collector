@@ -49,6 +49,8 @@ def create_database_engine(database_url: str) -> Engine:
         return create_engine(
             database_url,
             future=True,
+            # Error messages must not quote parameters (secrets, key hashes).
+            hide_parameters=True,
             pool_pre_ping=True,
             connect_args={"timeout": PG_SOCKET_TIMEOUT_S},
         )
@@ -68,7 +70,8 @@ def create_sqlite_engine(
 
 
 def _create_sqlite_engine(database_url: str) -> Engine:
-    engine = create_engine(database_url, future=True)
+    # Error messages must not quote parameters (secrets, key hashes).
+    engine = create_engine(database_url, future=True, hide_parameters=True)
 
     @event.listens_for(engine, "connect")
     def _enable_sqlite_foreign_keys(
