@@ -4,10 +4,12 @@ A new API key is shown once, in the response to the create POST itself (with
 ``Cache-Control: no-store``). It is never put in the session, a redirect URL or
 a log, so reloading or opening Settings again cannot show it.
 
-Import is two steps. ``/settings/import`` parses the upload and shows what
-would change; the review page carries the raw JSON in a hidden field, and
-``/settings/import/confirm`` validates it again from scratch, because the
-browser may send anything.
+Import is two steps. ``/settings/import`` parses the upload, shows what
+would change and keeps the parsed file in memory under a random single-use
+token (``PendingImports``); the review page carries only that token, never
+any part of the file. ``/settings/import/confirm`` takes the token, refuses
+it when the configuration changed since the review, merges stored secrets
+again and replaces the configuration.
 
 Saving retention wakes the supervisor's retention job, so old readings are
 deleted right away instead of at the next hourly run.
@@ -18,7 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import secrets
+import threading
+from collections import OrderedDict
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from time import monotonic
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Request, UploadFile, status
@@ -30,7 +38,8 @@ from plc_data_collector.app.config_transfer import (
     diff_configs,
     export_config,
     export_filename,
-    parse_import,
+    keep_stored_values,
+    parse_import_file,
 )
 from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import ConfigurationError
@@ -41,6 +50,14 @@ from plc_data_collector.panel.routes_live import diff_sections, utc_now
 from plc_data_collector.persistence import ApiKeyInfo, RetentionSettings
 
 IMPORTED_MESSAGE = "Configuration imported. Apply changes to start using it."
+IMPORT_EXPIRED_MESSAGE = "This import has expired. Upload the file again."
+IMPORT_CHANGED_MESSAGE = (
+    "The configuration changed after you reviewed this import. Upload the file "
+    "again to see the new differences."
+)
+NO_FILE_MESSAGE = "Choose a configuration file to import."
+PENDING_IMPORT_TTL_S = 15 * 60
+MAX_PENDING_IMPORTS = 8
 TOO_LARGE_MESSAGE = (
     "The file is larger than 5 MB. Check that you chose a configuration file."
 )
@@ -91,6 +108,68 @@ def _retention_form(stores: Stores) -> dict[str, object]:
         "days": days,
         "preview": _retention_preview(stores, days),
     }
+
+
+@dataclass(frozen=True)
+class PendingImport:
+    """A reviewed import: the parsed file and the revision it was compared with.
+
+    ``config`` is the file as parsed, before stored secrets are merged in;
+    confirm merges them against the configuration current at that time.
+    """
+
+    config: CollectorConfig
+    revision: int
+    created_at: float
+
+
+class PendingImports:
+    """Reviewed imports waiting for confirmation, keyed by a random token.
+
+    Tokens expire after 15 minutes, work once, and at most eight imports are
+    kept (the oldest is dropped first). Thread-safe: plain-def handlers run
+    in the threadpool.
+    """
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] | None = None,
+        ttl_s: float = PENDING_IMPORT_TTL_S,
+        max_entries: int = MAX_PENDING_IMPORTS,
+    ) -> None:
+        """Create an empty map; ``clock`` defaults to ``time.monotonic``."""
+        self._clock = clock or (lambda: monotonic())
+        self._ttl_s = ttl_s
+        self._max_entries = max_entries
+        self._entries: OrderedDict[str, PendingImport] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def add(self, config: CollectorConfig, revision: int) -> str:
+        """Keep a reviewed import and return its token."""
+        token = secrets.token_urlsafe(32)
+        with self._lock:
+            now = self._clock()
+            self._drop_expired(now)
+            self._entries[token] = PendingImport(config, revision, now)
+            while len(self._entries) > self._max_entries:
+                self._entries.popitem(last=False)
+        return token
+
+    def take(self, token: str) -> PendingImport | None:
+        """Remove and return the import for ``token``; None if unknown or expired."""
+        with self._lock:
+            self._drop_expired(self._clock())
+            return self._entries.pop(token, None)
+
+    def _drop_expired(self, now: float) -> None:
+        expired = [
+            token
+            for token, entry in self._entries.items()
+            if now - entry.created_at >= self._ttl_s
+        ]
+        for token in expired:
+            del self._entries[token]
 
 
 def _import_error(error: ConfigurationError) -> str:
@@ -163,6 +242,7 @@ def _key_error(error: ConfigurationError) -> str:
 def create_settings_router() -> APIRouter:
     """Create the Settings routes; include them with the ``/panel`` prefix."""
     router = APIRouter()
+    pending_imports = PendingImports()
 
     @router.get("/settings", include_in_schema=False, dependencies=[AdminRequired])
     def settings(request: Request, stores: PanelStores) -> HTMLResponse:
@@ -296,15 +376,23 @@ def create_settings_router() -> APIRouter:
     async def import_review(
         request: Request,
         stores: PanelStores,
-        config_file: Annotated[UploadFile, File()],
+        config_file: Annotated[UploadFile | None, File()] = None,
     ) -> HTMLResponse:
+        if config_file is None:
+            return await asyncio.to_thread(
+                _settings_page,
+                request,
+                stores,
+                import_error=NO_FILE_MESSAGE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
         data = await config_file.read(MAX_IMPORT_BYTES + 1)
         return await asyncio.to_thread(_review, request, stores, data)
 
-    def _review(request: Request, stores: PanelStores, data: bytes) -> HTMLResponse:
-        current, _ = stores.config.load_active()
+    def _review(request: Request, stores: Stores, data: bytes) -> HTMLResponse:
+        current, revision = stores.config.load_active()
         try:
-            new = parse_import(data, current=current)
+            parsed = parse_import_file(data)
         except ConfigurationError as error:
             return _settings_page(
                 request,
@@ -312,6 +400,8 @@ def create_settings_router() -> APIRouter:
                 import_error=_import_error(error),
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
+        new = keep_stored_values(parsed, current=current)
+        token = pending_imports.add(parsed, revision)
         return render(
             request,
             "import_review.html",
@@ -319,7 +409,7 @@ def create_settings_router() -> APIRouter:
                 "nav": "settings",
                 "title": "Review import",
                 "sections": diff_sections(diff_configs(current, new)),
-                "config_json": data.decode("utf-8"),
+                "token": token,
             },
         )
 
@@ -331,19 +421,36 @@ def create_settings_router() -> APIRouter:
     def import_confirm(
         request: Request,
         stores: PanelStores,
-        config_json: Annotated[str, Form()] = "",
+        token: Annotated[str, Form()] = "",
     ) -> Response:
-        current: CollectorConfig = stores.config.load_active()[0]
-        try:
-            new = parse_import(config_json.encode("utf-8"), current=current)
-        except ConfigurationError as error:
+        pending = pending_imports.take(token)
+        if pending is None:
             return _settings_page(
                 request,
                 stores,
-                import_error=_import_error(error),
+                import_error=IMPORT_EXPIRED_MESSAGE,
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
-        stores.config.replace_all(new)
+        current, revision = stores.config.load_active()
+        try:
+            if revision != pending.revision:
+                raise ConfigurationError(
+                    "The configuration changed after the review.",
+                    code="revision_changed",
+                )
+            stores.config.replace_all(
+                keep_stored_values(pending.config, current=current),
+                expected_revision=revision,
+            )
+        except ConfigurationError as error:
+            if error.code != "revision_changed":
+                raise
+            return _settings_page(
+                request,
+                stores,
+                import_error=IMPORT_CHANGED_MESSAGE,
+                status_code=status.HTTP_409_CONFLICT,
+            )
         flash(request, IMPORTED_MESSAGE)
         return RedirectResponse(
             "/panel/settings", status_code=status.HTTP_303_SEE_OTHER

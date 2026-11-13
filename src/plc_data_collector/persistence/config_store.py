@@ -223,10 +223,23 @@ class ConfigStore:
             )
             self._finish_write(connection, revision)
 
-    def replace_all(self, config: CollectorConfig) -> None:
-        """Make ``config`` the active set: upsert it, archive everything else."""
+    def replace_all(
+        self, config: CollectorConfig, *, expected_revision: int | None = None
+    ) -> None:
+        """Make ``config`` the active set: upsert it, archive everything else.
+
+        With ``expected_revision``, raises ``ConfigurationError`` with code
+        ``revision_changed`` and writes nothing when the revision differs; the
+        check runs under the revision lock.
+        """
         with self._engine.begin() as connection:
             revision = _lock_revision(connection)
+            if expected_revision is not None and revision != expected_revision:
+                raise ConfigurationError(
+                    "The configuration changed since it was read.",
+                    code="revision_changed",
+                    details={"expected": expected_revision, "actual": revision},
+                )
             for item in config.connections:
                 self._write_connection(connection, item)
             for group in config.tag_groups:

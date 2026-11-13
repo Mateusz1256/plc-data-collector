@@ -124,6 +124,15 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
     Secrets the file omits are kept for Connection IDs that exist in ``current``.
     Environment overrides are not applied.
     """
+    return keep_stored_values(parse_import_file(data), current=current)
+
+
+def parse_import_file(data: bytes) -> CollectorConfig:
+    """Validate an uploaded configuration file, without merging stored values.
+
+    Raises ``ConfigurationError`` for a file that is too large, not JSON or
+    not a valid configuration.
+    """
     if len(data) > MAX_IMPORT_BYTES:
         raise ConfigurationError(
             f"The file is larger than {MAX_IMPORT_BYTES // (1024 * 1024)} MiB.",
@@ -158,7 +167,7 @@ def parse_import(data: bytes, *, current: CollectorConfig) -> CollectorConfig:
             details={"location": "$"},
         )
 
-    return keep_stored_values(parse_collector_config(loaded), current=current)
+    return parse_collector_config(loaded)
 
 
 def keep_stored_values(

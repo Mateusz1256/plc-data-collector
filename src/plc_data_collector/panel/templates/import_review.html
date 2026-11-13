@@ -11,7 +11,7 @@
 <section class="panel"><p class="empty">This file matches the saved configuration. Nothing will change.</p></section>
 {% endif %}
 <form method="post" action="/panel/settings/import/confirm" class="form-actions">
-<textarea name="config_json" hidden>{{ config_json }}</textarea>
+<input type="hidden" name="token" value="{{ token }}">
 <button type="submit" class="btn btn-primary">Replace configuration</button>
 <a class="btn btn-quiet" href="/panel/settings">Cancel</a>
 </form>

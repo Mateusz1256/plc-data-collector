@@ -89,14 +89,23 @@ def _export_json(client: TestClient) -> bytes:
     return bytes(client.get("/panel/settings/export").content)
 
 
-def _hidden_json(html: str) -> str:
-    import html as html_lib
-
-    match = re.search(
-        r'<textarea name="config_json" hidden>(.*?)</textarea>', html, re.S
-    )
+def _token(html: str) -> str:
+    match = re.search(r'<input type="hidden" name="token" value="([^"]+)">', html)
     assert match
-    return html_lib.unescape(match.group(1))
+    return match.group(1)
+
+
+def _confirm(client: TestClient, token: str) -> Response:
+    response: Response = client.post(
+        "/panel/settings/import/confirm", data={"token": token}
+    )
+    return response
+
+
+def _renamed_export(client: TestClient, name: str = "Renamed") -> bytes:
+    document = json.loads(_export_json(client))
+    document["connections"][0]["name"] = name
+    return json.dumps(document).encode()
 
 
 def test_settings_page_has_three_sections(signed_in_client: TestClient) -> None:
@@ -148,31 +157,34 @@ def test_import_review_shows_added_changed_removed(
     assert _stores(fake_host).config.revision() == before
 
 
-def test_review_escapes_hidden_json(
+def test_review_page_holds_no_part_of_the_file(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
     _seed(fake_host)
     document = json.loads(_export_json(signed_in_client))
     document["connections"][0]["name"] = "</textarea><script>alert(1)</script>"
+    document["connections"][0]["protocol_options"]["password"] = "file-only-pw-42"
+    document["tags"][0]["address"] = "ns=2;s=OnlyInTheFile"
+
     response = _upload(signed_in_client, json.dumps(document).encode())
+
+    assert response.status_code == 200
     text = response.text
     assert "<script>alert(1)</script>" not in text
-    assert json.loads(_hidden_json(text)) == document
+    assert "file-only-pw-42" not in text
+    assert "OnlyInTheFile" not in text
+    assert "config_json" not in text and "<textarea" not in text
+    assert len(_token(text)) >= 40
 
 
 def test_import_confirm_replaces_and_bumps_revision(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
     _seed(fake_host)
-    document = json.loads(_export_json(signed_in_client))
-    document["connections"][0]["name"] = "Renamed"
-    review = _upload(signed_in_client, json.dumps(document).encode())
+    review = _upload(signed_in_client, _renamed_export(signed_in_client))
     before = _stores(fake_host).config.revision()
 
-    response = signed_in_client.post(
-        "/panel/settings/import/confirm",
-        data={"config_json": _hidden_json(review.text)},
-    )
+    response = _confirm(signed_in_client, _token(review.text))
 
     assert response.status_code == 303
     assert response.headers["location"] == "/panel/settings"
@@ -184,17 +196,128 @@ def test_import_confirm_replaces_and_bumps_revision(
     assert IMPORTED in signed_in_client.get("/panel/settings").text
 
 
-def test_confirm_revalidates_tampered_json(
+def test_import_token_works_only_once(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
     _seed(fake_host)
+    token = _token(_upload(signed_in_client, _renamed_export(signed_in_client)).text)
+    assert _confirm(signed_in_client, token).status_code == 303
+    revision = _stores(fake_host).config.revision()
+
+    again = _confirm(signed_in_client, token)
+
+    assert again.status_code == 400
+    assert "This import has expired. Upload the file again." in again.text
+    assert _stores(fake_host).config.revision() == revision
+
+
+@pytest.mark.parametrize(
+    "token", ["", "unknown-token", "x" * 5000], ids=["empty", "unknown", "long"]
+)
+def test_unknown_import_token_is_refused(
+    signed_in_client: TestClient, fake_host: FakeHost, token: str
+) -> None:
+    _seed(fake_host)
     before = _stores(fake_host).config.revision()
-    for payload in ("not json", "[]", "x" * (MAX_IMPORT_BYTES + 1)):
-        response = signed_in_client.post(
-            "/panel/settings/import/confirm", data={"config_json": payload}
-        )
-        assert response.status_code == 400
+
+    response = _confirm(signed_in_client, token)
+
+    assert response.status_code == 400
+    assert "This import has expired. Upload the file again." in response.text
     assert _stores(fake_host).config.revision() == before
+
+
+def test_expired_import_token_is_refused(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(fake_host)
+    clock = [1000.0]
+    monkeypatch.setattr(routes_settings, "monotonic", lambda: clock[0])
+    token = _token(_upload(signed_in_client, _renamed_export(signed_in_client)).text)
+    before = _stores(fake_host).config.revision()
+    clock[0] += 15 * 60 + 1
+
+    response = _confirm(signed_in_client, token)
+
+    assert response.status_code == 400
+    assert "This import has expired. Upload the file again." in response.text
+    assert _stores(fake_host).config.revision() == before
+
+
+def test_import_refused_when_configuration_changed_after_review(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+    token = _token(_upload(signed_in_client, _renamed_export(signed_in_client)).text)
+    _stores(fake_host).config.upsert_tag(_tag("pressure"))
+    before = _stores(fake_host).config.revision()
+
+    response = _confirm(signed_in_client, token)
+
+    assert response.status_code == 409
+    assert (
+        "The configuration changed after you reviewed this import. Upload the "
+        "file again to see the new differences."
+    ) in response.text
+    assert _stores(fake_host).config.revision() == before
+    assert _stores(fake_host).config.get_tag("pressure") is not None
+
+
+def test_two_megabyte_configuration_imports_end_to_end(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+    document = json.loads(_export_json(signed_in_client))
+    document["tags"] = [
+        {
+            "id": f"tag_{index}",
+            "tag_group_id": "fast",
+            "name": f"Tag {index}",
+            "address": f"ns=2;s=Tag{index}",
+            "value_type": "numeric",
+            "metadata": {"description": "d" * 4000},
+        }
+        for index in range(520)
+    ]
+    data = json.dumps(document).encode()
+    assert 2 * 1024 * 1024 <= len(data) < MAX_IMPORT_BYTES
+
+    review = _upload(signed_in_client, data)
+    assert review.status_code == 200
+    response = _confirm(signed_in_client, _token(review.text))
+
+    assert response.status_code == 303
+    config, _ = _stores(fake_host).config.load_active()
+    assert len(config.tags) == 520
+
+
+def test_import_without_a_file_shows_the_settings_error(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/settings/import", data={"other": "x"}, files={"x": ("x", b"")}
+    )
+
+    assert response.status_code == 400
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Choose a configuration file to import." in response.text
+
+
+def test_pending_imports_keep_at_most_eight() -> None:
+    now = [0.0]
+    pending = routes_settings.PendingImports(clock=lambda: now[0])
+    config = CollectorConfig(connections=(), tag_groups=(), tags=())
+    tokens = [pending.add(config, revision) for revision in range(9)]
+
+    assert pending.take(tokens[0]) is None
+    entry = pending.take(tokens[8])
+    assert entry is not None and entry.revision == 8
+    assert pending.take(tokens[8]) is None
+    assert pending.take(tokens[1]) is not None
 
 
 @pytest.mark.parametrize(
@@ -255,9 +378,7 @@ def test_import_requires_login(panel_client: TestClient) -> None:
     assert "/panel/login" in response.headers.get("location", "/panel/login")
     assert panel_client.get("/panel/settings").status_code == 303
     assert panel_client.get("/panel/settings/export").status_code == 303
-    confirm = panel_client.post(
-        "/panel/settings/import/confirm", data={"config_json": "{}"}
-    )
+    confirm = panel_client.post("/panel/settings/import/confirm", data={"token": "x"})
     assert confirm.status_code in (303, 401, 403)
 
 
@@ -268,9 +389,10 @@ def test_cross_site_posts_are_refused(
     before = _stores(fake_host).config.revision()
     document = _export_json(signed_in_client)
     upload = _upload(signed_in_client, document, headers=CROSS_SITE)
+    token = _token(_upload(signed_in_client, _renamed_export(signed_in_client)).text)
     confirm = signed_in_client.post(
         "/panel/settings/import/confirm",
-        data={"config_json": document.decode()},
+        data={"token": token},
         headers=CROSS_SITE,
     )
     assert upload.status_code == 403

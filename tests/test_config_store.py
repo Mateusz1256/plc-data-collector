@@ -435,3 +435,23 @@ def test_create_tag_group_needs_active_connection(store: ConfigStore) -> None:
         store.create_tag_group(_group())
 
     assert caught.value.code == "unknown_reference"
+
+
+def test_replace_all_refuses_a_stale_expected_revision(store: ConfigStore) -> None:
+    store.upsert_connection(_connection("rev_conn"))
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError) as error:
+        store.replace_all(
+            CollectorConfig(connections=(), tag_groups=(), tags=()),
+            expected_revision=revision - 1,
+        )
+
+    assert error.value.code == "revision_changed"
+    assert store.revision() == revision
+    assert store.get_connection("rev_conn") is not None
+    store.replace_all(
+        CollectorConfig(connections=(), tag_groups=(), tags=()),
+        expected_revision=revision,
+    )
+    assert store.get_connection("rev_conn") is None
