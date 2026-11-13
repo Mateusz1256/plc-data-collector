@@ -186,7 +186,7 @@ Run the service (collector, Panel and API in one process) outside Docker with `p
 
 There are two ways to read collected data.
 
-**SQL.** The PostgreSQL schema is the main contract for consumers. [docs/database-schema.md](docs/database-schema.md) documents `tag_readings`, `tags`, `tag_groups` and `connections`, the value-type columns, quality values and indexes. Timestamps are stored as ISO 8601 text in UTC; cast them with `::timestamptz`.
+**SQL.** The PostgreSQL schema is the main contract for consumers. [docs/database-schema.md](docs/database-schema.md) documents `tag_readings`, `tags`, `tag_groups` and `connections`, the value-type columns, quality values and indexes. Timestamps are stored as ISO 8601 text in UTC with a `+00:00` offset. Filter on the text against literals in the same format and cast with `::timestamptz` only in the select list: casting the column in `WHERE` prevents index use.
 
 **REST API.** Create an API key in the Panel under Settings ("Create key"). The key is shown once; only its SHA-256 hash is stored. Send it in the `X-API-Key` header:
 
@@ -215,9 +215,12 @@ from tag_readings r
 join tags t on t.id = r.tag_id
 where r.tag_id = 'line1_temperature'
   and r.quality = 'good'
-  and $__timeFilter(r.received_at::timestamptz)
+  and r.received_at >= to_char($__timeFrom() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
+  and r.received_at <  to_char($__timeTo() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
 order by 1;
 ```
+
+The time range compares `received_at` as text against bounds in its stored format, so the `(tag_id, received_at)` index serves it; `$__timeFilter(r.received_at::timestamptz)` would cast the column and scan the whole table.
 
 ## Design decisions
 
@@ -225,7 +228,7 @@ order by 1;
 
 **Removed configuration is archived.** Deleting a Connection, Tag Group or Tag sets `archived_at` instead of deleting the row, because `tag_readings` has foreign keys to all three and Poll Results for a removed Tag may still wait in the Reading Queue or the Spool ([ADR 0002](docs/adr/0002-archive-instead-of-delete.md)).
 
-**Apply changes is an in-process restart.** Saving in the Panel only writes to the database and bumps a configuration revision. "Apply changes" stops the current runtime, which drains its Reading Queue into the database or the Spool, then starts a new runtime from the saved configuration (`app/supervisor.py`). The web server keeps serving throughout. If the new runtime cannot start, `/health/ready` reports the error code, the Panel banner says collection is stopped, and Apply can be retried.
+**Apply changes is an in-process restart.** Saving in the Panel only writes to the database and bumps a configuration revision. "Apply changes" stops the current runtime, which drains its Reading Queue into the database or the Spool, then starts a new runtime from the saved configuration (`app/supervisor.py`). The web server keeps serving throughout. If the new runtime cannot start, collection restarts with the previous configuration and the Panel banner says the changes could not be applied; only if that fails too does `/health/ready` report the error code and the banner say collection is stopped. Apply can be retried either way.
 
 **API keys are hashed.** A key is `pdc_` plus 48 hex characters (192 random bits). Only its SHA-256 hash and a short prefix are stored (`persistence/api_keys.py`); because the key is random and long, an unsalted fast hash is enough and lets each request look the key up through a unique index.
 

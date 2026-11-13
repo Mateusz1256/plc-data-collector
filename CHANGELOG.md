@@ -58,7 +58,20 @@ Versioning.
 - `RuntimeSettings.config_file` is optional, and so are
   `PLC_DATA_COLLECTOR_CONFIG` and `--config`.
 - A 0.2.0 database is not re-seeded from the file. On first start its
-  plaintext protocol secrets move to the encrypted `secret_options` column.
+  plaintext protocol secrets move to the encrypted `secret_options` column,
+  and, when the config file is set and valid, the file becomes the active
+  configuration once: items 0.2.0 kept after they were removed from the file
+  are archived (`configuration_upgrade_reconciled`). Without a valid file
+  nothing changes and `configuration_upgrade_unreconciled` is logged.
+- A failed "Apply changes" restarts collection with the previous
+  configuration and its revision; the banner says the changes could not be
+  applied. Collection stops only when that fallback fails too.
+- Import confirmation uses a single-use server-side token (15 minutes) instead
+  of sending the file back from the review page, and is refused when the
+  configuration changed after the review.
+- Endpoint URL credentials (`user:password@`) are left out of exports, kept
+  on import when the stored endpoint matches, and moved into the user name and
+  encrypted password of OPC UA Connections at startup.
 - The demo stack passes `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` and
   `PLC_DATA_COLLECTOR_SECRET_KEY` to the collector; `.env.example` documents
   both.

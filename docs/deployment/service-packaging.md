@@ -26,9 +26,19 @@ plc-data-collector --run-service \
   --run-dir /run/plc-data-collector
 ```
 
+`--config` (or `PLC_DATA_COLLECTOR_CONFIG`) is optional. The file only seeds
+the configuration on the first start, while the database has no
+configuration; after that, edit configuration in the Panel. Without it, the
+collector starts with an empty configuration.
+
 Supported environment variables:
 
-- `PLC_DATA_COLLECTOR_CONFIG`
+- `PLC_DATA_COLLECTOR_CONFIG` (optional; seed only)
+- `PLC_DATA_COLLECTOR_ADMIN_PASSWORD`: the Panel sign-in password. Unset
+  turns the Panel off.
+- `PLC_DATA_COLLECTOR_SECRET_KEY`: the Fernet key that encrypts stored
+  protocol passwords. Unset, the collector generates `secret.key` in the
+  data directory once.
 - `PLC_DATA_COLLECTOR_DATA_DIR`
 - `PLC_DATA_COLLECTOR_LOG_DIR`
 - `PLC_DATA_COLLECTOR_RUN_DIR`
@@ -130,7 +140,11 @@ nssm start plc-data-collector
 Recommended update flow:
 
 1. Stop the service.
-2. Back up configuration, main database and spool directory.
+2. Back up the database (it holds the configuration and the readings; with
+   SQLite, the database file in the data directory), `secret.key` in the
+   data directory (or keep `PLC_DATA_COLLECTOR_SECRET_KEY` safe), the spool
+   directory and, if used, the seed configuration file. Without the secret
+   key, stored protocol passwords cannot be decrypted.
 3. Install the new package or virtual environment in a separate installation
    directory.
 4. Run database migrations if the release notes require them.

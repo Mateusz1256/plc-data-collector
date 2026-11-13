@@ -20,10 +20,16 @@ on them.
 ## Conventions
 
 - **Timestamps are text.** Every timestamp column is `VARCHAR(32)` holding an
-  ISO 8601 string in UTC with an explicit offset, for example
-  `2026-11-13T09:15:02.481233+00:00`. Cast it in PostgreSQL with
-  `received_at::timestamptz`. Because every value is UTC in the same format,
+  ISO 8601 string in UTC with a `+00:00` offset; fractional seconds omitted
+  when zero, for example `2026-11-13T09:15:02.481233+00:00` or
+  `2026-11-13T09:15:03+00:00`. Because every value is UTC in the same format,
   sorting and range comparisons on the text give chronological order.
+- **Filter on the text, cast for display.** In `WHERE`, compare
+  `received_at` as text against ISO literals with a `+00:00` offset, for
+  example `received_at >= '2026-11-13T08:00:00+00:00'`. Casting the column
+  (`received_at::timestamptz`) in `WHERE` prevents index use, so a time range
+  then scans the whole table. Cast it in the select list
+  (`received_at::timestamptz`) to get a timestamp for display or grouping.
 - **IDs are chosen by the user.** Connection, Tag Group and Tag IDs are the
   short strings entered in the Panel or the configuration file, for example
   `line1_temperature`, not generated numbers.
@@ -171,7 +177,9 @@ select date_trunc('hour', received_at::timestamptz) as hour,
 from tag_readings
 where tag_id = 'line1_temperature'
   and quality = 'good'
-  and received_at::timestamptz > now() - interval '1 day'
+  and received_at > to_char(
+        (now() - interval '1 day') at time zone 'UTC',
+        'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"')
 group by 1
 order by 1;
 ```
