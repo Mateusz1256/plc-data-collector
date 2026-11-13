@@ -204,6 +204,11 @@ class RuntimeSupervisor:
             try:
                 if runtime is not None:
                     await runtime.stop(timeout_s=self._settings.storage_timeout_s * 2)
+                if self._stop_requested:
+                    # stop() arrived while the old runtime drained: starting a
+                    # new runtime now would only connect it to drain it again.
+                    LOGGER.info("runtime_apply_aborted")
+                    return
                 await self._start_runtime()
             except Exception as error:
                 self._running_revision = None
@@ -227,8 +232,9 @@ class RuntimeSupervisor:
         """Stop the runtime, then dispose the database engine.
 
         ``timeout_s`` bounds the runtime's drain. An apply in progress finishes
-        first. A stop() during start() aborts the start. Calling stop() again,
-        or before start(), does nothing.
+        first, without starting a new runtime if it has not started one yet.
+        A stop() during start() aborts the start. Calling stop() again, or
+        before start(), does nothing.
         """
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive.")
@@ -375,6 +381,7 @@ class RuntimeSupervisor:
                 await runtime.stop(timeout_s=timeout_s)
         finally:
             self._running_revision = None
+            self._running_config = None
             self._stores = None
             if self._engine is not None:
                 self._engine.dispose()

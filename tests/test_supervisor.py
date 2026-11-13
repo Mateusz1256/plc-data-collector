@@ -566,3 +566,53 @@ async def test_supervisor_wrong_secret_key_fails_cleanly(
         assert value not in logs
         assert value not in str(error.value)
     await second.stop()
+
+
+async def test_stop_during_apply_does_not_start_a_new_runtime(
+    tmp_path: Path,
+) -> None:
+    calls = 0
+    old_runtime_stopping = asyncio.Event()
+    release_old_runtime = asyncio.Event()
+
+    def factory(*args: Any, **kwargs: Any) -> CollectorRuntime:
+        nonlocal calls
+        calls += 1
+        runtime = CollectorRuntime(*args, **kwargs)
+        if calls == 1:
+            original_stop = runtime.stop
+
+            async def slow_stop(timeout_s: float = 10.0) -> None:
+                # Holds the old runtime's drain open, so stop() arrives mid-apply.
+                old_runtime_stopping.set()
+                await release_old_runtime.wait()
+                await original_stop(timeout_s=timeout_s)
+
+            runtime.stop = slow_stop  # type: ignore[method-assign]
+        return runtime
+
+    supervisor = RuntimeSupervisor(
+        make_settings(tmp_path, mock_config()), runtime_factory=factory
+    )
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    apply_task = asyncio.create_task(supervisor.apply())
+    stop_task: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(old_runtime_stopping.wait(), timeout=10)
+        stop_task = asyncio.create_task(supervisor.stop())
+        await asyncio.sleep(0)
+        release_old_runtime.set()
+
+        await asyncio.wait_for(apply_task, timeout=10)
+        await asyncio.wait_for(stop_task, timeout=10)
+
+        assert calls == 1
+        assert supervisor.running_revision is None
+        assert supervisor.running_config is None
+        assert supervisor.applying is False
+    finally:
+        release_old_runtime.set()
+        for task in (apply_task, stop_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
