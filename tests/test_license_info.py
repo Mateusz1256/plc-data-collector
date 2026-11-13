@@ -26,7 +26,7 @@ def test_license_report_loads_bundled_credits() -> None:
     report = load_license_report()
 
     assert report.project.spdx_id == "MIT"
-    assert report.build.version == "0.2.0"
+    assert report.build.version == "0.3.0"
     assert any(dependency.name == "asyncua" for dependency in report.dependencies)
     assert all(dependency.license for dependency in report.dependencies)
 

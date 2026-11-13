@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plc-data-collector"
-version = "0.2.0"
-description = "Industrial PLC and OPC UA data collector MVP"
+version = "0.3.0"
+description = "Industrial PLC and OPC UA data collector with web Panel and REST API"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

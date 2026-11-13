@@ -12,15 +12,15 @@ from plc_data_collector.app.logging import configure_logging
 
 
 def test_package_exposes_version() -> None:
-    assert plc_data_collector.__version__ == "0.2.0"
-    assert plc_data_collector.get_version() == "0.2.0"
+    assert plc_data_collector.__version__ == "0.3.0"
+    assert plc_data_collector.get_version() == "0.3.0"
 
 
 def test_health_status_contains_application_version() -> None:
     assert build_health_status() == {
         "application": "plc-data-collector",
         "status": "ok",
-        "version": "0.2.0",
+        "version": "0.3.0",
     }
 
 
@@ -37,7 +37,7 @@ def test_main_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out.strip() == "0.2.0"
+    assert captured.out.strip() == "0.3.0"
 
 
 def test_main_prints_license_report(capsys: pytest.CaptureFixture[str]) -> None:
@@ -47,7 +47,7 @@ def test_main_prints_license_report(capsys: pytest.CaptureFixture[str]) -> None:
     payload = json.loads(captured.out)
     assert exit_code == 0
     assert payload["project"]["spdx_id"] == "MIT"
-    assert payload["build"]["version"] == "0.2.0"
+    assert payload["build"]["version"] == "0.3.0"
     assert payload["dependencies"]
 
 

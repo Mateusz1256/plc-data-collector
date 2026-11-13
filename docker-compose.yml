@@ -1,5 +1,5 @@
-# Demo stack: OPC UA simulator -> collector -> PostgreSQL.
-# Usage: cp .env.example .env && docker compose up
+# Demo stack: OPC UA simulator -> collector -> PostgreSQL, with the Panel on port 8080.
+# Usage: cp .env.example .env && docker compose up, then open http://localhost:8080/
 services:
   # PostgreSQL 17, the storage target for Readings.
   postgres:
@@ -28,7 +28,8 @@ services:
       retries: 10
       start_period: 5s
 
-  # The collector service: polls the simulator and writes Readings to PostgreSQL.
+  # The collector service: polls the simulator, writes Readings to PostgreSQL and serves
+  # the Panel and the API.
   collector:
     build: .
     image: plc-data-collector:local
@@ -40,16 +41,22 @@ services:
     restart: unless-stopped # also covers the case where the DB wait times out
     stop_grace_period: 30s # leave time to drain the Reading Queue and spool on SIGTERM
     ports:
-      - "${COLLECTOR_API_PORT:-8080}:8080" # HTTP API: /health/*, /api/*
+      - "${COLLECTOR_API_PORT:-8080}:8080" # Panel (/panel), data API (/api/v1), /health/*, /api/*
     environment:
+      # Seed file: imported only on the first start, while the database has no configuration.
+      # After that the database is the source of truth; edit configuration in the Panel.
       PLC_DATA_COLLECTOR_CONFIG: /etc/plc-data-collector/collector.config.json
       PLC_DATA_COLLECTOR_DATA_DIR: /var/lib/plc-data-collector
       PLC_DATA_COLLECTOR_API_HOST: 0.0.0.0 # listen on all interfaces so the port mapping works
       PLC_DATA_COLLECTOR_DATABASE_URL: postgresql+pg8000://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       PLC_DATA_COLLECTOR_LOG_LEVEL: ${PLC_DATA_COLLECTOR_LOG_LEVEL:-INFO}
+      # Panel sign-in password; when empty, the Panel is off.
+      PLC_DATA_COLLECTOR_ADMIN_PASSWORD: ${PLC_DATA_COLLECTOR_ADMIN_PASSWORD:-}
+      # Key that encrypts Connection secrets; when empty, one is generated into collector-data.
+      PLC_DATA_COLLECTOR_SECRET_KEY: ${PLC_DATA_COLLECTOR_SECRET_KEY:-}
     volumes:
-      - ./deploy/demo/collector.config.json:/etc/plc-data-collector/collector.config.json:ro # demo config, read-only
-      - collector-data:/var/lib/plc-data-collector # Spool and runtime files survive restarts
+      - ./deploy/demo/collector.config.json:/etc/plc-data-collector/collector.config.json:ro # demo seed config, read-only
+      - collector-data:/var/lib/plc-data-collector # Spool, generated secret key and runtime files survive restarts
 
 volumes:
   pgdata:

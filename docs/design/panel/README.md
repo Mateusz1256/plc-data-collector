@@ -1,8 +1,13 @@
 # Panel design
 
-The reference mockup for the Panel planned for 0.3.0: the password-protected web
-UI for managing Connections, Tag Groups and Tags and previewing current Tag
-values (see `GLOSSARY.md`). The Panel has no charts.
+The reference mockup for the Panel: the password-protected web UI for managing
+Connections, Tag Groups and Tags and previewing current Tag values (see
+`GLOSSARY.md`). The Panel has no charts.
+
+Status: implemented in 0.3.0 (`src/plc_data_collector/panel/`). The mockup
+shows a Modbus TCP Connection; in 0.3.0, OPC UA is the only protocol that can
+be added, and Modbus TCP, S7 and M-Bus are listed as coming in 0.4.0, 0.5.0
+and 0.6.0.
 
 Interactive canvas: https://claude.ai/artifact/LqVW6RZ81HYmGBfUsgRXeM
 
