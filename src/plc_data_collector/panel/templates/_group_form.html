@@ -33,7 +33,7 @@
 </form>
 {% if ui.mode == "edit" %}
 <form class="inline-form-delete" method="post" action="/panel/groups/{{ ui.target_id }}/delete">
-<p class="secondary">Deleting a tag group also deletes its tags. Stored readings are kept.</p>
+<p class="secondary">Deleting this tag group also deletes its {{ plural(tag_count, "tag") }}. Stored readings are kept.</p>
 <button type="submit" class="btn btn-danger">Delete tag group</button>
 </form>
 {% endif %}

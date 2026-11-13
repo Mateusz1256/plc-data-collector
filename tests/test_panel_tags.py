@@ -531,3 +531,18 @@ def test_tag_last_read_marks_old_good_values_stale(
     assert old_row is not None and new_row is not None
     assert "state-degraded" in old_row.group(0) and "Stale" in old_row.group(0)
     assert "state-normal" in new_row.group(0) and "Good" in new_row.group(0)
+
+
+@pytest.mark.parametrize("htmx", [True, False], ids=["fragment", "page"])
+def test_group_delete_says_how_many_tags_go_with_it(
+    signed_in_client: TestClient, fake_host: FakeHost, htmx: bool
+) -> None:
+    stores = _seed(fake_host)
+    for tag_id in ("t1", "t2", "t3"):
+        stores.config.upsert_tag(_tag(tag_id))
+
+    headers = {"HX-Request": "true"} if htmx else {}
+    page = signed_in_client.get("/panel/groups/fast/edit", headers=headers)
+
+    assert page.status_code == 200
+    assert "Deleting this tag group also deletes its 3 tags." in page.text

@@ -7,7 +7,7 @@
 </div>
 <div id="group-form-slot">
 {% if tag_section.group_ui %}
-{% with ui = tag_section.group_ui, connection_id = tag_section.connection_id %}{% include "_group_form.html" %}{% endwith %}
+{% with ui = tag_section.group_ui, connection_id = tag_section.connection_id, tag_count = tag_section.tag_count(tag_section.group_ui.target_id) %}{% include "_group_form.html" %}{% endwith %}
 {% endif %}
 </div>
 {% if tag_section.group_rows %}

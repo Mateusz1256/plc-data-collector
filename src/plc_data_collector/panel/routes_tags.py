@@ -363,10 +363,14 @@ async def _group_form(
     request: Request, stores: Stores, connection_id: str, ui: FormUi
 ) -> HTMLResponse:
     if _is_htmx(request):
+        tag_count = 0
+        if ui.target_id is not None:
+            active = await asyncio.to_thread(stores.config.active_tags)
+            tag_count = sum(1 for tag, _ in active if tag.tag_group_id == ui.target_id)
         return render(
             request,
             "_group_form.html",
-            {"connection_id": connection_id, "ui": ui, "tag_count": 0},
+            {"connection_id": connection_id, "ui": ui, "tag_count": tag_count},
         )
     return await render_connection_page(request, stores, connection_id, group_ui=ui)
 

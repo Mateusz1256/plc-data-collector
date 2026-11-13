@@ -89,6 +89,10 @@ class TagSection:
     group_ui: FormUi | None
     tag_ui: FormUi | None
 
+    def tag_count(self, group_id: str | None) -> int:
+        """Return how many active Tags the Tag Group has."""
+        return sum(row.tag_count for row in self.group_rows if row.group.id == group_id)
+
 
 def build_tag_section(
     host: CollectorHost,
