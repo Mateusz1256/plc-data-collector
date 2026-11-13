@@ -245,6 +245,10 @@ class RuntimeSupervisor:
                 await self._start_runtime()
             except Exception as error:
                 self._running_revision = None
+                if self._stop_requested:
+                    # stop() aborted the new runtime's start; not a failure.
+                    LOGGER.info("runtime_apply_aborted")
+                    return
                 self._last_error_code = error_code(error)
                 LOGGER.error(
                     "runtime_apply_failed",
@@ -292,7 +296,9 @@ class RuntimeSupervisor:
         """Stop the runtime, then dispose the database engine.
 
         ``timeout_s`` bounds the runtime's drain. An apply in progress finishes
-        first, without starting a new runtime if it has not started one yet.
+        first, without starting a new runtime if it has not started one yet;
+        a runtime it is starting is stopped, which aborts its start (connect
+        retries included), so shutdown does not wait for it.
         A stop() during start() aborts the start. Calling stop() again, or
         before start(), does nothing.
         """
@@ -307,6 +313,9 @@ class RuntimeSupervisor:
             return
         if self._phase == "running":
             self._phase = "stopping"
+            starting = self._runtime if self._applying else None
+            if starting is not None:
+                await starting.stop(timeout_s=timeout_s)
             async with self._apply_lock:
                 await self._release(timeout_s=timeout_s)
         elif self._phase == "stopping":
@@ -481,6 +490,12 @@ class RuntimeSupervisor:
             live_values=self._live_values,
         )
         self._runtime = runtime
+        if self._applying and self._stop_requested:
+            # stop() arrived while the configuration loaded: do not connect.
+            self._runtime = None
+            raise CollectorError(
+                "Runtime start was aborted by stop().", code="runtime_start_aborted"
+            )
         try:
             await runtime.start()
         except BaseException:

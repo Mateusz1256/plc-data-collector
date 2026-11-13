@@ -824,3 +824,51 @@ def test_prepare_configuration_moves_endpoint_credentials(
     assert loaded.connections[0].protocol_options["password"] == SECRET
     assert "configuration_endpoint_credentials_moved" in caplog.text
     assert SECRET not in captured_logs(caplog)
+
+
+async def test_stop_during_apply_aborts_the_starting_runtime(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    calls = 0
+    connecting = asyncio.Event()
+
+    def factory(*args: Any, **kwargs: Any) -> CollectorRuntime:
+        nonlocal calls
+        calls += 1
+        runtime = CollectorRuntime(*args, **kwargs)
+        if calls == 2:
+
+            async def endless_connect() -> None:
+                # Stands in for connect retries against an unreachable PLC.
+                connecting.set()
+                await asyncio.Event().wait()
+
+            runtime._connect_workers = endless_connect  # type: ignore[method-assign]
+        return runtime
+
+    supervisor = RuntimeSupervisor(
+        make_settings(tmp_path, mock_config()), runtime_factory=factory
+    )
+    await asyncio.wait_for(supervisor.start(), timeout=10)
+    apply_task = asyncio.create_task(supervisor.apply())
+    try:
+        await asyncio.wait_for(connecting.wait(), timeout=10)
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+
+        await asyncio.wait_for(supervisor.stop(), timeout=5)
+
+        assert loop.time() - started < 3
+        await asyncio.wait_for(apply_task, timeout=5)
+        assert calls == 2
+        assert supervisor.applying is False
+        assert supervisor.running_revision is None
+        assert "runtime_apply_aborted" in caplog.text
+        assert "runtime_apply_failed" not in caplog.text
+        assert "runtime_apply_rolled_back" not in caplog.text
+        assert other_tasks() == []
+    finally:
+        if not apply_task.done():
+            apply_task.cancel()
+        await asyncio.wait_for(supervisor.stop(), timeout=10)
