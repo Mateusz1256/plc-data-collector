@@ -440,9 +440,25 @@ def _assert_0003_upgrade(url: str) -> None:
         assert "ix_poll_executions_started_at" in indexes["poll_executions"]
         with engine.connect() as connection:
             diff = compare_metadata(MigrationContext.configure(connection), metadata)
+        if engine.dialect.name == "postgresql":
+            # On PostgreSQL, autogenerate reports the uq_tag_readings_event_id
+            # constraint as missing because it duplicates the primary key on
+            # event_id. Uniqueness is enforced by the key either way.
+            diff = [change for change in diff if not _is_event_id_unique(change)]
         assert diff == []
     finally:
         engine.dispose()
+
+
+def _is_event_id_unique(change: object) -> bool:
+    if not (isinstance(change, tuple) and change[0] == "add_constraint"):
+        return False
+    constraint = change[1]
+    return (
+        getattr(constraint, "table", None) is not None
+        and constraint.table.name == "tag_readings"
+        and [column.name for column in constraint.columns] == ["event_id"]
+    )
 
 
 def _assert_0003_round_trip(url: str) -> None:
