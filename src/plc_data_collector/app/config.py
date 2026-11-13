@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
-from urllib.parse import SplitResult, urlsplit, urlunsplit
+from urllib.parse import SplitResult, unquote, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -376,6 +376,42 @@ def _mask_sequence_item(value: object) -> object:
 
 
 def _mask_endpoint(endpoint: str) -> str:
+    return _replace_userinfo(endpoint, "***@")
+
+
+def strip_endpoint_userinfo(endpoint: str) -> str:
+    """Return ``endpoint`` without its ``user:password@`` part.
+
+    An endpoint that cannot be parsed loses everything up to the last ``@``
+    of its authority, so credentials never survive in the result.
+    """
+    try:
+        return _replace_userinfo(endpoint, "")
+    except ValueError:
+        scheme, separator, rest = endpoint.partition("://")
+        authority, slash, path = rest.partition("/")
+        if not separator or "@" not in authority:
+            return endpoint
+        return f"{scheme}://{authority.rsplit('@', 1)[1]}{slash}{path}"
+
+
+def endpoint_userinfo(endpoint: str) -> tuple[str | None, str | None]:
+    """Return the decoded user name and password in ``endpoint``, if any."""
+    try:
+        split = urlsplit(endpoint)
+    except ValueError:
+        return None, None
+    if "@" not in split.netloc:
+        return None, None
+    userinfo = split.netloc.rsplit("@", 1)[0]
+    user, has_password, password = userinfo.partition(":")
+    return (
+        unquote(user) or None,
+        unquote(password) if has_password and password else None,
+    )
+
+
+def _replace_userinfo(endpoint: str, replacement: str) -> str:
     split = urlsplit(endpoint)
     if "@" not in split.netloc:
         return endpoint
@@ -383,7 +419,7 @@ def _mask_endpoint(endpoint: str) -> str:
     return urlunsplit(
         SplitResult(
             scheme=split.scheme,
-            netloc=f"***@{host}",
+            netloc=f"{replacement}{host}",
             path=split.path,
             query=split.query,
             fragment=split.fragment,

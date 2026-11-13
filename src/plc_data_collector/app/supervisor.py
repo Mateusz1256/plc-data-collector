@@ -409,13 +409,29 @@ class RuntimeSupervisor:
         """Encrypt legacy secrets and seed from the file once; runs in a thread.
 
         A 0.2.0 database (Connection rows but no revision) is reconciled with
-        the file once instead of being seeded.
+        the file once instead of being seeded. Credentials in OPC UA endpoint
+        URLs then move into the user name and encrypted password options.
         """
         encrypted = store.encrypt_plaintext_secrets()
         if encrypted:
             LOGGER.info(
                 "configuration_secrets_encrypted", extra={"connections": encrypted}
             )
+        self._seed_or_reconcile(store)
+        # After seeding: a file can carry credentials in an endpoint URL too.
+        moved, left = store.move_endpoint_credentials()
+        if moved:
+            LOGGER.info(
+                "configuration_endpoint_credentials_moved",
+                extra={"connections": len(moved)},
+            )
+        for connection_id in left:
+            LOGGER.warning(
+                "endpoint_credentials_left_in_url",
+                extra={"connection_id": connection_id},
+            )
+
+    def _seed_or_reconcile(self, store: ConfigStore) -> None:
         config_file = self._settings.config_file
         if store.has_any_connection_rows() and not store.has_revision():
             _reconcile_upgrade(store, config_file)

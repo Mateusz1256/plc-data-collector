@@ -19,6 +19,7 @@ from sqlalchemy import func, select, text
 
 from plc_data_collector.api import create_api_app
 from plc_data_collector.app.runtime import CollectorRuntime
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.app.supervisor import RuntimeSupervisor
 from plc_data_collector.domain import (
@@ -28,7 +29,12 @@ from plc_data_collector.domain import (
     TagConfig,
     ValueType,
 )
-from plc_data_collector.persistence import DurableSqliteSpool, create_database_engine
+from plc_data_collector.persistence import (
+    ConfigStore,
+    DurableSqliteSpool,
+    create_database_engine,
+    run_migrations,
+)
 from plc_data_collector.persistence.schema import connections, tag_readings, tags
 
 SECRET = "s3cr3t"
@@ -790,3 +796,31 @@ async def test_stop_during_apply_does_not_start_a_new_runtime(
             if task is not None and not task.done():
                 task.cancel()
         await asyncio.wait_for(supervisor.stop(), timeout=10)
+
+
+def test_prepare_configuration_moves_endpoint_credentials(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    config = mock_config()
+    connection = config["connections"][0]  # type: ignore[index]
+    connection["protocol"] = "opcua"
+    connection["endpoint"] = f"opc.tcp://operator:{SECRET}@plc:4840"
+    connection["protocol_options"] = {}
+    settings = make_settings(tmp_path, config)
+    settings.data_dir.mkdir(parents=True)
+    run_migrations(settings.database_url)
+    engine = create_database_engine(settings.database_url)
+    try:
+        store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
+        supervisor = RuntimeSupervisor(settings)
+
+        supervisor._prepare_configuration(store)
+
+        loaded, _ = store.load_active()
+    finally:
+        engine.dispose()
+    assert loaded.connections[0].endpoint == "opc.tcp://plc:4840"
+    assert loaded.connections[0].protocol_options["password"] == SECRET
+    assert "configuration_endpoint_credentials_moved" in caplog.text
+    assert SECRET not in captured_logs(caplog)

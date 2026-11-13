@@ -227,3 +227,38 @@ def test_import_refuses_values_beyond_a_database_integer(
 
     assert caught.value.code == "invalid_configuration"
     assert "2147483647" in caught.value.message
+
+
+def _with_endpoint(config: CollectorConfig, endpoint: str) -> CollectorConfig:
+    connection = replace(config.connections[0], endpoint=endpoint)
+    return replace(config, connections=(connection,))
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "exported"),
+    [
+        ("opc.tcp://op:pa%40ss@plc:4840/path", "opc.tcp://plc:4840/path"),
+        ("opc.tcp://op@plc:4840", "opc.tcp://plc:4840"),
+        ("opc.tcp://plc:4840", "opc.tcp://plc:4840"),
+        # Unparseable (bad IPv6 literal): the credentials still go.
+        ("opc.tcp://op:pa%40ss@[bad:4840/x", "opc.tcp://[bad:4840/x"),
+    ],
+)
+def test_export_strips_endpoint_userinfo(endpoint: str, exported: str) -> None:
+    document = export_config(_with_endpoint(_config(), endpoint))
+
+    assert document["connections"][0]["endpoint"] == exported  # type: ignore[index]
+    assert "pa%40ss" not in json.dumps(document)
+    assert "***" not in json.dumps(document)
+
+
+def test_import_keeps_stored_endpoint_credentials_when_host_matches() -> None:
+    current = _with_endpoint(_config(), "opc.tcp://op:secret@plc:4840")
+    document = export_config(current)
+
+    same = parse_import(json.dumps(document).encode(), current=current)
+    assert same.connections[0].endpoint == "opc.tcp://op:secret@plc:4840"
+
+    document["connections"][0]["endpoint"] = "opc.tcp://other:4840"  # type: ignore[index]
+    moved = parse_import(json.dumps(document).encode(), current=current)
+    assert moved.connections[0].endpoint == "opc.tcp://other:4840"

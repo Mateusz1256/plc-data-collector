@@ -7,7 +7,11 @@ from datetime import UTC, datetime
 
 from sqlalchemy import Connection, Engine, Row, Table, select, update
 
-from plc_data_collector.app.config import CollectorConfig
+from plc_data_collector.app.config import (
+    CollectorConfig,
+    endpoint_userinfo,
+    strip_endpoint_userinfo,
+)
 from plc_data_collector.app.secrets import SecretBox, merge_secrets, split_secrets
 from plc_data_collector.domain import (
     ConfigurationError,
@@ -303,6 +307,59 @@ class ConfigStore:
                 )
                 changed += 1
         return changed
+
+    def move_endpoint_credentials(self) -> tuple[list[str], list[str]]:
+        """Move user names and passwords out of OPC UA endpoint URLs.
+
+        Handles rows 0.2.0 or an import stored with ``user:password@`` in the
+        endpoint: the user name goes to ``username``, the password to the
+        encrypted ``password`` secret, and the endpoint is stored without
+        them. A Connection that already has a ``username`` or ``password``
+        option is left alone. Returns ``(moved, left)`` Connection IDs. Like
+        ``encrypt_plaintext_secrets``, the revision is not bumped.
+        """
+        moved: list[str] = []
+        left: list[str] = []
+        with self._engine.begin() as connection:
+            rows = connection.execute(
+                select(
+                    connections.c.id,
+                    connections.c.protocol,
+                    connections.c.endpoint,
+                    connections.c.protocol_options,
+                    connections.c.secret_options,
+                ).order_by(connections.c.id)
+            ).all()
+            for row in rows:
+                if row.protocol != "opcua":
+                    continue
+                user, password = endpoint_userinfo(row.endpoint)
+                stripped = strip_endpoint_userinfo(row.endpoint)
+                if stripped == row.endpoint:
+                    continue
+                plain: dict[str, object] = dict(row.protocol_options or {})
+                secret = (
+                    self._box.decrypt(row.secret_options) if row.secret_options else {}
+                )
+                options = merge_secrets(plain, secret)
+                if "username" in options or "password" in options:
+                    left.append(row.id)
+                    continue
+                if user is not None:
+                    plain["username"] = user
+                if password is not None:
+                    secret = {**secret, "password": password}
+                connection.execute(
+                    update(connections)
+                    .where(connections.c.id == row.id)
+                    .values(
+                        endpoint=stripped,
+                        protocol_options=plain,
+                        secret_options=self._box.encrypt(secret) if secret else None,
+                    )
+                )
+                moved.append(row.id)
+        return moved, left
 
     # Internals
 

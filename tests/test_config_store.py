@@ -455,3 +455,49 @@ def test_replace_all_refuses_a_stale_expected_revision(store: ConfigStore) -> No
         expected_revision=revision,
     )
     assert store.get_connection("rev_conn") is None
+
+
+def test_move_endpoint_credentials_into_options(store: ConfigStore) -> None:
+    store.upsert_connection(
+        ConnectionConfig(
+            id="moved",
+            name="Moved",
+            protocol="opcua",
+            endpoint="opc.tcp://op%20one:pa%40ss@plc:4840/x",
+        )
+    )
+    store.upsert_connection(
+        ConnectionConfig(
+            id="kept",
+            name="Kept",
+            protocol="opcua",
+            endpoint="opc.tcp://op:url-pw@plc:4840",
+            protocol_options={"password": "stored-pw"},
+        )
+    )
+    store.upsert_connection(_connection("plain"))
+    revision = store.revision()
+
+    moved, left = store.move_endpoint_credentials()
+
+    assert moved == ["moved"]
+    assert left == ["kept"]
+    assert store.revision() == revision
+    connection = store.get_connection("moved")
+    assert connection is not None
+    assert connection.endpoint == "opc.tcp://plc:4840/x"
+    assert connection.protocol_options["username"] == "op one"
+    assert connection.protocol_options["password"] == "pa@ss"
+    with store._engine.connect() as db:
+        row = db.execute(
+            select(connections.c.protocol_options, connections.c.secret_options).where(
+                connections.c.id == "moved"
+            )
+        ).one()
+    assert "password" not in row.protocol_options
+    assert "pa@ss" not in (row.secret_options or "")
+    kept = store.get_connection("kept")
+    assert kept is not None
+    assert kept.endpoint == "opc.tcp://op:url-pw@plc:4840"
+    assert kept.protocol_options["password"] == "stored-pw"
+    assert store.move_endpoint_credentials() == ([], ["kept"])

@@ -8,7 +8,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 
-from plc_data_collector.app.config import CollectorConfig, parse_collector_config
+from plc_data_collector.app.config import (
+    CollectorConfig,
+    parse_collector_config,
+    strip_endpoint_userinfo,
+)
 from plc_data_collector.app.secrets import merge_secrets, split_secrets
 from plc_data_collector.domain import (
     ConfigurationError,
@@ -75,7 +79,11 @@ def diff_configs(current: CollectorConfig, new: CollectorConfig) -> ConfigDiff:
 
 
 def export_config(config: CollectorConfig) -> dict[str, object]:
-    """Return the configuration-file shape with secrets omitted."""
+    """Return the configuration-file shape with secrets omitted.
+
+    Credentials in an endpoint URL count as secrets: the user name and
+    password part is removed.
+    """
     return {
         "format_version": 1,
         "connections": [
@@ -83,7 +91,7 @@ def export_config(config: CollectorConfig) -> dict[str, object]:
                 "id": connection.id,
                 "name": connection.name,
                 "protocol": connection.protocol,
-                "endpoint": connection.endpoint,
+                "endpoint": strip_endpoint_userinfo(connection.endpoint),
                 "enabled": connection.enabled,
                 "timeout_ms": connection.timeout_ms,
                 "protocol_options": _plain(
@@ -176,7 +184,9 @@ def keep_stored_values(
     """Return ``config`` with what files leave out taken from ``current``.
 
     For Connection IDs that exist in ``current``, secrets the file omits are
-    kept; the file's own values win.
+    kept; the file's own values win. The stored endpoint is kept too when it
+    equals the file's once its credentials are removed, because exports leave
+    endpoint credentials out.
     """
     existing = {connection.id: connection for connection in current.connections}
     connections = []
@@ -187,6 +197,8 @@ def keep_stored_values(
             # Existing secrets first, then the file's options on top: file wins.
             options = merge_secrets(secrets, connection.protocol_options)
             connection = replace(connection, protocol_options=options)
+            if strip_endpoint_userinfo(known.endpoint) == connection.endpoint:
+                connection = replace(connection, endpoint=known.endpoint)
         connections.append(connection)
     return replace(config, connections=tuple(connections))
 
