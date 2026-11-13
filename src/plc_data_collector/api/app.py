@@ -124,13 +124,16 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     # Imported here so the API without the Panel needs no Jinja or sessions.
     from fastapi.responses import RedirectResponse
     from fastapi.staticfiles import StaticFiles
+    from sqlalchemy.exc import SQLAlchemyError
     from starlette.middleware.sessions import SessionMiddleware
 
     from plc_data_collector.api.data_v1 import create_data_v1_router
+    from plc_data_collector.domain import StorageError
     from plc_data_collector.panel.app import (
         DatabaseNotReady,
         create_panel_router,
         cross_site_request_handler,
+        database_error_handler,
         database_not_ready_handler,
         login_required_handler,
     )
@@ -174,6 +177,9 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     app.add_exception_handler(LoginRequired, login_required_handler)
     app.add_exception_handler(DatabaseNotReady, database_not_ready_handler)
     app.add_exception_handler(CrossSiteRequest, cross_site_request_handler)
+    # Only /panel pages get the 503 page; elsewhere the error is re-raised.
+    app.add_exception_handler(SQLAlchemyError, database_error_handler)
+    app.add_exception_handler(StorageError, database_error_handler)
 
     @app.get("/", include_in_schema=False)
     async def root() -> RedirectResponse:

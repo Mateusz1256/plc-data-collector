@@ -62,9 +62,11 @@
 {% endfor %}
 </section>
 {% else %}
+{% if not view.stopped %}
 <section class="panel">
 <p class="empty">No connections yet. <a href="/panel/connections">Add a connection</a> to start collecting.</p>
 </section>
+{% endif %}
 {% endfor %}
 </div>
 </div>

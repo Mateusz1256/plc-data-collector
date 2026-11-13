@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime, timedelta
+from importlib import resources
+from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from panel_support import FakeHost
+from sqlalchemy.exc import OperationalError
 
-from plc_data_collector.app.stores import Stores
+from plc_data_collector.app.secrets import SecretBox
+from plc_data_collector.app.stores import Stores, build_stores
 from plc_data_collector.domain import (
     CollectorError,
     ConnectionConfig,
     PollExecution,
     PollStatus,
     Quality,
+    StorageError,
     TagConfig,
     TagGroupConfig,
     TagResult,
@@ -28,6 +35,7 @@ from plc_data_collector.panel.routes_live import (
     freshness_bar,
     pending_changes,
 )
+from plc_data_collector.persistence import create_database_engine
 from plc_data_collector.runtime.connection_worker import WorkerPollResult
 
 NOW = datetime(2026, 11, 13, 12, 0, 0, tzinfo=UTC)
@@ -534,3 +542,151 @@ def test_cross_site_posts_are_refused(
     assert response.status_code == 403
     assert fake_host.apply_calls == 0
     assert stores.config.revision() == before
+
+
+# Database outage
+
+
+DATABASE_DOWN_COPY = (
+    "The database is not reachable. Collection keeps running and stores "
+    "readings when it comes back."
+)
+
+
+def _break_database(host: FakeHost, tmp_path: Path) -> None:
+    """Point the stores at a database file that cannot be opened."""
+    engine = create_database_engine(f"sqlite:///{tmp_path / 'missing' / 'x.db'}")
+    host.stores = build_stores(engine, SecretBox(Fernet.generate_key()))
+
+
+def test_database_outage_gives_503_pages_not_500(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    _seed(fake_host)
+    _poll(fake_host, "line1_fast", {"temperature": TagValue.numeric(71.0)}, age_s=0.4)
+    _break_database(fake_host, tmp_path)
+
+    for path in ("/panel/connections", "/panel/settings"):
+        response = signed_in_client.get(path)
+        assert response.status_code == 503, path
+        assert DATABASE_DOWN_COPY in response.text, path
+        assert "<html" in response.text and "site-nav" in response.text, path
+    fragment = signed_in_client.get(
+        "/panel/connections", headers={"HX-Request": "true"}
+    )
+    assert fragment.status_code == 503
+    assert "<html" not in fragment.text
+    assert DATABASE_DOWN_COPY in fragment.text
+    # The Live page needs no database: it keeps showing the running values.
+    live = signed_in_client.get("/panel/live")
+    assert live.status_code == 200
+    assert "71.00" in _tag_row(live.text, "temperature")
+    assert "not running yet" not in live.text
+    errors = [r for r in caplog.records if r.getMessage() == "panel_database_error"]
+    assert errors
+    assert errors[0].error_type == "OperationalError"  # type: ignore[attr-defined]
+    assert "x.db" not in repr(vars(errors[0]))
+
+
+def test_stopped_banner_renders_when_load_active_raises(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = _seed(fake_host)
+    fake_host.running_revision = None
+    fake_host.running_config = None
+    fake_host.last_error_code = "runtime_start_failed"
+
+    def broken() -> object:
+        raise OperationalError("SELECT 1", {}, Exception("gone"))
+
+    monkeypatch.setattr(stores.config, "load_active", broken)
+
+    pending = pending_changes(fake_host)
+    assert pending is not None
+    assert pending.stopped_error == "runtime_start_failed"
+    assert pending.diff.is_empty
+    html = signed_in_client.get("/panel/live").text
+    assert "Collection is stopped: runtime_start_failed." in _text(html)
+    assert 'action="/panel/apply"' in html
+
+    fake_host.last_error_code = None
+    fake_host.running_revision = None
+    monkeypatch.setattr(stores.config, "revision", broken)
+    # Starting without an error code: no banner, whatever the store does.
+    assert pending_changes(fake_host) is None
+
+
+def test_pending_changes_defaults_to_database_unavailable(
+    fake_host: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stores = _seed(fake_host)
+
+    def broken() -> object:
+        raise StorageError("down", code="database_unavailable_x")
+
+    monkeypatch.setattr(stores.config, "load_active", broken)
+    monkeypatch.setattr(stores.config, "revision", broken)
+    # Running: a failing store hides the banner instead of failing the page.
+    assert pending_changes(fake_host) is None
+
+    fake_host.running_revision = None
+    fake_host.running_config = None
+    fake_host.last_error_code = "database_unavailable"
+    pending = pending_changes(fake_host)
+    assert pending is not None
+    assert pending.stopped_error == "database_unavailable"
+
+
+def test_live_body_renders_from_running_config(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    # Saved but not applied: the packer is disabled in the database only.
+    stores.config.upsert_connection(_connection("line1_opcua", enabled=False))
+    stores.config.upsert_tag(_tag("speed"))
+    _poll(fake_host, "line1_fast", {"temperature": TagValue.numeric(5.0)}, age_s=0.4)
+
+    html = signed_in_client.get("/panel/live/body", headers={"HX-Request": "true"}).text
+
+    line1 = _section(html, "line1_opcua")
+    assert "Not collecting. Its" not in line1
+    assert "Enable connection" not in line1
+    assert "5.00" in _tag_row(line1, "temperature")
+    assert 'data-tag="speed"' not in html
+
+
+def test_live_body_without_running_config_shows_stopped_state(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+    fake_host.running_config = None
+    fake_host.running_revision = None
+    fake_host.last_error_code = "database_unavailable"
+
+    html = signed_in_client.get("/panel/live/body", headers={"HX-Request": "true"}).text
+
+    assert "Collection is stopped, so there are no live values." in html
+    assert "data-tag=" not in html
+    assert "No connections yet" not in html
+
+
+def test_live_page_warns_when_updates_fail(signed_in_client: TestClient) -> None:
+    html = signed_in_client.get("/panel/live").text
+
+    assert 'src="/panel/static/live.js' in html
+    assert "Live values are not updating. Retrying…" in html
+    assert 'id="live-stale"' in html
+    assert "<script>" not in html
+    script = (
+        resources.files("plc_data_collector.panel")
+        .joinpath("static/live.js")
+        .read_text(encoding="utf-8")
+    )
+    for name in ("htmx:responseError", "htmx:sendError", "live-body", "stale"):
+        assert name in script

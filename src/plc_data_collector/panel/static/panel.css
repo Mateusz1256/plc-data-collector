@@ -367,3 +367,4 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 /* The toggle shows either the days field or the "kept" note, without script. */
 .retention-form:has(#field-retention-enabled:not(:checked)) .retention-on,
 .retention-form:has(#field-retention-enabled:checked) .retention-off { display: none; }
+.live-stale { margin: 0 0 16px; }

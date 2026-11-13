@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form, Request, status
@@ -21,7 +22,12 @@ from plc_data_collector.panel.auth import (
 )
 from plc_data_collector.panel.rendering import render
 
+LOGGER = logging.getLogger(__name__)
 DATABASE_NOT_READY_MESSAGE = "Starting: waiting for the database."
+DATABASE_ERROR_MESSAGE = (
+    "The database is not reachable. Collection keeps running and stores "
+    "readings when it comes back."
+)
 
 
 class DatabaseNotReady(Exception):
@@ -40,6 +46,8 @@ AdminRequired = Depends(auth.require_admin)
 # Every Panel POST uses this, on top of the SameSite=Strict cookie.
 SameSiteRequired = Depends(auth.require_same_site)
 PanelStores = Annotated[Stores, Depends(panel_stores)]
+# For pages that read no store but should wait for the database to be ready.
+StoresRequired = Depends(panel_stores)
 
 
 def create_panel_router(throttle: LoginThrottle | None = None) -> APIRouter:
@@ -154,4 +162,30 @@ async def database_not_ready_handler(request: Request, error: Exception) -> Resp
             "show_nav": False,
         },
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+    )
+
+
+async def database_error_handler(request: Request, error: Exception) -> Response:
+    """Show a 503 page when a Panel page cannot reach the database.
+
+    Registered for ``SQLAlchemyError`` and ``StorageError``. Requests outside
+    ``/panel`` keep the default handling. Only the error type is logged:
+    SQLAlchemy messages can quote statement parameters.
+    """
+    if not request.url.path.startswith("/panel"):
+        raise error
+    LOGGER.error("panel_database_error", extra={"error_type": type(error).__name__})
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    if request.headers.get("HX-Request") == "true":
+        return render(
+            request,
+            "_database_error.html",
+            {"message": DATABASE_ERROR_MESSAGE},
+            status_code=status_code,
+        )
+    return render(
+        request,
+        "base.html",
+        {"title": "Database not reachable", "message": DATABASE_ERROR_MESSAGE},
+        status_code=status_code,
     )

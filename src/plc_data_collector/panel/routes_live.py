@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy.exc import SQLAlchemyError
 
 from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.config_transfer import (
@@ -24,20 +25,25 @@ from plc_data_collector.app.config_transfer import (
     ConfigDiff,
     diff_configs,
 )
-from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import (
     CollectorError,
     ConnectionConfig,
     PollExecution,
     PollStatus,
     Quality,
+    StorageError,
     TagConfig,
     TagGroupConfig,
     TagValue,
     ValueType,
 )
 from plc_data_collector.panel import auth
-from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
+from plc_data_collector.panel.app import (
+    AdminRequired,
+    PanelStores,
+    SameSiteRequired,
+    StoresRequired,
+)
 from plc_data_collector.panel.host import CollectorHost
 from plc_data_collector.panel.protocol_forms import display_endpoint, form_for
 from plc_data_collector.panel.rendering import (
@@ -71,6 +77,9 @@ NOTHING_PENDING_MESSAGE = "Nothing to apply. The saved configuration is running.
 NO_VALUE = "—"
 THIN_SPACE = "\u2009"
 EMPTY_CONFIG = CollectorConfig(connections=(), tag_groups=(), tags=())
+DATABASE_UNAVAILABLE = "database_unavailable"
+STOPPED_INTRO = "Collection is stopped, so there are no live values."
+APPLYING_INTRO = "Applying changes. Live values return in a few seconds."
 # A Tag Group interval below this cannot come from the store; it is clamped
 # so the freshness bar never divides by zero.
 MIN_INTERVAL_MS = 1
@@ -123,6 +132,10 @@ def pending_changes(host: CollectorHost) -> PendingChanges | None:
     the saved revision differs from the running one, or when collection is
     stopped by an error. It stays hidden while an apply is in progress and
     while collection is starting (stopped without an error code).
+
+    When the database cannot be read, a stopped collection still gets its
+    banner (with an empty diff) and a running one gets none, so the page
+    renders instead of failing.
     """
     stores = host.stores
     if stores is None or host.applying:
@@ -134,9 +147,17 @@ def pending_changes(host: CollectorHost) -> PendingChanges | None:
         stopped_error = host.last_error_code
         if stopped_error is None:
             return None
-    elif stores.config.revision() == running_revision:
-        return None
-    saved, revision = stores.config.load_active()
+    try:
+        if stopped_error is None and stores.config.revision() == running_revision:
+            return None
+        saved, revision = stores.config.load_active()
+    except (SQLAlchemyError, StorageError):
+        if stopped_error is None:
+            return None
+        return PendingChanges(
+            diff=diff_configs(EMPTY_CONFIG, EMPTY_CONFIG),
+            stopped_error=stopped_error or DATABASE_UNAVAILABLE,
+        )
     if stopped_error is None and revision == running_revision:
         return None
     return PendingChanges(
@@ -218,6 +239,7 @@ class LiveView:
 
     intro: str
     connections: tuple[ConnectionView, ...]
+    stopped: bool = False
 
 
 def format_value(value: TagValue | None) -> str:
@@ -258,9 +280,17 @@ def updated_text(age_s: float) -> str:
 
 
 def build_live_view(
-    host: CollectorHost, config: CollectorConfig, now: datetime
+    host: CollectorHost, config: CollectorConfig | None, now: datetime
 ) -> LiveView:
-    """Build the Live page from the saved configuration and the live cache."""
+    """Build the Live page from the running configuration and the live cache.
+
+    ``config`` is what the runtime runs (``host.running_config``), not what is
+    saved, so the page needs no database. None means collection is not
+    running, and the page says so instead of listing Connections.
+    """
+    if config is None:
+        intro = APPLYING_INTRO if host.applying else STOPPED_INTRO
+        return LiveView(intro=intro, connections=(), stopped=True)
     workers = worker_statuses(host)
     values = host.live_values.values()
     groups_by_connection: dict[str, list[TagGroupConfig]] = defaultdict(list)
@@ -432,16 +462,24 @@ def create_live_router() -> APIRouter:
     """Create the Live, Review changes, Apply and Enable routes under ``/panel``."""
     router = APIRouter()
 
-    @router.get("/live", include_in_schema=False, dependencies=[AdminRequired])
-    async def live(request: Request, stores: PanelStores) -> HTMLResponse:
-        view = await _live_view(request, stores)
+    # The Live page reads only memory: the running configuration and the live
+    # cache. StoresRequired shows the starting page until the database is ready.
+    @router.get(
+        "/live", include_in_schema=False, dependencies=[AdminRequired, StoresRequired]
+    )
+    async def live(request: Request) -> HTMLResponse:
+        view = _live_view(request)
         return render(
             request, "live.html", {"nav": "live", "title": "Live tags", "view": view}
         )
 
-    @router.get("/live/body", include_in_schema=False, dependencies=[AdminRequired])
-    async def live_body(request: Request, stores: PanelStores) -> HTMLResponse:
-        view = await _live_view(request, stores)
+    @router.get(
+        "/live/body",
+        include_in_schema=False,
+        dependencies=[AdminRequired, StoresRequired],
+    )
+    async def live_body(request: Request) -> HTMLResponse:
+        view = _live_view(request)
         return render(request, "_live_body.html", {"view": view})
 
     @router.get("/changes", include_in_schema=False, dependencies=[AdminRequired])
@@ -512,7 +550,7 @@ def create_live_router() -> APIRouter:
     return router
 
 
-async def _live_view(request: Request, stores: Stores) -> LiveView:
-    config, _ = await asyncio.to_thread(stores.config.load_active)
+def _live_view(request: Request) -> LiveView:
     # The live cache and worker states belong to the event loop; read them here.
-    return build_live_view(auth.web_options(request).host, config, utc_now())
+    host = auth.web_options(request).host
+    return build_live_view(host, host.running_config, utc_now())

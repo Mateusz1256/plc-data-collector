@@ -1,4 +1,7 @@
 {% extends "base.html" %}
 {% block main %}
+{# Shown by live.js while the every-second refresh fails. #}
+<p id="live-stale" class="alert alert-degraded live-stale" role="alert" hidden>Live values are not updating. Retrying…</p>
 {% include "_live_body.html" %}
+<script src="/panel/static/live.js?v={{ version }}" defer></script>
 {% endblock %}
