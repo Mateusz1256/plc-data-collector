@@ -1,0 +1,2 @@
+{#- Retention preview line; the preview route returns it on its own for htmx. -#}
+{% if preview.error %}<span class="field-error">{{ preview.error }}</span>{% else %}{{ preview.message }}{% endif %}

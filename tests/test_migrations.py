@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import fields
 from datetime import UTC, datetime
 from importlib import resources
@@ -12,6 +14,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.config import Config
 from alembic.migration import MigrationContext
+from cryptography.fernet import Fernet
 from sqlalchemy import (
     BigInteger,
     Engine,
@@ -24,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.engine import make_url
 from sqlalchemy.pool import NullPool
 
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.domain import (
     ConfigurationError,
@@ -38,7 +42,7 @@ from plc_data_collector.domain import (
     ValueType,
 )
 from plc_data_collector.persistence import (
-    ConfigurationRepository,
+    ConfigStore,
     ReadingRepository,
     create_database_engine,
     run_migrations,
@@ -149,32 +153,7 @@ def test_writer_round_trip_on_postgres(postgres_url: str) -> None:
     engine = create_database_engine(postgres_url)
     wait_for_database(engine, timeout_s=10)
     now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
-    config_repository = ConfigurationRepository(engine)
-    config_repository.upsert_connections(
-        [
-            ConnectionConfig(
-                id="mock_connection",
-                protocol="mock",
-                endpoint="mock://local",
-                protocol_options={"driver": "mock"},
-            )
-        ]
-    )
-    config_repository.upsert_tag_groups(
-        [TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)]
-    )
-    config_repository.upsert_tags(
-        [
-            TagConfig(
-                id="temperature",
-                tag_group_id="fast",
-                name="Temperature",
-                address="mock://temperature",
-                value_type=ValueType.NUMERIC,
-                metadata={"unit": "C"},
-            )
-        ]
-    )
+    _seed_mock_configuration(engine)
     run_id = uuid.uuid4().hex
     values = [
         TagValue.numeric(20.5),
@@ -348,6 +327,154 @@ def _assert_migration_0002_widens_columns(url: str) -> None:
         engine.dispose()
 
 
+def test_0003_upgrade_adds_configuration_columns_and_tables(tmp_path: Path) -> None:
+    _assert_0003_upgrade(f"sqlite:///{tmp_path}/t.db")
+
+
+def test_0003_downgrade_round_trip(tmp_path: Path) -> None:
+    _assert_0003_round_trip(f"sqlite:///{tmp_path}/t.db")
+
+
+@pytest.mark.postgres
+def test_0003_upgrade_adds_configuration_columns_and_tables_on_postgres(
+    postgres_url: str,
+) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0003_upgrade(url)
+
+
+@pytest.mark.postgres
+def test_0003_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0003_round_trip(url)
+
+
+@contextmanager
+def _scratch_postgres_database(postgres_url: str) -> Iterator[str]:
+    admin_engine = create_engine(
+        postgres_url, isolation_level="AUTOCOMMIT", poolclass=NullPool
+    )
+    database_name = f"pdc_migration_{uuid.uuid4().hex[:12]}"
+    with admin_engine.connect() as connection:
+        connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+    url = make_url(postgres_url).set(database=database_name)
+    try:
+        yield url.render_as_string(hide_password=False)
+    finally:
+        with admin_engine.connect() as connection:
+            connection.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+        admin_engine.dispose()
+
+
+def _assert_0003_upgrade(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "0002")
+    engine = create_database_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO connections (id, protocol, endpoint, enabled, "
+                    "timeout_ms, protocol_options) VALUES "
+                    "('c1', 'mock', 'mock://local', true, 1000, '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tag_groups (id, connection_id, interval_ms, "
+                    "timeout_ms, overlap_policy, enabled) VALUES "
+                    "('g1', 'c1', 1000, 1000, 'skip', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tags (id, tag_group_id, name, address, enabled, "
+                    "metadata_json) VALUES ('t1', 'g1', 'T', 'a', true, '{}')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            row = connection.execute(
+                text("SELECT name, secret_options, archived_at FROM connections")
+            ).one()
+            assert row.name == "c1"
+            assert row.secret_options is None
+            assert row.archived_at is None
+            for table in ("tag_groups", "tags"):
+                assert (
+                    connection.scalar(text(f"SELECT archived_at FROM {table}")) is None
+                )
+        inspector = inspect(engine)
+        assert {"app_settings", "api_keys"} <= set(inspector.get_table_names())
+        assert {column["name"] for column in inspector.get_columns("api_keys")} == {
+            "id",
+            "name",
+            "prefix",
+            "key_hash",
+            "created_at",
+            "last_used_at",
+            "revoked_at",
+        }
+        assert {column["name"] for column in inspector.get_columns("app_settings")} == {
+            "key",
+            "value",
+        }
+        name_column = next(
+            column
+            for column in inspector.get_columns("connections")
+            if column["name"] == "name"
+        )
+        assert name_column["nullable"] is False
+        indexes = {
+            table: {index["name"] for index in inspector.get_indexes(table)}
+            for table in ("tag_readings", "poll_executions")
+        }
+        assert {
+            "ix_tag_readings_received_at",
+            "ix_tag_readings_tag_id_received_at",
+        } <= indexes["tag_readings"]
+        assert "ix_poll_executions_started_at" in indexes["poll_executions"]
+        with engine.connect() as connection:
+            diff = compare_metadata(MigrationContext.configure(connection), metadata)
+        if engine.dialect.name == "postgresql":
+            # On PostgreSQL, autogenerate reports the uq_tag_readings_event_id
+            # constraint as missing because it duplicates the primary key on
+            # event_id. Uniqueness is enforced by the key either way.
+            diff = [change for change in diff if not _is_event_id_unique(change)]
+        assert diff == []
+    finally:
+        engine.dispose()
+
+
+def _is_event_id_unique(change: object) -> bool:
+    if not (isinstance(change, tuple) and change[0] == "add_constraint"):
+        return False
+    constraint = change[1]
+    return (
+        getattr(constraint, "table", None) is not None
+        and constraint.table.name == "tag_readings"
+        and [column.name for column in constraint.columns] == ["event_id"]
+    )
+
+
+def _assert_0003_round_trip(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    command.downgrade(config, "0002")
+    engine = create_database_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert "api_keys" not in inspector.get_table_names()
+        assert "name" not in {c["name"] for c in inspector.get_columns("connections")}
+    finally:
+        engine.dispose()
+    command.upgrade(config, "head")
+
+
 def _alembic_config(url: str) -> Config:
     script_location = resources.files("plc_data_collector.persistence").joinpath(
         "migrations"
@@ -366,31 +493,27 @@ def _column_type(engine: Engine, table: str, column: str) -> object:
 
 
 def _seed_mock_configuration(engine: Engine) -> None:
-    config_repository = ConfigurationRepository(engine)
-    config_repository.upsert_connections(
-        [
-            ConnectionConfig(
-                id="mock_connection",
-                protocol="mock",
-                endpoint="mock://local",
-                protocol_options={"driver": "mock"},
-            )
-        ]
+    store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
+    store.upsert_connection(
+        ConnectionConfig(
+            id="mock_connection",
+            protocol="mock",
+            endpoint="mock://local",
+            protocol_options={"driver": "mock"},
+        )
     )
-    config_repository.upsert_tag_groups(
-        [TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)]
+    store.upsert_tag_group(
+        TagGroupConfig(id="fast", connection_id="mock_connection", interval_ms=1000)
     )
-    config_repository.upsert_tags(
-        [
-            TagConfig(
-                id="temperature",
-                tag_group_id="fast",
-                name="Temperature",
-                address="mock://temperature",
-                value_type=ValueType.NUMERIC,
-                metadata={"unit": "C"},
-            )
-        ]
+    store.upsert_tag(
+        TagConfig(
+            id="temperature",
+            tag_group_id="fast",
+            name="Temperature",
+            address="mock://temperature",
+            value_type=ValueType.NUMERIC,
+            metadata={"unit": "C"},
+        )
     )
 
 

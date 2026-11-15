@@ -1,0 +1,57 @@
+{#- Inputs of one protocol, from its ProtocolForm spec.
+    Secret fields never render a value: a saved secret is kept when the
+    field is left empty, and a "remove_<name>" checkbox clears it. -#}
+{% macro field_error(name, errors) -%}
+{% if errors.get(name) %}<small class="field-error" id="field-{{ name }}-error">{{ errors[name] }}</small>{% endif %}
+{%- endmacro %}
+
+{% macro described_by(name, help, errors) -%}
+{%- set ids = [] -%}
+{%- if help %}{% set _ = ids.append("field-" ~ name ~ "-help") %}{% endif -%}
+{%- if errors.get(name) %}{% set _ = ids.append("field-" ~ name ~ "-error") %}{% endif -%}
+{%- if ids %} aria-describedby="{{ ids | join(' ') }}"{% endif -%}
+{%- if errors.get(name) %} aria-invalid="true"{% endif -%}
+{%- endmacro %}
+
+{% macro protocol_fields(form, values, errors, saved_secrets) %}
+{% for field in form.fields %}
+{% if field.kind == "bool" %}
+<label class="check">
+<input type="checkbox" name="{{ field.name }}" id="field-{{ field.name }}"{% if values.get(field.name) %} checked{% endif %}{{ described_by(field.name, field.help, errors) }}>
+{{ field.label }}
+</label>
+{% if field.help %}<small class="field-help" id="field-{{ field.name }}-help">{{ field.help }}</small>{% endif %}
+{{ field_error(field.name, errors) }}
+{% elif field.kind == "password" %}
+<div class="field">
+<label for="field-{{ field.name }}">{{ field.label }}</label>
+<input class="input" type="password" name="{{ field.name }}" id="field-{{ field.name }}" value="" autocomplete="new-password"{% if field.name in saved_secrets %} placeholder="Saved"{% endif %}{{ described_by(field.name, field.help or field.name in saved_secrets, errors) }}>
+{% if field.name in saved_secrets %}
+<small class="field-help" id="field-{{ field.name }}-help">A {{ field.label | lower }} is saved. Leave this empty to keep it.</small>
+<label class="check check-small"><input type="checkbox" name="remove_{{ field.name }}">Remove the saved {{ field.label | lower }}</label>
+{% elif field.help %}
+<small class="field-help" id="field-{{ field.name }}-help">{{ field.help }}</small>
+{% endif %}
+{{ field_error(field.name, errors) }}
+</div>
+{% elif field.kind == "select" %}
+<div class="field">
+<label for="field-{{ field.name }}">{{ field.label }}</label>
+<select class="input" name="{{ field.name }}" id="field-{{ field.name }}"{{ described_by(field.name, field.help, errors) }}>
+{% for key, label in field.choices %}
+<option value="{{ key }}"{% if values.get(field.name) == key %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{% if field.help %}<small class="field-help" id="field-{{ field.name }}-help">{{ field.help }}</small>{% endif %}
+{{ field_error(field.name, errors) }}
+</div>
+{% else %}
+<div class="field">
+<label for="field-{{ field.name }}">{{ field.label }}</label>
+<input class="input{% if field.kind == 'url' or field.target == 'endpoint' %} mono{% endif %}" type="{{ 'number' if field.kind == 'int' else 'text' }}" name="{{ field.name }}" id="field-{{ field.name }}" value="{{ values.get(field.name, '') }}"{% if field.required %} required{% endif %} spellcheck="false" autocapitalize="off"{{ described_by(field.name, field.help, errors) }}>
+{% if field.help %}<small class="field-help" id="field-{{ field.name }}-help">{{ field.help }}</small>{% endif %}
+{{ field_error(field.name, errors) }}
+</div>
+{% endif %}
+{% endfor %}
+{% endmacro %}

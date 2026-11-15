@@ -3,26 +3,51 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from fastapi import FastAPI, Response, status
+from fastapi import Depends, FastAPI, Response, status
 
 from plc_data_collector._version import get_version
 from plc_data_collector.api.state import RuntimeApiState
 from plc_data_collector.license_info import load_license_report
 
+if TYPE_CHECKING:
+    from plc_data_collector.panel.host import CollectorHost
+
 RuntimeStateProvider = Callable[[], RuntimeApiState]
+
+PANEL_SESSION_COOKIE = "pdc_session"
+PANEL_SESSION_MAX_AGE_S = 12 * 60 * 60
+
+
+@dataclass(frozen=True)
+class WebOptions:
+    """What the app needs to serve the Panel.
+
+    An unset or empty ``admin_password`` turns the Panel off;
+    ``session_secret`` signs the session cookie. Neither appears in ``repr``.
+    """
+
+    host: CollectorHost
+    admin_password: str | None = field(repr=False)
+    session_secret: bytes = field(repr=False)
 
 
 def create_api_app(
     state: RuntimeApiState | RuntimeStateProvider | None = None,
+    *,
+    web: WebOptions | None = None,
 ) -> FastAPI:
-    """Create the read-only PLC Data Collector API application.
+    """Create the PLC Data Collector API application.
 
     ``state`` is either a fixed snapshot or a callable that returns a fresh
-    snapshot; a callable is invoked on every request.
+    snapshot; a callable is invoked on every request. With ``web``, the app
+    also serves the Panel at ``/panel``, redirects ``/`` to it and serves the
+    data API at ``/api/v1``; without it, the app serves only the read-only
+    runtime endpoints.
     """
     app = FastAPI(
         title="PLC Data Collector",
@@ -90,7 +115,75 @@ def create_api_app(
             "dependency_count": len(license_report.dependencies),
         }
 
+    if web is not None:
+        _mount_panel(app, web)
     return app
+
+
+def _mount_panel(app: FastAPI, web: WebOptions) -> None:
+    # Imported here so the API without the Panel needs no Jinja or sessions.
+    from fastapi.responses import RedirectResponse
+    from fastapi.staticfiles import StaticFiles
+    from sqlalchemy.exc import SQLAlchemyError
+    from starlette.middleware.sessions import SessionMiddleware
+
+    from plc_data_collector.api.data_v1 import create_data_v1_router
+    from plc_data_collector.domain import StorageError
+    from plc_data_collector.panel.app import (
+        DatabaseNotReady,
+        create_panel_router,
+        cross_site_request_handler,
+        database_error_handler,
+        database_not_ready_handler,
+        login_required_handler,
+    )
+    from plc_data_collector.panel.auth import CrossSiteRequest, LoginRequired
+    from plc_data_collector.panel.routes_connections import (
+        create_connections_router,
+    )
+    from plc_data_collector.panel.routes_live import (
+        attach_pending_changes,
+        create_live_router,
+    )
+    from plc_data_collector.panel.routes_settings import create_settings_router
+    from plc_data_collector.panel.routes_tags import create_tags_router
+
+    app.state.panel_web = web
+    # SameSite=Strict is the CSRF defence for the Panel's forms.
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=web.session_secret.hex(),
+        session_cookie=PANEL_SESSION_COOKIE,
+        max_age=PANEL_SESSION_MAX_AGE_S,
+        same_site="strict",
+    )
+    app.mount(
+        "/panel/static",
+        StaticFiles(packages=[("plc_data_collector.panel", "static")]),
+        name="panel_static",
+    )
+    # Every full Panel page shows the pending-changes banner.
+    banner = [Depends(attach_pending_changes)]
+    for router in (
+        create_panel_router(),
+        create_live_router(),
+        create_connections_router(),
+        create_tags_router(),
+        create_settings_router(),
+    ):
+        app.include_router(router, prefix="/panel", dependencies=banner)
+    # The data API needs no session; it authenticates each request by API key.
+    app.include_router(create_data_v1_router())
+    app.add_exception_handler(LoginRequired, login_required_handler)
+    app.add_exception_handler(DatabaseNotReady, database_not_ready_handler)
+    app.add_exception_handler(CrossSiteRequest, cross_site_request_handler)
+    # Only /panel pages get the 503 page; elsewhere the error is re-raised.
+    app.add_exception_handler(SQLAlchemyError, database_error_handler)
+    app.add_exception_handler(StorageError, database_error_handler)
+
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse("/panel/live", status_code=status.HTTP_303_SEE_OTHER)
 
 
 def _runtime_state(app: FastAPI) -> RuntimeApiState:

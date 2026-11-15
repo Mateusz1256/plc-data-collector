@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% from "_state.html" import state_marker %}
+{% from "_protocol_fields.html" import protocol_fields, field_error %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/connections">Connections</a> / {{ heading }}</nav>
+<div class="title-row">
+<h1 class="page-title">{{ heading }}</h1>
+{% if badge %}{{ state_marker(badge) }}{% endif %}
+</div>
+{% if status_detail %}<p class="row-detail secondary">{{ status_detail }}</p>{% endif %}
+</div>
+
+{% if confirm_delete is not none and existing %}
+<section class="panel confirm-panel" aria-labelledby="confirm-delete-title">
+<h2 class="section-title" id="confirm-delete-title">Delete {{ existing.name }}?</h2>
+<p>
+{% if confirm_delete.groups or confirm_delete.tags %}
+Its {{ plural(confirm_delete.groups, "tag group") }} and {{ plural(confirm_delete.tags, "tag") }} are deleted with it.
+{% else %}
+It has no tag groups or tags.
+{% endif %}
+Stored readings are kept. Collection stops after you apply changes.
+</p>
+<form method="post" action="/panel/connections/{{ existing.id }}/delete" class="form-actions">
+<button type="submit" class="btn btn-danger-solid">Delete connection</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ existing.id }}">Cancel</a>
+</form>
+</section>
+{% endif %}
+
+<div class="edit-layout">
+<form class="panel form-panel" method="post" action="{{ '/panel/connections/' ~ existing.id if existing else '/panel/connections' }}" aria-label="Connection settings" novalidate>
+<h2 class="section-title">Connection</h2>
+{% if errors %}
+<p class="alert alert-failed" role="alert">{{ errors.form if errors.get("form") else "The connection was not saved. Check the highlighted fields." }}</p>
+{% endif %}
+<div class="field">
+<label for="field-name">Name</label>
+<input class="input" type="text" name="name" id="field-name" value="{{ values.get('name', '') }}" placeholder="Line 2 oven">
+</div>
+<div class="field">
+<label for="field-id">ID</label>
+{% if existing %}
+<input class="input mono" type="text" id="field-id" value="{{ existing.id }}" readonly aria-describedby="field-id-help">
+<small class="field-help" id="field-id-help">{{ id_help }}</small>
+{% else %}
+<input class="input mono" type="text" name="id" id="field-id" value="{{ values.get('id', '') }}" required spellcheck="false" autocapitalize="off" aria-describedby="field-id-help{% if errors.get('id') %} field-id-error{% endif %}"{% if errors.get('id') %} aria-invalid="true"{% endif %}>
+<small class="field-help" id="field-id-help">Letters, digits, dot, dash or underscore. It can't be changed later.</small>
+{{ field_error("id", errors) }}
+{% endif %}
+</div>
+<div class="field">
+<label for="field-protocol">Protocol</label>
+<select class="input" id="field-protocol" disabled><option>{{ form.label }}</option></select>
+{% if not existing %}<input type="hidden" name="protocol" value="{{ form.protocol }}">{% endif %}
+</div>
+{{ protocol_fields(form, values, errors, saved_secrets) }}
+<div class="field">
+<label for="field-timeout_ms">Timeout (ms)</label>
+<input class="input mono" type="number" min="1" step="1" name="timeout_ms" id="field-timeout_ms" value="{{ values.get('timeout_ms', '') }}"{% if errors.get('timeout_ms') %} aria-invalid="true" aria-describedby="field-timeout_ms-error"{% endif %}>
+{{ field_error("timeout_ms", errors) }}
+</div>
+<label class="check"><input type="checkbox" name="enabled"{% if values.get('enabled') %} checked{% endif %}>Collect from this connection</label>
+
+<div class="form-footer">
+<div class="form-actions">
+{% if existing %}
+<button type="button" class="btn" hx-post="/panel/connections/{{ existing.id }}/test" hx-include="closest form" hx-target="#test-result" hx-swap="innerHTML" hx-disabled-elt="this">Test connection</button>
+{% endif %}
+<button type="submit" class="btn btn-primary">Save connection</button>
+</div>
+<div id="test-result" aria-live="polite"></div>
+<p class="secondary">{{ saved_note }}</p>
+</div>
+</form>
+{% if tag_section %}
+<div class="tag-stack">
+{% include "_tag_groups.html" %}
+{% include "_tags.html" %}
+</div>
+{% endif %}
+</div>
+
+{% if existing and confirm_delete is none %}
+<p><a class="btn btn-danger" href="/panel/connections/{{ existing.id }}/delete">Delete connection</a></p>
+{% endif %}
+{% endblock %}

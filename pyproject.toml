@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plc-data-collector"
-version = "0.2.0"
-description = "Industrial PLC and OPC UA data collector MVP"
+version = "0.3.0"
+description = "Industrial PLC and OPC UA data collector with web Panel and REST API"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
@@ -19,7 +19,11 @@ dependencies = [
   "pg8000==1.31.2",
   "SQLAlchemy==2.0.44",
   "uvicorn==0.35.0",
-  "pydantic==2.11.3"
+  "pydantic==2.11.3",
+  "cryptography==50.0.2",
+  "jinja2==3.1.6",
+  "python-multipart==0.0.33",
+  "itsdangerous==2.2.0"
 ]
 
 [project.optional-dependencies]
@@ -45,6 +49,8 @@ plc_data_collector = [
   "persistence/migrations/*.py",
   "persistence/migrations/versions/*.py",
   "persistence/migrations/script.py.mako",
+  "panel/templates/*.html",
+  "panel/static/*",
 ]
 
 [tool.setuptools]

@@ -1,0 +1,25 @@
+<section aria-labelledby="cfg-h" class="panel settings-section">
+<div class="settings-head">
+<h2 class="section-title" id="cfg-h">Configuration file</h2>
+<p class="lead">Back up or move all connections, tag groups and tags as one JSON file.</p>
+</div>
+<div class="settings-columns">
+<div class="settings-column">
+<h3 class="subsection-title">Export</h3>
+<p class="secondary">Passwords and other secrets are left out of the file. Connections that already exist keep theirs; enter them for new connections after importing.</p>
+<a class="btn btn-secondary" href="/panel/settings/export">Export configuration</a>
+</div>
+<form class="settings-column" method="post" action="/panel/settings/import" enctype="multipart/form-data" aria-label="Import configuration">
+<h3 class="subsection-title">Import</h3>
+<p class="secondary">Importing replaces the whole configuration. You'll see what will be added, changed and removed before anything is saved.</p>
+{% if import_error %}
+<p class="alert alert-failed" role="alert">{{ import_error }}</p>
+{% endif %}
+<div class="field">
+<label for="field-config-file">Configuration file</label>
+<input class="input" type="file" name="config_file" id="field-config-file" accept=".json,application/json" required>
+</div>
+<button type="submit" class="btn btn-secondary">Review import</button>
+</form>
+</div>
+</section>

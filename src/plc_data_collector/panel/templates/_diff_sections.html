@@ -1,0 +1,15 @@
+{% for heading, changes in sections %}
+<section class="panel" aria-labelledby="changes-{{ loop.index }}">
+<div class="section-head"><h2 class="section-title" id="changes-{{ loop.index }}">{{ heading }}</h2></div>
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Kind</th><th scope="col">Name</th><th scope="col">ID</th></tr></thead>
+<tbody>
+{% for kind, change in changes %}
+<tr><td>{{ kind }}</td><td class="row-name">{{ change.label }}</td><td class="addr">{{ change.id }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+{% endfor %}

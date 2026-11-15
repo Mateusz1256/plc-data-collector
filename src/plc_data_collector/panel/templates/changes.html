@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-head">
+<div class="page-head-text">
+<h1 class="page-title">Review changes</h1>
+</div>
+</div>
+{% if sections %}
+{% include "_diff_sections.html" %}
+{% elif not pending %}
+<section class="panel"><p class="empty">{{ nothing_message }}</p></section>
+{% else %}
+<section class="panel"><p class="empty">The saved configuration differs only in its revision. Applying restarts collection with it.</p></section>
+{% endif %}
+{% endblock %}

@@ -186,8 +186,8 @@ def test_about_returns_version_build_and_license_information() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["application"] == "plc-data-collector"
-    assert payload["version"] == "0.2.0"
-    assert payload["build"]["version"] == "0.2.0"
+    assert payload["version"] == "0.3.0"
+    assert payload["build"]["version"] == "0.3.0"
     assert payload["license"]["spdx_id"] == "MIT"
     assert payload["third_party_notices_file"] == "THIRD_PARTY_NOTICES.md"
     assert payload["dependency_count"] > 0

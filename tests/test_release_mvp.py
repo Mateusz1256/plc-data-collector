@@ -5,8 +5,10 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import pytest
+from cryptography.fernet import Fernet
 from sqlalchemy import Engine, select
 
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.domain import (
     ConnectionConfig,
     PollStatus,
@@ -17,7 +19,7 @@ from plc_data_collector.domain import (
     WorkerState,
 )
 from plc_data_collector.persistence import (
-    ConfigurationRepository,
+    ConfigStore,
     DatabaseWriter,
     DurableSqliteSpool,
     ReadingRepository,
@@ -399,10 +401,13 @@ def seed_configuration(
     tags: Iterable[TagConfig],
 ) -> None:
     """Persist configuration required by relational reading constraints."""
-    repository = ConfigurationRepository(engine)
-    repository.upsert_connections(connections)
-    repository.upsert_tag_groups(tag_groups)
-    repository.upsert_tags(tags)
+    store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
+    for connection in connections:
+        store.upsert_connection(connection)
+    for group in tag_groups:
+        store.upsert_tag_group(group)
+    for tag in tags:
+        store.upsert_tag(tag)
 
 
 def poll_status_values(engine: Engine) -> list[str]:

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column,
     Float,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     MetaData,
@@ -27,11 +28,14 @@ connections = Table(
     "connections",
     metadata,
     Column("id", String(128), primary_key=True),
+    Column("name", String(256), nullable=False),
     Column("protocol", String(64), nullable=False),
     Column("endpoint", String(1024), nullable=False),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("timeout_ms", Integer, nullable=False),
     Column("protocol_options", JSON, nullable=False, default=dict),
+    Column("secret_options", Text, nullable=True),
+    Column("archived_at", UTCDateTime(), nullable=True),
     CheckConstraint("timeout_ms > 0", name="ck_connections_timeout_positive"),
 )
 
@@ -44,6 +48,7 @@ tag_groups = Table(
     Column("timeout_ms", Integer, nullable=False),
     Column("overlap_policy", String(32), nullable=False),
     Column("enabled", Boolean, nullable=False, default=True),
+    Column("archived_at", UTCDateTime(), nullable=True),
     CheckConstraint("interval_ms > 0", name="ck_tag_groups_interval_positive"),
     CheckConstraint("timeout_ms > 0", name="ck_tag_groups_timeout_positive"),
 )
@@ -58,6 +63,7 @@ tags = Table(
     Column("value_type", String(32), nullable=True),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("archived_at", UTCDateTime(), nullable=True),
 )
 
 poll_executions = Table(
@@ -76,6 +82,7 @@ poll_executions = Table(
     CheckConstraint("requested_tags >= 0", name="ck_poll_requested_non_negative"),
     CheckConstraint("successful_tags >= 0", name="ck_poll_success_non_negative"),
     CheckConstraint("failed_tags >= 0", name="ck_poll_failed_non_negative"),
+    Index("ix_poll_executions_started_at", "started_at"),
 )
 
 tag_readings = Table(
@@ -97,6 +104,8 @@ tag_readings = Table(
     Column("error_code", String(128), nullable=True),
     Column("error_message", Text, nullable=True),
     UniqueConstraint("event_id", name="uq_tag_readings_event_id"),
+    Index("ix_tag_readings_received_at", "received_at"),
+    Index("ix_tag_readings_tag_id_received_at", "tag_id", "received_at"),
 )
 
 runtime_components = Table(
@@ -108,4 +117,23 @@ runtime_components = Table(
     Column("message", String(1024), nullable=True),
     Column("error_code", String(128), nullable=True),
     Column("error_message", Text, nullable=True),
+)
+
+app_settings = Table(
+    "app_settings",
+    metadata,
+    Column("key", String(64), primary_key=True),
+    Column("value", JSON, nullable=False),
+)
+
+api_keys = Table(
+    "api_keys",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("name", String(128), nullable=False),
+    Column("prefix", String(16), nullable=False),
+    Column("key_hash", String(64), nullable=False, unique=True),
+    Column("created_at", UTCDateTime(), nullable=False),
+    Column("last_used_at", UTCDateTime(), nullable=True),
+    Column("revoked_at", UTCDateTime(), nullable=True),
 )

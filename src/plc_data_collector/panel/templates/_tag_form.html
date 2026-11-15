@@ -1,0 +1,55 @@
+{% from "_protocol_fields.html" import field_error %}
+{% set errors = ui.errors %}
+{% set values = ui.values %}
+<form class="inline-form" method="post" action="{{ '/panel/tags/' ~ ui.target_id if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags' }}" aria-label="{{ 'Edit tag' if ui.mode == 'edit' else 'New tag' }}" novalidate>
+<h3>{{ "Edit tag" if ui.mode == "edit" else "New tag" }}</h3>
+{% if errors.get("form") %}<p class="alert alert-failed" role="alert">{{ errors.form }}</p>{% endif %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-name">Name</label>
+<input class="input" type="text" name="name" id="tag-name" value="{{ values.get('name', '') }}"{% if errors.get('name') %} aria-invalid="true" aria-describedby="field-name-error"{% endif %}>
+{{ field_error("name", errors) }}
+</div>
+<div class="field">
+<label for="tag-group">Tag group</label>
+<select class="input" name="tag_group_id" id="tag-group"{% if errors.get('tag_group_id') %} aria-invalid="true" aria-describedby="field-tag_group_id-error"{% endif %}>
+{% for group_id, label in group_choices %}
+<option value="{{ group_id }}"{% if group_id == values.get('tag_group_id') %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{{ field_error("tag_group_id", errors) }}
+</div>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-address">Address</label>
+<input class="input mono" type="text" name="address" id="tag-address" value="{{ values.get('address', '') }}" spellcheck="false" autocapitalize="off" aria-describedby="tag-address-help{% if errors.get('address') %} field-address-error{% endif %}"{% if errors.get('address') %} aria-invalid="true"{% endif %}>
+<small class="field-help" id="tag-address-help">OPC UA node ID, for example ns=2;s=Line1.Temperature.</small>
+{{ field_error("address", errors) }}
+</div>
+<div class="field">
+<label for="tag-type">Data type</label>
+<select class="input" name="value_type" id="tag-type"{% if errors.get('value_type') %} aria-invalid="true" aria-describedby="field-value_type-error"{% endif %}>
+{% for value_type in value_types %}
+<option value="{{ value_type }}"{% if value_type == values.get('value_type') %} selected{% endif %}>{{ value_type }}</option>
+{% endfor %}
+</select>
+{{ field_error("value_type", errors) }}
+</div>
+<div class="field">
+<label for="tag-unit">Unit</label>
+<input class="input" type="text" name="unit" id="tag-unit" value="{{ values.get('unit', '') }}">
+</div>
+</div>
+<label class="check"><input type="checkbox" name="enabled"{% if values.get('enabled') %} checked{% endif %}>Read this tag</label>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Save tag</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+</form>
+{% if ui.mode == "edit" %}
+<form class="inline-form-delete" method="post" action="/panel/tags/{{ ui.target_id }}/delete">
+<p class="secondary">Stored readings are kept.</p>
+<button type="submit" class="btn btn-danger">Delete tag</button>
+</form>
+{% endif %}

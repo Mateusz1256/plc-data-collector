@@ -19,12 +19,26 @@ _Avoid_: Scan class, poll group
 One addressed value inside a controller or meter that the collector reads.
 _Avoid_: Variable, point, signal, zmienna
 
+**Archived**:
+A Connection, Tag Group or Tag removed from the configuration whose stored
+readings are kept.
+_Avoid_: Deleted
+
 ### Operation
 
 **Panel**:
 The password-protected web UI for managing Connections, Tag Groups and Tags
 and for previewing current Tag values and runtime status. It has no charts.
 _Avoid_: Dashboard, HMI, SCADA
+
+**Apply changes**:
+Restarting collection so saved configuration takes effect, without stopping the
+Panel or losing queued readings.
+_Avoid_: Deploy, reload
+
+**API Key**:
+A secret that lets one application read collected data through the REST API.
+_Avoid_: Token, password
 
 ### Data flow
 

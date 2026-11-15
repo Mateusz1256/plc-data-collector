@@ -260,14 +260,18 @@ def test_service_sigterm_while_waiting_for_database_exits_cleanly(
     assert ":p@" not in service.output()
 
 
-def test_service_exits_1_on_missing_config(start_service: StartService) -> None:
+def test_service_starts_without_config_file(start_service: StartService) -> None:
+    # Without a seed file and with an empty database the service still starts:
+    # configuration is added through the Panel, so readiness reflects the runtime.
     service = start_service(with_config=False)
 
-    assert service.wait(SHUTDOWN_TIMEOUT_S) == 1, service.output()
+    service.wait_for(lambda: service.status_code("/health/ready") == 200, "readiness")
+    response = service.get("/api/runtime/workers")
+    assert response is not None
+    assert response.json()["workers"] == []
     log_text = service.log_text()
-    assert "service_start_failed" in log_text
-    assert "config_file_required" in log_text
-    assert not service.pid_file.exists()
+    assert "configuration_empty" in log_text
+    assert "service_start_failed" not in log_text
 
 
 def test_service_exits_1_when_database_never_answers(

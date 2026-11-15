@@ -1,0 +1,33 @@
+{% from "_state.html" import state_marker %}
+<section class="panel" aria-label="Tag groups">
+<div class="section-head">
+<h2 class="section-title">Tag groups</h2>
+<p class="secondary">Tags in one group are read together, in as few requests as possible.</p>
+<a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/groups/new" hx-get="/panel/connections/{{ tag_section.connection_id }}/groups/new" hx-target="#group-form-slot" hx-swap="innerHTML">Add tag group</a>
+</div>
+<div id="group-form-slot">
+{% if tag_section.group_ui %}
+{% with ui = tag_section.group_ui, connection_id = tag_section.connection_id, tag_count = tag_section.tag_count(tag_section.group_ui.target_id) %}{% include "_group_form.html" %}{% endwith %}
+{% endif %}
+</div>
+{% if tag_section.group_rows %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Group</th><th scope="col">Read every</th><th scope="col">Timeout</th><th scope="col">Tags</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{% for row in tag_section.group_rows %}
+<tr data-group="{{ row.group.id }}">
+<td class="addr">{{ row.group.id }}{% if not row.group.enabled %} <span class="secondary">(not read)</span>{% endif %}</td>
+<td class="num">{{ row.group.interval_ms | interval }}</td>
+<td class="num">{{ row.group.timeout_ms | interval }}</td>
+<td class="num">{{ row.tag_count }}</td>
+<td class="actions"><a class="btn btn-quiet" href="/panel/groups/{{ row.group.id }}/edit" hx-get="/panel/groups/{{ row.group.id }}/edit" hx-target="#group-form-slot" hx-swap="innerHTML">Edit<span class="visually-hidden"> {{ row.group.id }}</span></a></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% else %}
+<p class="secondary" style="padding: 0 16px 16px; margin: 0">No tag groups yet. Add one to start reading tags.</p>
+{% endif %}
+</section>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -191,3 +192,19 @@ def test_connection_and_runtime_status_validate_common_fields() -> None:
     assert connection.id == "opcua_demo"
     assert connection.protocol == "opcua"
     assert status.state is WorkerState.RUNNING
+
+
+@pytest.mark.parametrize(
+    "build",
+    [
+        lambda v: ConnectionConfig(id="c", protocol="p", endpoint="e", timeout_ms=v),
+        lambda v: TagGroupConfig(id="g", connection_id="c", interval_ms=v),
+        lambda v: TagGroupConfig(
+            id="g", connection_id="c", interval_ms=1, timeout_ms=v
+        ),
+    ],
+)
+def test_millisecond_fields_fit_a_database_integer(build: Any) -> None:
+    build(2_147_483_647)
+    with pytest.raises(ConfigurationError, match="2147483647"):
+        build(2_147_483_648)

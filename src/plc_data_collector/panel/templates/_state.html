@@ -1,0 +1,16 @@
+{#- State marker: shape plus word, so no state relies on colour alone.
+    Usage: {% from "_state.html" import state_marker %}
+           {{ state_marker(state_badge("degraded")) }} -#}
+{% macro state_marker(badge, label=None) -%}
+<span class="state {{ badge.css_class }}">
+{%- if badge.kind == "normal" -%}
+<svg class="marker" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4.5"></circle></svg>
+{%- elif badge.kind == "degraded" -%}
+<svg class="marker" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 0.5 11.5 6 6 11.5 0.5 6Z"></path></svg>
+{%- elif badge.kind == "failed" -%}
+<svg class="marker" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10"></rect></svg>
+{%- else -%}
+<svg class="marker" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1 6h10"></path></svg>
+{%- endif -%}
+<span class="state-word">{{ label or badge.word }}</span></span>
+{%- endmacro %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% from "_state.html" import state_marker %}
+{% block main %}
+<div class="page-head">
+<div class="page-head-text">
+<h1 class="page-title">Connections</h1>
+<p class="lead num">{{ summary }}</p>
+</div>
+{% if not adding %}
+<a class="btn btn-primary" href="/panel/connections/new">Add connection</a>
+{% endif %}
+</div>
+
+{% if adding %}
+<form class="panel add-panel" method="get" action="/panel/connections/new" aria-label="Add connection">
+<h2 class="section-title">Add connection</h2>
+{% if picker_error %}
+<p class="alert alert-failed" role="alert">{{ picker_error }}</p>
+{% endif %}
+<fieldset class="picker">
+<legend>Protocol</legend>
+<div class="picker-options">
+{% for option in picker %}
+<label class="opt{% if not option.available %} opt-disabled{% endif %}">
+<span class="opt-title"><input type="radio" name="protocol" value="{{ option.protocol }}"{% if not option.available %} disabled{% elif option.protocol == default_protocol %} checked{% endif %}>{{ option.label }}</span>
+<span class="opt-summary">{{ option.summary }}</span>
+{% if not option.available and option.available_in %}
+<span class="opt-summary">Coming in {{ option.available_in }}</span>
+{% endif %}
+</label>
+{% endfor %}
+</div>
+</fieldset>
+<div class="form-grid-2">
+<label class="field">Name<input class="input" type="text" name="name" value="{{ adding.name }}" placeholder="Line 2 oven"></label>
+<label class="field">ID<input class="input mono" type="text" name="id" value="{{ adding.id }}" placeholder="line2_oven" spellcheck="false" autocapitalize="off"></label>
+</div>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Continue to settings</button>
+<a class="btn btn-quiet" href="/panel/connections">Cancel</a>
+</div>
+</form>
+{% endif %}
+
+<section class="panel" aria-label="All connections">
+{% if rows %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Connection</th><th scope="col">Protocol</th><th scope="col">Address</th><th scope="col">Status</th><th scope="col">Tags collected</th><th scope="col">Last poll</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{% for row in rows %}
+{% set connection = row.connection %}
+<tr data-connection="{{ connection.id }}"{% if row.row_class %} class="{{ row.row_class }}"{% endif %}>
+<td>
+{% if connection.enabled %}
+<a class="row-name" href="/panel/live#{{ connection.id }}">{{ connection.name }}</a>
+{% else %}
+<span class="row-name muted">{{ connection.name }}</span>
+{% endif %}
+<div class="addr row-id">{{ connection.id }}</div>
+</td>
+<td{% if not connection.enabled %} class="muted"{% endif %}>{{ row.protocol_label }}</td>
+<td class="addr row-detail">{{ row.address }}</td>
+<td>{{ state_marker(row.badge) }}{% if row.detail %}<div class="row-detail secondary">{{ row.detail }}</div>{% endif %}</td>
+<td class="num{% if not connection.enabled %} muted{% endif %}">{{ row.collected }}</td>
+<td class="num {% if row.last_poll_failed %}row-detail{% elif not connection.enabled %}muted{% else %}secondary{% endif %}">{{ row.last_poll }}</td>
+<td class="actions"><a class="btn btn-quiet" href="/panel/connections/{{ connection.id }}">Edit<span class="visually-hidden"> {{ connection.name }}</span></a></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% else %}
+<p class="empty">No connections yet. Add one to start collecting.</p>
+{% endif %}
+</section>
+{% endblock %}

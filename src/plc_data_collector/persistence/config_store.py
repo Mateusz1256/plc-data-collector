@@ -1,0 +1,635 @@
+"""Database-backed configuration with archive instead of delete."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import UTC, datetime
+
+from sqlalchemy import Connection, Engine, Row, Table, select, update
+
+from plc_data_collector.app.config import (
+    CollectorConfig,
+    endpoint_userinfo,
+    strip_endpoint_userinfo,
+)
+from plc_data_collector.app.secrets import SecretBox, merge_secrets, split_secrets
+from plc_data_collector.domain import (
+    ConfigurationError,
+    ConnectionConfig,
+    OverlapPolicy,
+    TagConfig,
+    TagGroupConfig,
+    ValueType,
+)
+from plc_data_collector.persistence.app_settings import (
+    CONFIG_REVISION_KEY,
+    get_setting,
+    set_setting,
+)
+from plc_data_collector.persistence.schema import (
+    app_settings,
+    connections,
+    tag_groups,
+    tags,
+)
+from plc_data_collector.persistence.sql import insert_for
+
+
+class ConfigStore:
+    """Stores Connections, Tag Groups and Tags; every write bumps the revision.
+
+    Removed items are archived (``archived_at``), never deleted, so stored
+    readings and spooled Poll Results keep their foreign keys.
+    """
+
+    def __init__(self, engine: Engine, secret_box: SecretBox) -> None:
+        """Create a store over an engine whose schema is already migrated."""
+        self._engine = engine
+        self._box = secret_box
+
+    # Reads
+
+    def load_active(self) -> tuple[CollectorConfig, int]:
+        """Return the non-archived configuration and its revision.
+
+        The revision is read first, in the same connection, so a concurrent write
+        can only make the data newer than the revision, never older.
+        """
+        with self._engine.connect() as connection:
+            revision = _read_revision(connection)
+            connection_rows = connection.execute(
+                select(connections)
+                .where(connections.c.archived_at.is_(None))
+                .order_by(connections.c.id)
+            ).all()
+            group_rows = connection.execute(
+                select(tag_groups)
+                .where(tag_groups.c.archived_at.is_(None))
+                .order_by(tag_groups.c.id)
+            ).all()
+            tag_rows = connection.execute(
+                select(tags).where(tags.c.archived_at.is_(None)).order_by(tags.c.id)
+            ).all()
+        config = CollectorConfig(
+            connections=tuple(self._connection_from_row(r) for r in connection_rows),
+            tag_groups=tuple(_group_from_row(r) for r in group_rows),
+            tags=tuple(_tag_from_row(r) for r in tag_rows),
+        )
+        return config, revision
+
+    def revision(self) -> int:
+        """Return the configuration revision; 0 means never written."""
+        with self._engine.connect() as connection:
+            return _read_revision(connection)
+
+    def has_revision(self) -> bool:
+        """Return whether the revision row exists; 0.2.0 databases have none.
+
+        Every configuration write creates the row, so its absence next to
+        Connection rows means a database that 0.3.0 has never written.
+        """
+        with self._engine.connect() as connection:
+            return get_setting(connection, CONFIG_REVISION_KEY) is not None
+
+    def has_any_connection_rows(self) -> bool:
+        """Return whether any Connection row exists, archived ones included."""
+        with self._engine.connect() as connection:
+            return (
+                connection.execute(select(connections.c.id).limit(1)).first()
+                is not None
+            )
+
+    def get_connection(self, connection_id: str) -> ConnectionConfig | None:
+        """Return an active Connection, or None."""
+        with self._engine.connect() as connection:
+            row = connection.execute(
+                select(connections).where(
+                    connections.c.id == connection_id,
+                    connections.c.archived_at.is_(None),
+                )
+            ).first()
+        return None if row is None else self._connection_from_row(row)
+
+    def get_tag_group(self, group_id: str) -> TagGroupConfig | None:
+        """Return an active Tag Group, or None."""
+        with self._engine.connect() as connection:
+            row = connection.execute(
+                select(tag_groups).where(
+                    tag_groups.c.id == group_id, tag_groups.c.archived_at.is_(None)
+                )
+            ).first()
+        return None if row is None else _group_from_row(row)
+
+    def get_tag(self, tag_id: str) -> TagConfig | None:
+        """Return an active Tag, or None."""
+        with self._engine.connect() as connection:
+            row = connection.execute(
+                select(tags).where(tags.c.id == tag_id, tags.c.archived_at.is_(None))
+            ).first()
+        return None if row is None else _tag_from_row(row)
+
+    def active_tags(self, tag_id: str | None = None) -> list[tuple[TagConfig, str]]:
+        """Return active Tags with the ID of their Connection, ordered by ID.
+
+        Reads only Tags joined to their active Tag Groups, so no Connection
+        row is read and no secret is decrypted. With ``tag_id``, returns at
+        most that Tag.
+        """
+        statement = (
+            select(tags, tag_groups.c.connection_id.label("group_connection_id"))
+            .join(tag_groups, tags.c.tag_group_id == tag_groups.c.id)
+            .where(tags.c.archived_at.is_(None), tag_groups.c.archived_at.is_(None))
+            .order_by(tags.c.id)
+        )
+        if tag_id is not None:
+            statement = statement.where(tags.c.id == tag_id)
+        with self._engine.connect() as connection:
+            rows = connection.execute(statement).all()
+        return [(_tag_from_row(row), row.group_connection_id) for row in rows]
+
+    def is_archived_tag(self, tag_id: str) -> bool | None:
+        """Return whether the Tag is archived, or None when it is unknown."""
+        with self._engine.connect() as connection:
+            row = connection.execute(
+                select(tags.c.archived_at).where(tags.c.id == tag_id)
+            ).first()
+        return None if row is None else row[0] is not None
+
+    def all_tag_ids(self) -> set[str]:
+        """Return every Tag ID, archived ones included."""
+        with self._engine.connect() as connection:
+            return {row[0] for row in connection.execute(select(tags.c.id))}
+
+    # Writes
+
+    def create_connection(self, config: ConnectionConfig) -> None:
+        """Create a Connection; refuse an ID that an active Connection uses.
+
+        Raises ``ConfigurationError`` with code ``duplicate_id`` when an active
+        Connection has the ID. An archived Connection with the ID is restored
+        with the new values (ADR 0002); its archived Tag Groups and Tags stay
+        archived. The check runs under the revision lock, so two concurrent
+        creates of one ID cannot both succeed.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_active_id(connection, connections, "connection", config.id)
+            self._write_connection(connection, config)
+            self._finish_write(connection, revision)
+
+    def create_tag_group(self, group: TagGroupConfig) -> None:
+        """Create a Tag Group; same rules as ``create_connection``.
+
+        Its Connection must be active. Restoring it leaves its Tags archived.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_active_id(connection, tag_groups, "tag_group", group.id)
+            _write_tag_group(connection, group)
+            self._finish_write(connection, revision)
+
+    def create_tag(self, tag: TagConfig) -> None:
+        """Create a Tag; same rules as ``create_connection``.
+
+        Its Tag Group must be active.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _refuse_active_id(connection, tags, "tag", tag.id)
+            _write_tag(connection, tag)
+            self._finish_write(connection, revision)
+
+    def upsert_connection(self, config: ConnectionConfig) -> None:
+        """Create or update a Connection, restoring it when archived."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            self._write_connection(connection, config)
+            self._finish_write(connection, revision)
+
+    def upsert_tag_group(self, group: TagGroupConfig) -> None:
+        """Create or update a Tag Group; its Connection must be active."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _write_tag_group(connection, group)
+            self._finish_write(connection, revision)
+
+    def upsert_tag(self, tag: TagConfig) -> None:
+        """Create or update a Tag; its Tag Group must be active."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _write_tag(connection, tag)
+            self._finish_write(connection, revision)
+
+    def archive_connection(self, connection_id: str) -> None:
+        """Archive a Connection and, with it, its Tag Groups and Tags."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            now = _now()
+            _archive_connection(connection, connection_id, now)
+            self._finish_write(connection, revision)
+
+    def archive_tag_group(self, group_id: str) -> None:
+        """Archive a Tag Group and its Tags."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            _archive_group(connection, group_id, _now())
+            self._finish_write(connection, revision)
+
+    def archive_tag(self, tag_id: str) -> None:
+        """Archive a Tag."""
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            connection.execute(
+                update(tags)
+                .where(tags.c.id == tag_id, tags.c.archived_at.is_(None))
+                .values(archived_at=_now())
+            )
+            self._finish_write(connection, revision)
+
+    def replace_all(
+        self, config: CollectorConfig, *, expected_revision: int | None = None
+    ) -> None:
+        """Make ``config`` the active set: upsert it, archive everything else.
+
+        With ``expected_revision``, raises ``ConfigurationError`` with code
+        ``revision_changed`` and writes nothing when the revision differs; the
+        check runs under the revision lock.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            if expected_revision is not None and revision != expected_revision:
+                raise ConfigurationError(
+                    "The configuration changed since it was read.",
+                    code="revision_changed",
+                    details={"expected": expected_revision, "actual": revision},
+                )
+            for item in config.connections:
+                self._write_connection(connection, item)
+            for group in config.tag_groups:
+                _write_tag_group(connection, group)
+            for tag in config.tags:
+                _write_tag(connection, tag)
+
+            now = _now()
+            keep_connections = {c.id for c in config.connections}
+            keep_groups = {g.id for g in config.tag_groups}
+            keep_tags = {t.id for t in config.tags}
+            for (row_id,) in connection.execute(
+                select(connections.c.id).where(connections.c.archived_at.is_(None))
+            ).all():
+                if row_id not in keep_connections:
+                    _archive_connection(connection, row_id, now)
+            for (row_id,) in connection.execute(
+                select(tag_groups.c.id).where(tag_groups.c.archived_at.is_(None))
+            ).all():
+                if row_id not in keep_groups:
+                    _archive_group(connection, row_id, now)
+            for (row_id,) in connection.execute(
+                select(tags.c.id).where(tags.c.archived_at.is_(None))
+            ).all():
+                if row_id not in keep_tags:
+                    connection.execute(
+                        update(tags).where(tags.c.id == row_id).values(archived_at=now)
+                    )
+            self._finish_write(connection, revision)
+
+    def encrypt_plaintext_secrets(self) -> int:
+        """Move sensitive options from ``protocol_options`` into ``secret_options``.
+
+        Handles 0.2.0 rows. Returns the number of Connections changed. This is not
+        a configuration change, so the revision is not bumped.
+        """
+        changed = 0
+        with self._engine.begin() as connection:
+            rows = connection.execute(
+                select(
+                    connections.c.id,
+                    connections.c.protocol_options,
+                    connections.c.secret_options,
+                )
+            ).all()
+            for row in rows:
+                plain, found = split_secrets(row.protocol_options or {})
+                if not found:
+                    continue
+                merged = merge_secrets(
+                    self._box.decrypt(row.secret_options) if row.secret_options else {},
+                    found,
+                )
+                connection.execute(
+                    update(connections)
+                    .where(connections.c.id == row.id)
+                    .values(
+                        protocol_options=plain,
+                        secret_options=self._box.encrypt(merged),
+                    )
+                )
+                changed += 1
+        return changed
+
+    def move_endpoint_credentials(self) -> tuple[list[str], list[str]]:
+        """Move user names and passwords out of OPC UA endpoint URLs.
+
+        Handles rows 0.2.0 or an import stored with ``user:password@`` in the
+        endpoint: the user name goes to ``username``, the password to the
+        encrypted ``password`` secret, and the endpoint is stored without
+        them. A Connection that already has a ``username`` or ``password``
+        option is left alone. Returns ``(moved, left)`` Connection IDs. Like
+        ``encrypt_plaintext_secrets``, the revision is not bumped.
+        """
+        moved: list[str] = []
+        left: list[str] = []
+        with self._engine.begin() as connection:
+            rows = connection.execute(
+                select(
+                    connections.c.id,
+                    connections.c.protocol,
+                    connections.c.endpoint,
+                    connections.c.protocol_options,
+                    connections.c.secret_options,
+                ).order_by(connections.c.id)
+            ).all()
+            for row in rows:
+                if row.protocol != "opcua":
+                    continue
+                user, password = endpoint_userinfo(row.endpoint)
+                stripped = strip_endpoint_userinfo(row.endpoint)
+                if stripped == row.endpoint:
+                    continue
+                plain: dict[str, object] = dict(row.protocol_options or {})
+                secret = (
+                    self._box.decrypt(row.secret_options) if row.secret_options else {}
+                )
+                options = merge_secrets(plain, secret)
+                if "username" in options or "password" in options:
+                    left.append(row.id)
+                    continue
+                if user is not None:
+                    plain["username"] = user
+                if password is not None:
+                    secret = {**secret, "password": password}
+                connection.execute(
+                    update(connections)
+                    .where(connections.c.id == row.id)
+                    .values(
+                        endpoint=stripped,
+                        protocol_options=plain,
+                        secret_options=self._box.encrypt(secret) if secret else None,
+                    )
+                )
+                moved.append(row.id)
+        return moved, left
+
+    # Internals
+
+    def _connection_from_row(self, row: Row[tuple[object, ...]]) -> ConnectionConfig:
+        options = merge_secrets(
+            row.protocol_options or {},
+            self._box.decrypt(row.secret_options) if row.secret_options else {},
+        )
+        return ConnectionConfig(
+            id=row.id,
+            name=row.name,
+            protocol=row.protocol,
+            endpoint=row.endpoint,
+            enabled=row.enabled,
+            timeout_ms=row.timeout_ms,
+            protocol_options=options,
+        )
+
+    def _write_connection(
+        self, connection: Connection, config: ConnectionConfig
+    ) -> None:
+        plain, secret = split_secrets(config.protocol_options)
+        statement = insert_for(connection, connections).values(
+            id=config.id,
+            name=config.name,
+            protocol=config.protocol,
+            endpoint=config.endpoint,
+            enabled=config.enabled,
+            timeout_ms=config.timeout_ms,
+            protocol_options=plain,
+            secret_options=self._box.encrypt(secret) if secret else None,
+            archived_at=None,
+        )
+        connection.execute(
+            statement.on_conflict_do_update(
+                index_elements=[connections.c.id],
+                set_={
+                    "name": statement.excluded.name,
+                    "protocol": statement.excluded.protocol,
+                    "endpoint": statement.excluded.endpoint,
+                    "enabled": statement.excluded.enabled,
+                    "timeout_ms": statement.excluded.timeout_ms,
+                    "protocol_options": statement.excluded.protocol_options,
+                    "secret_options": statement.excluded.secret_options,
+                    "archived_at": None,
+                },
+            )
+        )
+
+    def _finish_write(self, connection: Connection, revision: int) -> None:
+        _validate_active_references(connection)
+        set_setting(connection, CONFIG_REVISION_KEY, revision + 1)
+
+
+def _lock_revision(connection: Connection) -> int:
+    """Lock the revision row for this transaction and return its value.
+
+    Called first in every write transaction. Concurrent writers queue on the row
+    lock (PostgreSQL), so revisions are distinct and strictly increasing and
+    reference checks never race with another write. SQLite serialises writers.
+    """
+    connection.execute(
+        insert_for(connection, app_settings)
+        .values(key=CONFIG_REVISION_KEY, value=0)
+        .on_conflict_do_nothing(index_elements=[app_settings.c.key])
+    )
+    value = connection.execute(
+        select(app_settings.c.value)
+        .where(app_settings.c.key == CONFIG_REVISION_KEY)
+        .with_for_update()
+    ).scalar_one()
+    return value if isinstance(value, int) else 0
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _read_revision(connection: Connection) -> int:
+    value = get_setting(connection, CONFIG_REVISION_KEY)
+    return value if isinstance(value, int) else 0
+
+
+def _refuse_active_id(
+    connection: Connection, table: Table, kind: str, item_id: str
+) -> None:
+    row = connection.execute(
+        select(table.c.id).where(table.c.id == item_id, table.c.archived_at.is_(None))
+    ).first()
+    if row is not None:
+        raise ConfigurationError(
+            f"A {kind.replace('_', ' ')} with the ID '{item_id}' already exists.",
+            code="duplicate_id",
+            details={kind: item_id},
+        )
+
+
+def _unknown_reference(kind: str, parent_id: str) -> ConfigurationError:
+    return ConfigurationError(
+        f"The {kind} '{parent_id}' does not exist or is archived.",
+        code="unknown_reference",
+        details={kind: parent_id},
+    )
+
+
+def _write_tag_group(connection: Connection, group: TagGroupConfig) -> None:
+    if (
+        connection.execute(
+            select(connections.c.id).where(
+                connections.c.id == group.connection_id,
+                connections.c.archived_at.is_(None),
+            )
+        ).first()
+        is None
+    ):
+        raise _unknown_reference("connection", group.connection_id)
+    statement = insert_for(connection, tag_groups).values(
+        id=group.id,
+        connection_id=group.connection_id,
+        interval_ms=group.interval_ms,
+        timeout_ms=group.timeout_ms,
+        overlap_policy=group.overlap_policy.value,
+        enabled=group.enabled,
+        archived_at=None,
+    )
+    connection.execute(
+        statement.on_conflict_do_update(
+            index_elements=[tag_groups.c.id],
+            set_={
+                "connection_id": statement.excluded.connection_id,
+                "interval_ms": statement.excluded.interval_ms,
+                "timeout_ms": statement.excluded.timeout_ms,
+                "overlap_policy": statement.excluded.overlap_policy,
+                "enabled": statement.excluded.enabled,
+                "archived_at": None,
+            },
+        )
+    )
+
+
+def _write_tag(connection: Connection, tag: TagConfig) -> None:
+    if (
+        connection.execute(
+            select(tag_groups.c.id).where(
+                tag_groups.c.id == tag.tag_group_id,
+                tag_groups.c.archived_at.is_(None),
+            )
+        ).first()
+        is None
+    ):
+        raise _unknown_reference("tag_group", tag.tag_group_id)
+    statement = insert_for(connection, tags).values(
+        id=tag.id,
+        tag_group_id=tag.tag_group_id,
+        name=tag.name,
+        address=tag.address,
+        value_type=tag.value_type.value,
+        enabled=tag.enabled,
+        metadata_json=dict(tag.metadata),
+        archived_at=None,
+    )
+    connection.execute(
+        statement.on_conflict_do_update(
+            index_elements=[tags.c.id],
+            set_={
+                "tag_group_id": statement.excluded.tag_group_id,
+                "name": statement.excluded.name,
+                "address": statement.excluded.address,
+                "value_type": statement.excluded.value_type,
+                "enabled": statement.excluded.enabled,
+                "metadata_json": statement.excluded.metadata_json,
+                "archived_at": None,
+            },
+        )
+    )
+
+
+def _archive_connection(
+    connection: Connection, connection_id: str, now: datetime
+) -> None:
+    for (group_id,) in connection.execute(
+        select(tag_groups.c.id).where(
+            tag_groups.c.connection_id == connection_id,
+            tag_groups.c.archived_at.is_(None),
+        )
+    ).all():
+        _archive_group(connection, group_id, now)
+    connection.execute(
+        update(connections)
+        .where(connections.c.id == connection_id, connections.c.archived_at.is_(None))
+        .values(archived_at=now)
+    )
+
+
+def _archive_group(connection: Connection, group_id: str, now: datetime) -> None:
+    connection.execute(
+        update(tags)
+        .where(tags.c.tag_group_id == group_id, tags.c.archived_at.is_(None))
+        .values(archived_at=now)
+    )
+    connection.execute(
+        update(tag_groups)
+        .where(tag_groups.c.id == group_id, tag_groups.c.archived_at.is_(None))
+        .values(archived_at=now)
+    )
+
+
+def _validate_active_references(connection: Connection) -> None:
+    """Fail when an active Tag Group or Tag points at an archived or missing parent."""
+    active_connections = set(
+        connection.execute(
+            select(connections.c.id).where(connections.c.archived_at.is_(None))
+        ).scalars()
+    )
+    active_groups: dict[str, str] = {
+        row.id: row.connection_id
+        for row in connection.execute(
+            select(tag_groups.c.id, tag_groups.c.connection_id).where(
+                tag_groups.c.archived_at.is_(None)
+            )
+        )
+    }
+    for parent in active_groups.values():
+        if parent not in active_connections:
+            raise _unknown_reference("connection", parent)
+    for row in connection.execute(
+        select(tags.c.tag_group_id).where(tags.c.archived_at.is_(None))
+    ):
+        if row.tag_group_id not in active_groups:
+            raise _unknown_reference("tag_group", row.tag_group_id)
+
+
+def _group_from_row(row: Row[tuple[object, ...]]) -> TagGroupConfig:
+    return TagGroupConfig(
+        id=row.id,
+        connection_id=row.connection_id,
+        interval_ms=row.interval_ms,
+        timeout_ms=row.timeout_ms,
+        overlap_policy=OverlapPolicy(row.overlap_policy),
+        enabled=row.enabled,
+    )
+
+
+def _tag_from_row(row: Row[tuple[object, ...]]) -> TagConfig:
+    metadata: Mapping[str, object] = row.metadata_json or {}
+    return TagConfig(
+        id=row.id,
+        tag_group_id=row.tag_group_id,
+        name=row.name,
+        address=row.address,
+        value_type=ValueType(row.value_type),
+        enabled=row.enabled,
+        metadata=metadata,
+    )

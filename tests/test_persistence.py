@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, inspect, select
+from cryptography.fernet import Fernet
+from sqlalchemy import Engine, inspect, select, text
+from sqlalchemy.exc import IntegrityError
 
+from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.domain import (
     ConnectionConfig,
     PollExecution,
@@ -20,10 +24,11 @@ from plc_data_collector.domain import (
     WorkerState,
 )
 from plc_data_collector.persistence import (
-    ConfigurationRepository,
+    ConfigStore,
     ReadingRepository,
     RuntimeStatusRepository,
     TagReadingRecord,
+    create_database_engine,
     create_sqlite_engine,
     initialize_schema,
 )
@@ -44,37 +49,31 @@ def make_engine() -> Engine:
 
 
 def seed_configuration(engine: Engine) -> None:
-    repository = ConfigurationRepository(engine)
-    repository.upsert_connections(
-        [
-            ConnectionConfig(
-                id="mock_connection",
-                protocol="mock",
-                endpoint="mock://local",
-                protocol_options={"driver": "mock"},
-            )
-        ]
+    store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
+    store.upsert_connection(
+        ConnectionConfig(
+            id="mock_connection",
+            protocol="mock",
+            endpoint="mock://local",
+            protocol_options={"driver": "mock"},
+        )
     )
-    repository.upsert_tag_groups(
-        [
-            TagGroupConfig(
-                id="fast",
-                connection_id="mock_connection",
-                interval_ms=1000,
-            )
-        ]
+    store.upsert_tag_group(
+        TagGroupConfig(
+            id="fast",
+            connection_id="mock_connection",
+            interval_ms=1000,
+        )
     )
-    repository.upsert_tags(
-        [
-            TagConfig(
-                id="temperature",
-                tag_group_id="fast",
-                name="Temperature",
-                address="mock://temperature",
-                value_type=ValueType.NUMERIC,
-                metadata={"unit": "C"},
-            )
-        ]
+    store.upsert_tag(
+        TagConfig(
+            id="temperature",
+            tag_group_id="fast",
+            name="Temperature",
+            address="mock://temperature",
+            value_type=ValueType.NUMERIC,
+            metadata={"unit": "C"},
+        )
     )
 
 
@@ -215,3 +214,20 @@ def test_runtime_status_repository_upserts_component_status() -> None:
         row = connection.execute(select(runtime_components)).mappings().one()
     assert row["state"] == "degraded"
     assert row["error_code"] == "timeout"
+
+
+def test_engines_hide_statement_parameters(tmp_path: Path) -> None:
+    sqlite = create_database_engine(f"sqlite:///{tmp_path / 'p.db'}")
+    postgres = create_database_engine("postgresql+pg8000://u:p@127.0.0.1:1/x")
+    try:
+        assert sqlite.hide_parameters is True
+        assert postgres.hide_parameters is True
+        with sqlite.begin() as connection:
+            connection.execute(text("CREATE TABLE t (v TEXT UNIQUE)"))
+            connection.execute(text("INSERT INTO t VALUES (:v)"), {"v": "secret-v"})
+        with pytest.raises(IntegrityError) as error, sqlite.begin() as connection:
+            connection.execute(text("INSERT INTO t VALUES (:v)"), {"v": "secret-v"})
+        assert "secret-v" not in str(error.value)
+    finally:
+        sqlite.dispose()
+        postgres.dispose()
