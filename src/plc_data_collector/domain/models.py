@@ -203,6 +203,7 @@ class TagConfig:
     value_type: ValueType
     enabled: bool = True
     metadata: Mapping[str, object] = field(default_factory=dict)
+    protocol_options: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate tag invariants."""
@@ -211,6 +212,11 @@ class TagConfig:
         _set_stripped(self, "name", self.name)
         _set_stripped(self, "address", self.address)
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(
+            self,
+            "protocol_options",
+            MappingProxyType(dict(self.protocol_options)),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,11 +227,17 @@ class TagRequest:
     address: str
     value_type: ValueType
     timeout_ms: int | None = None
+    protocol_options: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate tag request invariants."""
         _set_stripped(self, "tag_id", self.tag_id)
         _set_stripped(self, "address", self.address)
+        object.__setattr__(
+            self,
+            "protocol_options",
+            MappingProxyType(dict(self.protocol_options)),
+        )
         if self.timeout_ms is not None:
             _require_positive_int(self.timeout_ms, "timeout_ms")
 

@@ -538,6 +538,7 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
         value_type=tag.value_type.value,
         enabled=tag.enabled,
         metadata_json=dict(tag.metadata),
+        protocol_options=dict(tag.protocol_options),
         archived_at=None,
     )
     connection.execute(
@@ -550,6 +551,7 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
                 "value_type": statement.excluded.value_type,
                 "enabled": statement.excluded.enabled,
                 "metadata_json": statement.excluded.metadata_json,
+                "protocol_options": statement.excluded.protocol_options,
                 "archived_at": None,
             },
         )
@@ -632,4 +634,5 @@ def _tag_from_row(row: Row[tuple[object, ...]]) -> TagConfig:
         value_type=ValueType(row.value_type),
         enabled=row.enabled,
         metadata=metadata,
+        protocol_options=row.protocol_options or {},
     )

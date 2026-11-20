@@ -349,6 +349,28 @@ def test_0003_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
         _assert_0003_round_trip(url)
 
 
+def test_0004_upgrade_adds_tag_protocol_options(tmp_path: Path) -> None:
+    _assert_0004_upgrade(f"sqlite:///{tmp_path}/t.db")
+
+
+def test_0004_downgrade_round_trip(tmp_path: Path) -> None:
+    _assert_0004_round_trip(f"sqlite:///{tmp_path}/t.db")
+
+
+@pytest.mark.postgres
+def test_0004_upgrade_adds_tag_protocol_options_on_postgres(
+    postgres_url: str,
+) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0004_upgrade(url)
+
+
+@pytest.mark.postgres
+def test_0004_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0004_round_trip(url)
+
+
 @contextmanager
 def _scratch_postgres_database(postgres_url: str) -> Iterator[str]:
     admin_engine = create_engine(
@@ -448,6 +470,68 @@ def _assert_0003_upgrade(url: str) -> None:
         assert diff == []
     finally:
         engine.dispose()
+
+
+def _assert_0004_upgrade(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "0003")
+    engine = create_database_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO connections (id, name, protocol, endpoint, enabled, "
+                    "timeout_ms, protocol_options) VALUES "
+                    "('c1', 'C', 'mock', 'mock://local', true, 1000, '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tag_groups (id, connection_id, interval_ms, "
+                    "timeout_ms, overlap_policy, enabled) VALUES "
+                    "('g1', 'c1', 1000, 1000, 'skip', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tags (id, tag_group_id, name, address, enabled, "
+                    "metadata_json) VALUES ('t1', 'g1', 'T', 'a', true, '{}')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT protocol_options FROM tags")) in (
+                {},
+                "{}",
+            )
+        column = next(
+            c
+            for c in inspect(engine).get_columns("tags")
+            if c["name"] == "protocol_options"
+        )
+        assert column["nullable"] is False
+        with engine.connect() as connection:
+            diff = compare_metadata(MigrationContext.configure(connection), metadata)
+        if engine.dialect.name == "postgresql":
+            diff = [change for change in diff if not _is_event_id_unique(change)]
+        assert diff == []
+    finally:
+        engine.dispose()
+
+
+def _assert_0004_round_trip(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    command.downgrade(config, "0003")
+    engine = create_database_engine(url)
+    try:
+        columns = {c["name"] for c in inspect(engine).get_columns("tags")}
+        assert "protocol_options" not in columns
+    finally:
+        engine.dispose()
+    command.upgrade(config, "head")
 
 
 def _is_event_id_unique(change: object) -> bool:

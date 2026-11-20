@@ -63,6 +63,7 @@ tags = Table(
     Column("value_type", String(32), nullable=True),
     Column("enabled", Boolean, nullable=False, default=True),
     Column("metadata_json", JSON, nullable=False, default=dict),
+    Column("protocol_options", JSON, nullable=False, default=dict),
     Column("archived_at", UTCDateTime(), nullable=True),
 )
 

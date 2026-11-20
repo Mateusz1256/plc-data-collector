@@ -208,3 +208,32 @@ def test_millisecond_fields_fit_a_database_integer(build: Any) -> None:
     build(2_147_483_647)
     with pytest.raises(ConfigurationError, match="2147483647"):
         build(2_147_483_648)
+
+
+def test_tag_config_protocol_options_default_and_read_only() -> None:
+    tag = TagConfig(
+        id="t", tag_group_id="g", name="T", address="hr:1", value_type=ValueType.INTEGER
+    )
+    assert dict(tag.protocol_options) == {}
+    tag2 = TagConfig(
+        id="t",
+        tag_group_id="g",
+        name="T",
+        address="hr:1",
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "int16"},
+    )
+    with pytest.raises(TypeError):
+        tag2.protocol_options["x"] = 1  # type: ignore[index]
+
+
+def test_tag_request_carries_protocol_options() -> None:
+    req = TagRequest(
+        tag_id="t",
+        address="hr:1",
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "int16"},
+    )
+    assert req.protocol_options["data_type"] == "int16"
+    with pytest.raises(TypeError):
+        req.protocol_options["x"] = 1  # type: ignore[index]

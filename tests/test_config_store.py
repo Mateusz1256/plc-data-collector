@@ -501,3 +501,24 @@ def test_move_endpoint_credentials_into_options(store: ConfigStore) -> None:
     assert kept.endpoint == "opc.tcp://op:url-pw@plc:4840"
     assert kept.protocol_options["password"] == "stored-pw"
     assert store.move_endpoint_credentials() == ([], ["kept"])
+
+
+def test_tag_protocol_options_round_trip(store: ConfigStore) -> None:
+    store.upsert_connection(_connection())
+    store.upsert_tag_group(_group())
+    options = {"data_type": "float32", "scale": 0.1}
+    store.create_tag(
+        TagConfig(
+            id="t9",
+            tag_group_id="g1",
+            name="T9",
+            address="hr:1",
+            value_type=ValueType.NUMERIC,
+            protocol_options=options,
+        )
+    )
+
+    tag = store.get_tag("t9")
+
+    assert tag is not None
+    assert dict(tag.protocol_options) == options
