@@ -44,6 +44,13 @@ Versioning.
 - New direct runtime dependency: `pymodbus` 3.16.2 (BSD-3-Clause), listed in
   `THIRD_PARTY_NOTICES.md`.
 
+### Fixed
+
+- The Database Writer now writes a pending batch at most
+  `writer_flush_interval_s` after its first reading, also when readings keep
+  arriving; before, it waited for a full batch when every Tag Group polled
+  faster than the interval allowed it to go idle.
+
 ### Known limitations
 
 - Saving a large CSV paste writes one audit entry per Tag.

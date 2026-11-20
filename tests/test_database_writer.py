@@ -192,6 +192,41 @@ async def test_database_writer_flushes_after_interval() -> None:
 
 
 @pytest.mark.asyncio
+async def test_database_writer_flushes_on_interval_while_items_keep_arriving() -> None:
+    interval_s = 0.2
+    queue = make_queue()
+    repository = FakeRepository()
+    loop = asyncio.get_running_loop()
+    write_times: list[float] = []
+    original_save = repository.save_poll_results
+
+    def timed_save(poll_results: list[WorkerPollResult]) -> int:
+        write_times.append(loop.time())
+        return original_save(poll_results)
+
+    repository.save_poll_results = timed_save  # type: ignore[method-assign]
+    writer = DatabaseWriter(
+        queue,
+        repository,
+        batch_size=1000,
+        flush_interval_s=interval_s,
+        storage_timeout_s=1,
+    )
+    task = await start_writer(writer)
+
+    first_put_at = loop.time()
+    for index in range(10):
+        await queue.put(make_poll_result(f"poll-{index}"))
+        await asyncio.sleep(interval_s / 2)
+
+    assert len(write_times) >= 2
+    assert write_times[0] - first_put_at <= interval_s + 0.1
+    assert write_times[1] - write_times[0] <= interval_s + 0.1
+    await writer.shutdown(timeout_s=1)
+    await task
+
+
+@pytest.mark.asyncio
 async def test_database_writer_retries_storage_errors() -> None:
     queue = make_queue()
     repository = FakeRepository(failures_before_success=1)

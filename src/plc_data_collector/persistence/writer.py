@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -135,6 +136,7 @@ class DatabaseWriter:
         self._stopped = asyncio.Event()
         self._stopped.set()
         self._pending_batch: list[WorkerPollResult] = []
+        self._batch_started_at: float | None = None
         self._running = False
         self._successful_batches = 0
         self._failed_batches = 0
@@ -226,21 +228,32 @@ class DatabaseWriter:
             await self._flush_pending()
             return
 
-        item = await self._wait_for_item_or_stop()
+        timeout_s = self._flush_interval_s
+        if self._pending_batch and self._batch_started_at is not None:
+            timeout_s = self._flush_interval_s - (
+                time.monotonic() - self._batch_started_at
+            )
+            if timeout_s <= 0:
+                await self._flush_pending()
+                return
+
+        item = await self._wait_for_item_or_stop(timeout_s)
         if item is None:
             await self._flush_pending()
             return
 
+        if not self._pending_batch:
+            self._batch_started_at = time.monotonic()
         self._pending_batch.append(item)
         if len(self._pending_batch) >= self._batch_size:
             await self._flush_pending()
 
-    async def _wait_for_item_or_stop(self) -> WorkerPollResult | None:
+    async def _wait_for_item_or_stop(self, timeout_s: float) -> WorkerPollResult | None:
         get_task = asyncio.create_task(self._queue.get())
         stop_task = asyncio.create_task(self._stop_requested.wait())
         done, pending = await asyncio.wait(
             {get_task, stop_task},
-            timeout=self._flush_interval_s,
+            timeout=timeout_s,
             return_when=asyncio.FIRST_COMPLETED,
         )
         for task in pending:
