@@ -50,8 +50,18 @@ class TagFormAdapter(Protocol):
         tag_id: str | None,
         allowed_group_ids: Collection[str],
         existing: TagConfig | None,
+        enabled: bool | None = None,
     ) -> TagConfig:
-        """Build a Tag from submitted ``data``; raise ``FormErrors`` by field."""
+        """Build a Tag from submitted ``data``; raise ``FormErrors`` by field.
+
+        ``data`` needs only the keys in ``columns``. ``enabled`` None means
+        enabled; the form passes whether its checkbox was ticked.
+
+        With ``tag_id`` None, ``build`` runs only the field checks and always
+        raises ``FormErrors`` (empty when the fields are fine): the domain
+        model, and for Modbus ``resolve_tag``, are not checked. Callers that
+        want full validation before choosing an ID pass a placeholder ID.
+        """
         ...
 
     def next_values(

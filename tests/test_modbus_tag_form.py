@@ -147,7 +147,13 @@ def test_build_refuses_unknown_group() -> None:
 def test_build_scale_on_bool_is_a_scale_error() -> None:
     with pytest.raises(FormErrors) as raised:
         _build(_data(read_from="co", address="00001", data_type="bool", scale="2"))
-    assert set(raised.value.errors) == {"scale"}
+    assert raised.value.errors == {"scale": "Scale isn't used with bool."}
+
+
+def test_build_offset_on_bool_is_an_offset_error() -> None:
+    with pytest.raises(FormErrors) as raised:
+        _build(_data(read_from="co", address="00001", data_type="bool", offset="1"))
+    assert raised.value.errors == {"offset": "Offset isn't used with bool."}
 
 
 def test_build_address_past_the_end_is_an_address_error() -> None:
@@ -262,3 +268,62 @@ def test_generic_adapter_matches_old_form() -> None:
     assert form.table_cells(tag, connection) == ("", "ns=2;s=T", "numeric")
     assert form.next_values(tag, connection) is None
     assert form.values(tag, connection)["tag_group"] == "press_fast"
+
+
+def test_build_from_columns_only_is_enabled() -> None:
+    modbus = ModbusTagForm()
+    row = dict.fromkeys(modbus.columns, "")
+    row.update(_data())
+    del row["enabled"]
+    assert set(row) == set(modbus.columns)
+    tag = modbus.build(
+        row,
+        connection=_connection(),
+        tag_id="t1",
+        allowed_group_ids={"press_fast"},
+        existing=None,
+    )
+    assert tag.enabled is True
+
+    generic = GenericTagForm()
+    opcua_row = {
+        "name": "T",
+        "tag_group": "press_fast",
+        "address": "ns=2;s=T",
+        "value_type": "numeric",
+        "unit": "",
+    }
+    assert set(opcua_row) == set(generic.columns)
+    opcua = ConnectionConfig(
+        id="line1", name="Line 1", protocol="opcua", endpoint="opc.tcp://x:4840"
+    )
+    tag = generic.build(
+        opcua_row,
+        connection=opcua,
+        tag_id="t1",
+        allowed_group_ids={"press_fast"},
+        existing=None,
+    )
+    assert tag.enabled is True
+
+
+def test_build_enabled_false() -> None:
+    tag = ModbusTagForm().build(
+        _data(),
+        connection=_connection(),
+        tag_id="t1",
+        allowed_group_ids={"press_fast"},
+        existing=None,
+        enabled=False,
+    )
+    assert tag.enabled is False
+
+
+def test_next_values_clear_unused_bit_and_length() -> None:
+    form = ModbusTagForm()
+    tag = _build(_data(address="10", data_type="string", length="8"), "zero")
+
+    values = form.next_values(tag, _connection("zero"))
+
+    assert values is not None
+    assert (values["address"], values["length"], values["bit"]) == ("18", "8", "")

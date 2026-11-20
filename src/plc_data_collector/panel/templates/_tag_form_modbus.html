@@ -1,7 +1,8 @@
 {#- Modbus fields of the Tag form. Changing Read from, Address, Data type or
     Length fetches the form again with the current values (htmx keeps the
     focused field), so the data types and the span hint follow; without
-    scripts the server refuses an unfitting data type. -#}
+    scripts the server refuses an unfitting data type. Bit and Length show
+    only for the data type that uses them, unless they carry an error. -#}
 {% from "_protocol_fields.html" import field_error %}
 {% set rerender_url = '/panel/tags/' ~ ui.target_id ~ '/edit' if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags/new' %}
 {% macro described(name, errors, help_id=None) -%}
@@ -14,7 +15,7 @@
 <div class="inline-form-grid">
 <div class="field">
 <label for="tag-read-from">Read from</label>
-<select class="input" name="read_from" id="tag-read-from" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("read_from", errors) }}>
+<select class="input" name="read_from" id="tag-read-from" hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("read_from", errors) }}>
 {% for key, label in extra.areas %}
 <option value="{{ key }}"{% if key == extra.selected_area %} selected{% endif %}>{{ label }}</option>
 {% endfor %}
@@ -23,13 +24,13 @@
 </div>
 <div class="field">
 <label for="tag-address">Address</label>
-<input class="input mono" type="text" inputmode="numeric" name="address" id="tag-address" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("address", errors, "tag-address-help") }}>
+<input class="input mono" type="text" inputmode="numeric" name="address" id="tag-address" hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("address", errors, "tag-address-help") }}>
 <small class="field-help" id="tag-address-help">{{ extra.address_help }}</small>
 {{ field_error("address", errors) }}
 </div>
 <div class="field">
 <label for="tag-data-type">Data type</label>
-<select class="input" name="data_type" id="tag-data-type" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("data_type", errors, "tag-span-hint" if extra.span_hint else None) }}>
+<select class="input" name="data_type" id="tag-data-type" hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("data_type", errors, "tag-span-hint" if extra.span_hint else None) }}>
 {% for data_type in extra.data_types %}
 <option value="{{ data_type }}"{% if data_type == values.get('data_type') %} selected{% endif %}>{{ data_type }}</option>
 {% endfor %}
@@ -41,13 +42,13 @@
 <div class="inline-form-grid">
 <div class="field">
 <label for="tag-bit">Bit</label>
-<input class="input mono" type="text" inputmode="numeric" name="bit" id="tag-bit" value="{{ values.get('bit', '') }}" autocomplete="off"{{ described("bit", errors, "tag-bit-help") }}>
+<input class="input mono" type="text" inputmode="numeric" name="bit" id="tag-bit" value="{{ values.get('bit', '') if values.get('data_type') == 'bit' or errors.get('bit') else '' }}" autocomplete="off"{{ described("bit", errors, "tag-bit-help") }}>
 <small class="field-help" id="tag-bit-help">0-15, only for data type bit.</small>
 {{ field_error("bit", errors) }}
 </div>
 <div class="field">
 <label for="tag-length">Length</label>
-<input class="input mono" type="text" inputmode="numeric" name="length" id="tag-length" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('length', '') }}" autocomplete="off"{{ described("length", errors, "tag-length-help") }}>
+<input class="input mono" type="text" inputmode="numeric" name="length" id="tag-length" hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('length', '') if values.get('data_type') == 'string' or errors.get('length') else '' }}" autocomplete="off"{{ described("length", errors, "tag-length-help") }}>
 <small class="field-help" id="tag-length-help">Registers, only for data type string.</small>
 {{ field_error("length", errors) }}
 </div>

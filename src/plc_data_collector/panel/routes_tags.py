@@ -12,6 +12,8 @@ or, for handlers that touch only the stores, a plain ``def``.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -236,6 +238,7 @@ def create_tags_router() -> APIRouter:
                 tag_id="pending",
                 allowed_group_ids=allowed,
                 existing=None,
+                enabled="enabled" in data,
             )
             await _create_with_generated_id(stores, connection_id, template)
         except FormErrors as error:
@@ -247,12 +250,11 @@ def create_tags_router() -> APIRouter:
             following = adapter.next_values(template, connection)
             if following is None:
                 return _back_to(connection_id)
-            # Fast entry: the page again with a new form for the next Tag.
-            return await render_connection_page(
-                request,
-                stores,
-                connection_id,
-                tag_ui=FormUi("new", None, following, {}),
+            # Fast entry: redirect to a new form for the next Tag, so a reload
+            # or Back never posts the same Tag again.
+            return RedirectResponse(
+                f"/panel/connections/{connection_id}/tags/new?{_form_query(following)}",
+                status_code=status.HTTP_303_SEE_OTHER,
             )
         ui = FormUi("new", None, adapter.values_from_data(data), errors)
         return await render_connection_page(
@@ -284,6 +286,7 @@ def create_tags_router() -> APIRouter:
                 tag_id=existing.id,
                 allowed_group_ids=allowed,
                 existing=existing,
+                enabled="enabled" in data,
             )
             await asyncio.to_thread(stores.config.upsert_tag, tag)
         except FormErrors as error:
@@ -441,6 +444,18 @@ def _redrawn_values(
     return adapter.values_from_data(
         {key: value for key, value in query.items() if isinstance(value, str)}
     )
+
+
+def _form_query(values: Mapping[str, object]) -> str:
+    """Encode form values for a URL: a ticked box as "on", empty fields left out."""
+    pairs: list[tuple[str, str]] = []
+    for key, value in values.items():
+        if isinstance(value, bool):
+            if value:
+                pairs.append((key, "on"))
+        elif value not in (None, ""):
+            pairs.append((key, str(value)))
+    return urlencode(pairs)
 
 
 def _is_htmx(request: Request) -> bool:

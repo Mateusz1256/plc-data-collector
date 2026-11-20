@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
+from html import unescape
+from urllib.parse import parse_qs
 
 import pytest
 from fastapi.testclient import TestClient
@@ -628,7 +630,7 @@ def test_modbus_tag_form_creates_tag(
         "/panel/connections/press2/tags", data=_modbus_tag_form()
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 303
     tag = stores.config.get_tag("press2_oil_temperature")
     assert tag is not None
     assert tag.tag_group_id == "press_fast"
@@ -641,15 +643,25 @@ def test_modbus_tag_form_creates_tag(
 def test_modbus_fast_entry_proposes_next_address(
     signed_in_client: TestClient, fake_host: FakeHost
 ) -> None:
-    _seed_modbus(fake_host)
+    stores = _seed_modbus(fake_host)
 
     response = signed_in_client.post(
         "/panel/connections/press2/tags", data=_modbus_tag_form()
     )
 
-    assert SAVED_FLASH in response.text
-    form_start = response.text.index('action="/panel/connections/press2/tags"')
-    html = response.text[form_start:]
+    assert response.status_code == 303
+    location = response.headers["location"]
+    path, _, query = location.partition("?")
+    assert path == "/panel/connections/press2/tags/new"
+    params = parse_qs(query)
+    assert params["address"] == ["40123"]
+    assert params["enabled"] == ["on"]
+    assert "name" not in params
+    page = signed_in_client.get(location)
+    assert page.status_code == 200
+    assert f'<p class="flash" role="status">{SAVED_FLASH}</p>' in page.text
+    form_start = page.text.index('action="/panel/connections/press2/tags"')
+    html = page.text[form_start:]
     assert 'aria-label="New tag"' in html
     assert _input_value(html, "address") == "40123"
     assert _input_value(html, "name") == ""
@@ -657,6 +669,41 @@ def test_modbus_fast_entry_proposes_next_address(
     assert _selected(html, "read_from") == "hr"
     assert _selected(html, "data_type") == "float32"
     assert _selected(html, "tag_group") == "press_fast"
+    assert re.search(r'<input type="checkbox" name="enabled" checked>', html)
+
+    reloaded = signed_in_client.get(location)
+
+    assert reloaded.status_code == 200
+    assert 'class="flash"' not in reloaded.text
+    assert stores.config.all_tag_ids() == {"press2_oil_temperature"}
+
+
+def test_fast_entry_keeps_an_unticked_box(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    data = _modbus_tag_form()
+    del data["enabled"]
+
+    response = signed_in_client.post("/panel/connections/press2/tags", data=data)
+
+    assert response.status_code == 303
+    assert "enabled" not in parse_qs(response.headers["location"].partition("?")[2])
+    tag = stores.config.get_tag("press2_oil_temperature")
+    assert tag is not None and tag.enabled is False
+
+
+def test_unticked_box_disables_opcua_tag(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    data = _tag_form()
+    del data["enabled"]
+
+    signed_in_client.post("/panel/connections/line1_opcua/tags", data=data)
+
+    tag = stores.config.get_tag("line1_opcua_temperature")
+    assert tag is not None and tag.enabled is False
 
 
 def test_opcua_create_still_closes_the_form(
@@ -766,6 +813,16 @@ def test_modbus_tag_edit_round_trip(
         ({"unit_id": "300"}, "unit_id", "255"),
         ({"offset": "abc"}, "offset", "number"),
         ({"data_type": "int16", "length": "4"}, "length", "string"),
+        (
+            {"data_type": "bit", "bit": "2", "scale": "2"},
+            "scale",
+            "isn't used with bit",
+        ),
+        (
+            {"data_type": "string", "length": "4", "offset": "1"},
+            "offset",
+            "isn't used with string",
+        ),
     ],
 )
 def test_modbus_tag_form_errors(
@@ -787,7 +844,7 @@ def test_modbus_tag_form_errors(
         response.text,
     )
     assert error is not None, response.text
-    assert fragment.lower() in error.group(1).lower()
+    assert fragment.lower() in unescape(error.group(1)).lower()
     assert stores.config.all_tag_ids() == set()
 
 
@@ -900,3 +957,33 @@ def test_modbus_form_shows_span_hint_and_numbering_help(
 
     assert "float32 uses 2 registers: 40121 and 40122." in html
     assert "bool" not in _options(html, "data_type")
+
+
+def test_modbus_redraw_drops_unused_bit_and_length(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    html = signed_in_client.get(
+        "/panel/connections/press2/tags/new",
+        params=_modbus_tag_form(data_type="float32", bit="3", length="4"),
+        headers={"HX-Request": "true"},
+    ).text
+
+    assert _input_value(html, "bit") == ""
+    assert _input_value(html, "length") == ""
+    assert 'hx-sync="closest form:replace"' in html
+
+
+def test_modbus_error_keeps_the_wrong_bit_visible(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form(bit="3")
+    )
+
+    assert response.status_code == 400
+    form_start = response.text.index('action="/panel/connections/press2/tags"')
+    assert _input_value(response.text[form_start:], "bit") == "3"

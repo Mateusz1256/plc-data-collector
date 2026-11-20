@@ -222,6 +222,7 @@ class ModbusTagForm:
         tag_id: str | None,
         allowed_group_ids: Collection[str],
         existing: TagConfig | None,
+        enabled: bool | None = None,
     ) -> TagConfig:
         """Build a Modbus Tag from submitted ``data``.
 
@@ -282,6 +283,11 @@ class ModbusTagForm:
         if scale == 0:
             errors["scale"] = SCALE_ZERO_ERROR
         offset = _optional_number(data, "offset", errors)
+        if data_type in _UNSCALED_TYPES:
+            if scale is not None and "scale" not in errors:
+                errors["scale"] = f"Scale isn't used with {data_type}."
+            if offset is not None and "offset" not in errors:
+                errors["offset"] = f"Offset isn't used with {data_type}."
 
         if errors or tag_id is None or area is None or address is None:
             raise FormErrors(errors)
@@ -307,7 +313,7 @@ class ModbusTagForm:
                 name=name,
                 address=stored_address,
                 value_type=plan.value_type,
-                enabled=bool(data.get("enabled")),
+                enabled=True if enabled is None else enabled,
                 metadata=metadata_with_unit(existing, data),
                 protocol_options=options,
             )
@@ -391,6 +397,7 @@ class ModbusTagForm:
         }
 
 
+_UNSCALED_TYPES = (DataType.BOOL, DataType.BIT, DataType.STRING)
 _ADVANCED_FIELDS = ("byte_order", "word_order", "unit_id", "scale", "offset")
 
 

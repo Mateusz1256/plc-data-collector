@@ -338,6 +338,7 @@ class GenericTagForm:
         tag_id: str | None,
         allowed_group_ids: Collection[str],
         existing: TagConfig | None,
+        enabled: bool | None = None,
     ) -> TagConfig:
         """Build a Tag from submitted ``data`` under the given ``tag_id``.
 
@@ -363,7 +364,7 @@ class GenericTagForm:
                 name=name,
                 address=address,
                 value_type=ValueType(raw_type),
-                enabled=bool(data.get("enabled")),
+                enabled=True if enabled is None else enabled,
                 metadata=metadata_with_unit(existing, data),
                 protocol_options=existing.protocol_options if existing else {},
             )
