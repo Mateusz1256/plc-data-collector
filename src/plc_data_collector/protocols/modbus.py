@@ -39,6 +39,14 @@ LOGGER = logging.getLogger(__name__)
 # without bound, so they are dropped when they get this large.
 _CACHE_LIMIT = 20_000
 
+# The pymodbus client caps every request at its own timeout, so it gets the
+# largest Connection timeout and the driver's asyncio.timeout decides instead.
+_CLIENT_TIMEOUT_S = 600.0
+
+# Exceptions that concern the whole request, not one register: function not
+# supported, gateway path unavailable, gateway target did not answer.
+_WHOLE_BLOCK_EXCEPTIONS = frozenset({0x01, 0x0A, 0x0B})
+
 _ResolveKey = tuple[str, str, frozenset[tuple[str, object]]]
 
 
@@ -140,6 +148,8 @@ class ModbusDriver:
         self._client: ModbusClient | None = None
         self._plans: dict[_ResolveKey, ModbusTagPlan | str] = {}
         self._blocks: dict[tuple[_ResolveKey, ...], list[ReadBlock]] = {}
+        # Blocks whose request was refused for one register: read member by member.
+        self._split: set[ReadBlock] = set()
 
     @property
     def capabilities(self) -> DriverCapabilities:
@@ -154,13 +164,16 @@ class ModbusDriver:
         """Open a new connection, closing any previous one first."""
         await self.disconnect()
         timeout_s = self._connection.timeout_ms / 1000
-        client = self._client_factory(self._host, self._port, timeout_s)
+        client = self._client_factory(self._host, self._port, _CLIENT_TIMEOUT_S)
         try:
             async with asyncio.timeout(timeout_s):
                 connected = await client.connect()
         except (TimeoutError, OSError, ModbusException) as error:
             self._close_quietly(client)
             raise self._connect_failed() from error
+        except BaseException:
+            self._close_quietly(client)
+            raise
         if not connected:
             self._close_quietly(client)
             raise self._connect_failed()
@@ -252,6 +265,7 @@ class ModbusDriver:
     ) -> list[ReadBlock]:
         blocks = self._blocks.get(keys)
         if blocks is None:
+            self._split.clear()
             blocks = plan_blocks(
                 resolved,
                 max_registers=self._options.max_registers_per_read,
@@ -268,6 +282,8 @@ class ModbusDriver:
     async def _read_block(
         self, client: ModbusClient, block: ReadBlock, timeout_s: float
     ) -> dict[str, TagResult]:
+        if block in self._split:
+            return await self._read_members(client, block, timeout_s)
         response = await self._request(
             client, block.unit_id, block.area, block.start, block.count, timeout_s
         )
@@ -275,28 +291,37 @@ class ModbusDriver:
         if not response.isError():
             return self._decode_block(block, response, received_at)
 
-        if len(block.members) == 1:
-            return self._refused(block, block.members, response, received_at)
-        # One refused register must not hide the Tags that can be read, so retry
-        # every member on its own.
+        code = _exception_code(response)
+        if len(block.members) == 1 or code in _WHOLE_BLOCK_EXCEPTIONS:
+            return self._refused(block, block.members, code, received_at)
+        # One refused register must not hide the Tags that can be read, so read
+        # every member on its own, now and on later polls.
         LOGGER.debug(
-            "modbus_block_refused_retrying_members",
+            "modbus_block_refused_reading_members",
             extra={
                 "connection_id": self._connection.id,
                 "unit_id": block.unit_id,
                 "area": block.area.value,
                 "start": block.start,
                 "count": block.count,
-                "exception_code": _exception_code(response),
+                "exception_code": code,
             },
         )
+        if len(self._split) >= _CACHE_LIMIT:
+            self._split.clear()
+        self._split.add(block)
+        return await self._read_members(client, block, timeout_s)
+
+    async def _read_members(
+        self, client: ModbusClient, block: ReadBlock, timeout_s: float
+    ) -> dict[str, TagResult]:
         results: dict[str, TagResult] = {}
         for member in block.members:
-            tag_id, plan = member
+            plan = member[1]
             single = ReadBlock(
                 block.unit_id, block.area, plan.address, plan.span, (member,)
             )
-            single_response = await self._request(
+            response = await self._request(
                 client,
                 single.unit_id,
                 single.area,
@@ -304,15 +329,15 @@ class ModbusDriver:
                 single.count,
                 timeout_s,
             )
-            single_received_at = self._now()
-            if single_response.isError():
-                results[tag_id] = self._refused(
-                    single, single.members, single_response, single_received_at
-                )[tag_id]
-            else:
+            received_at = self._now()
+            if response.isError():
                 results.update(
-                    self._decode_block(single, single_response, single_received_at)
+                    self._refused(
+                        single, single.members, _exception_code(response), received_at
+                    )
                 )
+            else:
+                results.update(self._decode_block(single, response, received_at))
         return results
 
     async def _request(
@@ -405,22 +430,22 @@ class ModbusDriver:
         self,
         block: ReadBlock,
         members: tuple[tuple[str, ModbusTagPlan], ...],
-        response: ModbusResponse,
+        code: int | None,
         received_at: datetime,
     ) -> dict[str, TagResult]:
-        code = _exception_code(response)
+        suffix = "unknown" if code is None else f"{code:02X}"
         results: dict[str, TagResult] = {}
         for tag_id, plan in members:
             results[tag_id] = TagResult.failure(
                 tag_id=tag_id,
-                error_code=f"modbus_exception_{code:02d}",
+                error_code=f"modbus_exception_{suffix}",
                 error_message=self._exception_message(code, block, plan),
                 received_at=received_at,
             )
         return results
 
     def _exception_message(
-        self, code: int, block: ReadBlock, plan: ModbusTagPlan
+        self, code: int | None, block: ReadBlock, plan: ModbusTagPlan
     ) -> str:
         if code == 2:
             shown = display_address(
@@ -429,9 +454,13 @@ class ModbusDriver:
             return f"The device has no register {shown}. Check the address."
         if code == 1:
             return f"The device does not support {block.area.label}."
-        if code == 11:
+        if code == 0x0B:
             return f"The gateway got no answer from unit {block.unit_id}."
-        return f"The device answered with Modbus exception {code}."
+        if code == 0x0A:
+            return f"The gateway has no path to unit {block.unit_id}."
+        if code is None:
+            return "The device answered with an unknown Modbus exception."
+        return f"The device answered with Modbus exception {code:02X}."
 
     # -- helpers ----------------------------------------------------------
 
@@ -457,9 +486,9 @@ class ModbusDriver:
         return self._clock().astimezone(UTC)
 
 
-def _exception_code(response: ModbusResponse) -> int:
-    code = getattr(response, "exception_code", 0)
-    return code if isinstance(code, int) else 0
+def _exception_code(response: ModbusResponse) -> int | None:
+    code = getattr(response, "exception_code", None)
+    return code if isinstance(code, int) and not isinstance(code, bool) else None
 
 
 def create_modbus_driver(connection: ConnectionConfig) -> ModbusDriver:

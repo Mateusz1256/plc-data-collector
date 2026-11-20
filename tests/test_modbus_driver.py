@@ -65,13 +65,16 @@ class FakeResponse:
         registers: list[int] | None = None,
         bits: list[bool] | None = None,
         exception_code: int | None = None,
+        error: bool = False,
     ) -> None:
         self.registers = registers or []
         self.bits = bits or []
-        self.exception_code = exception_code
+        if exception_code is not None:
+            self.exception_code = exception_code
+        self._error = error or exception_code is not None
 
     def isError(self) -> bool:
-        return self.exception_code is not None
+        return self._error
 
 
 Handler = Callable[[str, int, int, int], FakeResponse]
@@ -235,6 +238,13 @@ async def test_refused_register_isolates_tag(modbus_server: ModbusTestServer) ->
     assert results["a"].quality is Quality.GOOD
     assert results["c"].quality is Quality.GOOD
     assert results["b"].quality is Quality.BAD
+    # One refused block request, then one read per member.
+    assert [(r.address, r.count) for r in modbus_server.requests] == [
+        (0, 3),
+        (0, 1),
+        (1, 1),
+        (2, 1),
+    ]
     assert results["b"].error_code == "modbus_exception_02"
     assert results["b"].error_message is not None
     assert "has no register 1" in results["b"].error_message
@@ -254,7 +264,9 @@ async def test_refused_message_uses_connection_numbering() -> None:
     [
         (1, "does not support Holding registers (FC03)"),
         (11, "no answer from unit 1"),
-        (4, "Modbus exception 4"),
+        (10, "no path to unit 1"),
+        (4, "Modbus exception 04"),
+        (0x2B, "Modbus exception 2B"),
     ],
 )
 async def test_exception_messages(code: int, fragment: str) -> None:
@@ -262,32 +274,121 @@ async def test_exception_messages(code: int, fragment: str) -> None:
     driver = fake_driver(client)
     await driver.connect()
     [result] = await driver.read([request("a", "hr:0", "int16")])
-    assert result.error_code == f"modbus_exception_{code:02d}"
+    assert result.error_code == f"modbus_exception_{code:02X}"
     assert result.error_message is not None
     assert fragment in result.error_message
 
 
-async def test_gateway_exception_goes_per_tag() -> None:
+@pytest.mark.parametrize(("code", "suffix"), [(1, "01"), (10, "0A"), (11, "0B")])
+async def test_whole_block_exception_is_not_retried_per_member(
+    code: int, suffix: str
+) -> None:
+    client = FakeClient(lambda *_: FakeResponse(exception_code=code))
+    driver = fake_driver(client)
+    await driver.connect()
+    results = await driver.read(
+        [
+            request("a", "hr:0", "uint16", unit_id=3),
+            request("b", "hr:1", "uint16", unit_id=3),
+            request("c", "hr:2", "uint16", unit_id=3),
+        ]
+    )
+    assert len(client.calls) == 1
+    assert [r.error_code for r in results] == [f"modbus_exception_{suffix}"] * 3
+
+
+async def test_missing_exception_code_is_unknown() -> None:
+    client = FakeClient(lambda *_: FakeResponse(error=True))
+    driver = fake_driver(client)
+    await driver.connect()
+    [result] = await driver.read([request("a", "hr:0", "int16")])
+    assert result.error_code == "modbus_exception_unknown"
+
+
+async def test_split_block_is_read_per_member_on_later_polls() -> None:
     def handler(name: str, address: int, count: int, unit: int) -> FakeResponse:
-        if unit == 3:
-            return FakeResponse(exception_code=11)
-        return FakeResponse(registers=[address + 100] * count)
+        if count > 1 or address == 1:
+            return FakeResponse(exception_code=2)
+        return FakeResponse(registers=[address])
 
     client = FakeClient(handler)
     driver = fake_driver(client)
     await driver.connect()
-    results = by_id(
-        await driver.read(
-            [
-                request("dead1", "hr:0", "uint16", unit_id=3),
-                request("dead2", "hr:1", "uint16", unit_id=3),
-                request("live", "hr:0", "uint16"),
-            ]
-        )
+    tags = [
+        request("a", "hr:0", "uint16"),
+        request("b", "hr:1", "uint16"),
+        request("c", "hr:2", "uint16"),
+    ]
+    await driver.read(tags)
+    assert len(client.calls) == 4  # the refused block, then each member
+    client.calls.clear()
+    results = by_id(await driver.read(tags))
+    assert [call[2] for call in client.calls] == [1, 1, 1]
+    assert results["a"].quality is Quality.GOOD
+    assert results["b"].error_code == "modbus_exception_02"
+    assert results["c"].quality is Quality.GOOD
+
+
+async def test_tag_timeout_longer_than_connection_timeout_is_honoured() -> None:
+    class SlowClient(FakeClient):
+        async def read_holding_registers(
+            self, address: int, *, count: int, device_id: int
+        ) -> FakeResponse:
+            await asyncio.sleep(0.3)
+            return FakeResponse(registers=[7])
+
+    seen: list[float] = []
+
+    def factory(host: str, port: int, timeout: float) -> ModbusClient:
+        seen.append(timeout)
+        return cast(ModbusClient, SlowClient(holding([7])))
+
+    driver = ModbusDriver(
+        connection("tcp://127.0.0.1:1502", timeout_ms=200),
+        client_factory=factory,
+        clock=lambda: NOW,
     )
-    assert results["live"].quality is Quality.GOOD
-    assert results["dead1"].error_code == "modbus_exception_11"
-    assert results["dead2"].error_code == "modbus_exception_11"
+    await driver.connect()
+    assert seen == [600.0]  # the client must not cap requests itself
+    tag = TagRequest(
+        tag_id="a",
+        address="hr:0",
+        value_type=ValueType.INTEGER,
+        timeout_ms=2000,
+        protocol_options={"data_type": "uint16"},
+    )
+    [result] = await driver.read([tag])
+    assert result.quality is Quality.GOOD
+    with pytest.raises(TransientCommunicationError):
+        await driver.read([request("b", "hr:0", "uint16")])  # connection timeout
+
+
+async def test_cancelled_connect_closes_client() -> None:
+    class StuckClient(FakeClient):
+        async def connect(self) -> bool:
+            await asyncio.sleep(30)
+            return True
+
+    client = StuckClient(holding([]))
+    driver = fake_driver(client, timeout_ms=60000)
+    task = asyncio.create_task(driver.connect())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert client.closed
+
+
+async def test_connect_error_closes_client() -> None:
+    class BrokenClient(FakeClient):
+        async def connect(self) -> bool:
+            raise RuntimeError("boom")
+
+    client = BrokenClient(holding([]))
+    driver = fake_driver(client)
+    with pytest.raises(RuntimeError):
+        await driver.connect()
+    assert client.closed
 
 
 async def test_short_response_marks_missing_tags() -> None:
