@@ -1,0 +1,22 @@
+{% from "_protocol_fields.html" import field_error %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-address">Address</label>
+<input class="input mono" type="text" name="address" id="tag-address" value="{{ values.get('address', '') }}" spellcheck="false" autocapitalize="off" aria-describedby="tag-address-help{% if errors.get('address') %} field-address-error{% endif %}"{% if errors.get('address') %} aria-invalid="true"{% endif %}>
+<small class="field-help" id="tag-address-help">OPC UA node ID, for example ns=2;s=Line1.Temperature.</small>
+{{ field_error("address", errors) }}
+</div>
+<div class="field">
+<label for="tag-type">Data type</label>
+<select class="input" name="value_type" id="tag-type"{% if errors.get('value_type') %} aria-invalid="true" aria-describedby="field-value_type-error"{% endif %}>
+{% for value_type in extra.value_types %}
+<option value="{{ value_type }}"{% if value_type == values.get('value_type') %} selected{% endif %}>{{ value_type }}</option>
+{% endfor %}
+</select>
+{{ field_error("value_type", errors) }}
+</div>
+<div class="field">
+<label for="tag-unit">Unit</label>
+<input class="input" type="text" name="unit" id="tag-unit" value="{{ values.get('unit', '') }}">
+</div>
+</div>

@@ -27,9 +27,9 @@ from plc_data_collector.panel.routes_connections import (
     SAVED_MESSAGE,
     render_connection_page,
 )
+from plc_data_collector.panel.tag_adapters import TagFormAdapter, tag_adapter_for
 from plc_data_collector.panel.tag_forms import (
     GROUP_DUPLICATE_ERROR,
-    VALUE_TYPE_CHOICES,
     FormUi,
     generate_tag_id,
     group_choices,
@@ -37,10 +37,6 @@ from plc_data_collector.panel.tag_forms import (
     group_from_form,
     group_values,
     group_values_from_data,
-    tag_defaults,
-    tag_from_form,
-    tag_values,
-    tag_values_from_data,
 )
 
 GROUP_DELETED_MESSAGE = (
@@ -183,12 +179,16 @@ def create_tags_router() -> APIRouter:
     async def new_tag(
         request: Request, connection_id: str, stores: PanelStores
     ) -> HTMLResponse:
-        if await _connection(stores, connection_id) is None:
+        connection = await _connection(stores, connection_id)
+        if connection is None:
             return _not_found(request, CONNECTION_NOT_FOUND)
         config = await _load_config(stores)
-        choices = group_choices(config, connection_id)
-        ui = FormUi("new", None, tag_defaults(choices), {})
-        return await _tag_form(request, stores, connection_id, ui, config)
+        adapter = tag_adapter_for(connection.protocol)
+        values = _redrawn_values(request, adapter)
+        if values is None:
+            values = adapter.defaults(connection, group_choices(config, connection_id))
+        ui = FormUi("new", None, values, {})
+        return await _tag_form(request, stores, connection, adapter, ui, config)
 
     @router.get(
         "/tags/{tag_id}/edit",
@@ -201,10 +201,14 @@ def create_tags_router() -> APIRouter:
         found = await _tag_and_connection(stores, tag_id)
         if found is None:
             return _not_found(request, TAG_NOT_FOUND)
-        tag, connection_id = found
-        ui = FormUi("edit", tag.id, tag_values(tag), {})
+        tag, connection = found
+        adapter = tag_adapter_for(connection.protocol)
+        values = _redrawn_values(request, adapter)
+        if values is None:
+            values = adapter.values(tag, connection)
+        ui = FormUi("edit", tag.id, values, {})
         return await _tag_form(
-            request, stores, connection_id, ui, await _load_config(stores)
+            request, stores, connection, adapter, ui, await _load_config(stores)
         )
 
     @router.post(
@@ -215,8 +219,10 @@ def create_tags_router() -> APIRouter:
     async def create_tag(
         request: Request, connection_id: str, stores: PanelStores
     ) -> Response:
-        if await _connection(stores, connection_id) is None:
+        connection = await _connection(stores, connection_id)
+        if connection is None:
             return _not_found(request, CONNECTION_NOT_FOUND)
+        adapter = tag_adapter_for(connection.protocol)
         data = await _form_data(request)
         config = await _load_config(stores)
         allowed = {gid for gid, _ in group_choices(config, connection_id)}
@@ -224,8 +230,12 @@ def create_tags_router() -> APIRouter:
         try:
             # Validate with a placeholder ID first; the real one is generated
             # below from the IDs taken at that moment.
-            template = tag_from_form(
-                data, tag_id="pending", allowed_group_ids=allowed, existing=None
+            template = adapter.build(
+                data,
+                connection=connection,
+                tag_id="pending",
+                allowed_group_ids=allowed,
+                existing=None,
             )
             await _create_with_generated_id(stores, connection_id, template)
         except FormErrors as error:
@@ -234,8 +244,17 @@ def create_tags_router() -> APIRouter:
             errors = {"form": error.message}
         else:
             flash(request, SAVED_MESSAGE)
-            return _back_to(connection_id)
-        ui = FormUi("new", None, tag_values_from_data(data), errors)
+            following = adapter.next_values(template, connection)
+            if following is None:
+                return _back_to(connection_id)
+            # Fast entry: the page again with a new form for the next Tag.
+            return await render_connection_page(
+                request,
+                stores,
+                connection_id,
+                tag_ui=FormUi("new", None, following, {}),
+            )
+        ui = FormUi("new", None, adapter.values_from_data(data), errors)
         return await render_connection_page(
             request,
             stores,
@@ -253,13 +272,18 @@ def create_tags_router() -> APIRouter:
         found = await _tag_and_connection(stores, tag_id)
         if found is None:
             return _not_found(request, TAG_NOT_FOUND)
-        existing, connection_id = found
+        existing, connection = found
+        adapter = tag_adapter_for(connection.protocol)
         data = await _form_data(request)
         config = await _load_config(stores)
-        allowed = {gid for gid, _ in group_choices(config, connection_id)}
+        allowed = {gid for gid, _ in group_choices(config, connection.id)}
         try:
-            tag = tag_from_form(
-                data, tag_id=existing.id, allowed_group_ids=allowed, existing=existing
+            tag = adapter.build(
+                data,
+                connection=connection,
+                tag_id=existing.id,
+                allowed_group_ids=allowed,
+                existing=existing,
             )
             await asyncio.to_thread(stores.config.upsert_tag, tag)
         except FormErrors as error:
@@ -271,12 +295,12 @@ def create_tags_router() -> APIRouter:
                 audit.configuration_changed, stores, "tag", tag.id, "updated"
             )
             flash(request, SAVED_MESSAGE)
-            return _back_to(connection_id)
-        ui = FormUi("edit", existing.id, tag_values_from_data(data), errors)
+            return _back_to(connection.id)
+        ui = FormUi("edit", existing.id, adapter.values_from_data(data), errors)
         return await render_connection_page(
             request,
             stores,
-            connection_id,
+            connection.id,
             tag_ui=ui,
             status_code=status.HTTP_400_BAD_REQUEST,
         )
@@ -313,13 +337,16 @@ async def _load_config(stores: Stores) -> CollectorConfig:
 
 async def _tag_and_connection(
     stores: Stores, tag_id: str
-) -> tuple[TagConfig, str] | None:
-    """Return a Tag and the ID of the Connection its Tag Group belongs to."""
+) -> tuple[TagConfig, ConnectionConfig] | None:
+    """Return a Tag and the Connection its Tag Group belongs to."""
     tag = await asyncio.to_thread(stores.config.get_tag, tag_id)
     if tag is None:
         return None
     group = await asyncio.to_thread(stores.config.get_tag_group, tag.tag_group_id)
-    return None if group is None else (tag, group.connection_id)
+    if group is None:
+        return None
+    connection = await _connection(stores, group.connection_id)
+    return None if connection is None else (tag, connection)
 
 
 async def _create_with_generated_id(
@@ -379,7 +406,8 @@ async def _group_form(
 async def _tag_form(
     request: Request,
     stores: Stores,
-    connection_id: str,
+    connection: ConnectionConfig,
+    adapter: TagFormAdapter,
     ui: FormUi,
     config: CollectorConfig,
 ) -> HTMLResponse:
@@ -388,13 +416,31 @@ async def _tag_form(
             request,
             "_tag_form.html",
             {
-                "connection_id": connection_id,
+                "connection_id": connection.id,
                 "ui": ui,
-                "group_choices": group_choices(config, connection_id),
-                "value_types": VALUE_TYPE_CHOICES,
+                "group_choices": group_choices(config, connection.id),
+                "form_template": adapter.template,
+                "extra": adapter.template_context(ui.values, connection),
             },
         )
-    return await render_connection_page(request, stores, connection_id, tag_ui=ui)
+    return await render_connection_page(request, stores, connection.id, tag_ui=ui)
+
+
+def _redrawn_values(
+    request: Request, adapter: TagFormAdapter
+) -> dict[str, object] | None:
+    """Return the values of a form fetched again with its current fields.
+
+    The Modbus form asks for itself again when Read from or Data type
+    changes, sending its fields as query parameters, so the data types and
+    hints follow the choice. None when the request carries no form fields.
+    """
+    query = request.query_params
+    if not any(name in query for name in adapter.columns):
+        return None
+    return adapter.values_from_data(
+        {key: value for key, value in query.items() if isinstance(value, str)}
+    )
 
 
 def _is_htmx(request: Request) -> bool:

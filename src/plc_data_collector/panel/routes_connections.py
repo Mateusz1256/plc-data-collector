@@ -46,11 +46,8 @@ from plc_data_collector.panel.rendering import (
     render,
     state_badge,
 )
-from plc_data_collector.panel.tag_forms import (
-    VALUE_TYPE_CHOICES,
-    FormUi,
-    build_tag_section,
-)
+from plc_data_collector.panel.tag_adapters import tag_adapter_for
+from plc_data_collector.panel.tag_forms import FormUi, build_tag_section
 
 SAVED_MESSAGE = "Saved changes take effect after you apply them from the banner."
 DELETED_MESSAGE = (
@@ -415,7 +412,8 @@ def _edit_page(
             tag_section = build_tag_section(
                 _host(request),
                 config,
-                existing.id,
+                existing,
+                tag_adapter_for(existing.protocol),
                 group_ui=group_ui,
                 tag_ui=tag_ui,
             )
@@ -445,7 +443,6 @@ def _edit_page(
             "saved_note": SAVED_MESSAGE,
             "confirm_delete": confirm_delete,
             "tag_section": tag_section,
-            "value_types": VALUE_TYPE_CHOICES,
         },
         status_code=status_code,
     )

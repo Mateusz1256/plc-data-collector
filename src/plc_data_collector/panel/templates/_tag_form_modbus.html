@@ -1,0 +1,101 @@
+{#- Modbus fields of the Tag form. Changing Read from, Address, Data type or
+    Length fetches the form again with the current values (htmx keeps the
+    focused field), so the data types and the span hint follow; without
+    scripts the server refuses an unfitting data type. -#}
+{% from "_protocol_fields.html" import field_error %}
+{% set rerender_url = '/panel/tags/' ~ ui.target_id ~ '/edit' if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags/new' %}
+{% macro described(name, errors, help_id=None) -%}
+{%- set ids = [] -%}
+{%- if help_id %}{% set _ = ids.append(help_id) %}{% endif -%}
+{%- if errors.get(name) %}{% set _ = ids.append("field-" ~ name ~ "-error") %}{% endif -%}
+{%- if ids %} aria-describedby="{{ ids | join(' ') }}"{% endif -%}
+{%- if errors.get(name) %} aria-invalid="true"{% endif -%}
+{%- endmacro %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-read-from">Read from</label>
+<select class="input" name="read_from" id="tag-read-from" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("read_from", errors) }}>
+{% for key, label in extra.areas %}
+<option value="{{ key }}"{% if key == extra.selected_area %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{{ field_error("read_from", errors) }}
+</div>
+<div class="field">
+<label for="tag-address">Address</label>
+<input class="input mono" type="text" inputmode="numeric" name="address" id="tag-address" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("address", errors, "tag-address-help") }}>
+<small class="field-help" id="tag-address-help">{{ extra.address_help }}</small>
+{{ field_error("address", errors) }}
+</div>
+<div class="field">
+<label for="tag-data-type">Data type</label>
+<select class="input" name="data_type" id="tag-data-type" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("data_type", errors, "tag-span-hint" if extra.span_hint else None) }}>
+{% for data_type in extra.data_types %}
+<option value="{{ data_type }}"{% if data_type == values.get('data_type') %} selected{% endif %}>{{ data_type }}</option>
+{% endfor %}
+</select>
+{% if extra.span_hint %}<small class="field-help" id="tag-span-hint">{{ extra.span_hint }}</small>{% endif %}
+{{ field_error("data_type", errors) }}
+</div>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-bit">Bit</label>
+<input class="input mono" type="text" inputmode="numeric" name="bit" id="tag-bit" value="{{ values.get('bit', '') }}" autocomplete="off"{{ described("bit", errors, "tag-bit-help") }}>
+<small class="field-help" id="tag-bit-help">0-15, only for data type bit.</small>
+{{ field_error("bit", errors) }}
+</div>
+<div class="field">
+<label for="tag-length">Length</label>
+<input class="input mono" type="text" inputmode="numeric" name="length" id="tag-length" hx-get="{{ rerender_url }}" hx-trigger="change" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML" value="{{ values.get('length', '') }}" autocomplete="off"{{ described("length", errors, "tag-length-help") }}>
+<small class="field-help" id="tag-length-help">Registers, only for data type string.</small>
+{{ field_error("length", errors) }}
+</div>
+<div class="field">
+<label for="tag-unit">Unit</label>
+<input class="input" type="text" name="unit" id="tag-unit" value="{{ values.get('unit', '') }}">
+</div>
+</div>
+{% set advanced_errors = ["byte_order", "word_order", "unit_id", "scale", "offset"] | select("in", errors) | list %}
+<details class="advanced"{% if extra.advanced_open or advanced_errors %} open{% endif %}>
+<summary>Overrides and scaling</summary>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-byte-order">Byte order</label>
+<select class="input" name="byte_order" id="tag-byte-order"{{ described("byte_order", errors) }}>
+{% for key, label in extra.byte_orders %}
+<option value="{{ key }}"{% if key == values.get('byte_order') %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{{ field_error("byte_order", errors) }}
+</div>
+<div class="field">
+<label for="tag-word-order">Word order</label>
+<select class="input" name="word_order" id="tag-word-order"{{ described("word_order", errors) }}>
+{% for key, label in extra.word_orders %}
+<option value="{{ key }}"{% if key == values.get('word_order') %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{{ field_error("word_order", errors) }}
+</div>
+<div class="field">
+<label for="tag-unit-id">Unit ID</label>
+<input class="input mono" type="text" inputmode="numeric" name="unit_id" id="tag-unit-id" value="{{ values.get('unit_id', '') }}" placeholder="{{ extra.connection_unit_id }}" autocomplete="off"{{ described("unit_id", errors, "tag-unit-id-help") }}>
+<small class="field-help" id="tag-unit-id-help">Leave empty to use the connection's unit ID ({{ extra.connection_unit_id }}).</small>
+{{ field_error("unit_id", errors) }}
+</div>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-scale">Scale</label>
+<input class="input mono" type="text" inputmode="decimal" name="scale" id="tag-scale" value="{{ values.get('scale', '') }}" autocomplete="off"{{ described("scale", errors, "tag-scale-help") }}>
+<small class="field-help" id="tag-scale-help">Value = raw × scale + offset. For example 0.1.</small>
+{{ field_error("scale", errors) }}
+</div>
+<div class="field">
+<label for="tag-offset">Offset</label>
+<input class="input mono" type="text" inputmode="decimal" name="offset" id="tag-offset" value="{{ values.get('offset', '') }}" autocomplete="off"{{ described("offset", errors) }}>
+{{ field_error("offset", errors) }}
+</div>
+</div>
+</details>
