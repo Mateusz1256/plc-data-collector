@@ -576,6 +576,57 @@ def _column_type(engine: Engine, table: str, column: str) -> object:
     raise AssertionError(f"{table}.{column} not found")
 
 
+@pytest.mark.postgres
+def test_out_of_range_integer_does_not_fail_batch_on_postgres(
+    postgres_url: str,
+) -> None:
+    run_migrations(postgres_url)
+    engine = create_database_engine(postgres_url)
+    wait_for_database(engine, timeout_s=10)
+    _seed_mock_configuration(engine)
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    run_id = uuid.uuid4().hex
+    poll_results = [
+        _single_result_poll(
+            f"pg-range-{run_id}-big",
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.integer(2**64 - 1),
+                source_timestamp=now,
+                received_at=now,
+            ),
+            now,
+        ),
+        _single_result_poll(
+            f"pg-range-{run_id}-ok",
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.integer(7),
+                source_timestamp=now,
+                received_at=now,
+            ),
+            now,
+        ),
+    ]
+
+    inserted = ReadingRepository(engine).save_poll_results(poll_results)
+
+    assert inserted == 2
+    with engine.connect() as connection:
+        rows = {
+            row.event_id: row.error_code
+            for row in connection.execute(
+                select(tag_readings.c.event_id, tag_readings.c.error_code).where(
+                    tag_readings.c.event_id.like(f"pg-range-{run_id}-%")
+                )
+            )
+        }
+    assert rows == {
+        f"pg-range-{run_id}-big:0": "value_out_of_range",
+        f"pg-range-{run_id}-ok:0": None,
+    }
+
+
 def _seed_mock_configuration(engine: Engine) -> None:
     store = ConfigStore(engine, SecretBox(Fernet.generate_key()))
     store.upsert_connection(

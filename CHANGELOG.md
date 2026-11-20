@@ -50,6 +50,10 @@ Versioning.
   `writer_flush_interval_s` after its first reading, also when readings keep
   arriving; before, it waited for a full batch when every Tag Group polled
   faster than the interval allowed it to go idle.
+- An integer reading outside the signed 64-bit range (for example an OPC UA
+  `UInt64` above 9223372036854775807) is stored as a bad reading with the
+  error code `value_out_of_range`; before, it failed the whole write batch,
+  and its Spool replays, for every Connection.
 
 ### Known limitations
 

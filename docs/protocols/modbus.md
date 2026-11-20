@@ -150,6 +150,7 @@ of the same block.
 | `modbus_short_read` | Too few registers or bits to decode the Tag |
 | `modbus_string_not_ascii` | A `string` Tag contains non-ASCII bytes |
 | `modbus_value_not_finite` | A float is NaN or infinite, or scaling gave a non-finite number |
+| `modbus_value_out_of_range` | An unscaled integer (a `uint64` above 9223372036854775807) does not fit the 64-bit signed integer column; set `scale` to 1 to store it as a float |
 | `modbus_timeout` | A read timed out |
 | `modbus_connection_lost` | The connection failed during a read |
 | `modbus_connect_failed` | The connection could not be opened |
