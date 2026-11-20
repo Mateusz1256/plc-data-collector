@@ -137,10 +137,18 @@ marks the Tags with the code `modbus_exception_NN`, where `NN` is the exception
 code in two-digit uppercase hex (`modbus_exception_02`,
 `modbus_exception_0A`, `modbus_exception_0B`), or `modbus_exception_unknown`
 when the response carries no code. Exceptions 01, 0A and 0B mark every Tag
-of the block bad in that one request. For any other exception, for example 02
-Illegal data address, the driver reads the block's Tags one by one so that
-only the Tags the device refuses go bad, and it remembers this for later polls
-of the same block.
+of the block bad in that one request. Exceptions 05 Acknowledge and 06 Server
+device busy also mark every Tag of the block bad, for this poll only: the next
+poll asks for the whole block again. For any other exception, for example 02
+Illegal data address or 03 Illegal data value, the driver reads the block's
+Tags one by one in the same poll, so that only the Tags the device refuses go
+bad. When at least one Tag is refused on its own, the driver remembers this
+and reads that block Tag by Tag on later polls, until the Tags change (Apply)
+or the service restarts; it logs `modbus_block_split_remembered` at INFO once,
+with the unit, area, start, count and exception code. A block read Tag by Tag
+needs one request per Tag, so if this message appears often, lower
+`max_gap` or `max_registers_per_read`. When every Tag reads fine on its own,
+nothing is remembered and the next poll tries the whole block again.
 
 | Error code | Meaning |
 | --- | --- |

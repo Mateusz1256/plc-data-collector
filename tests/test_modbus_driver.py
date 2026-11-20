@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime
 from typing import cast
@@ -332,6 +333,104 @@ async def test_split_block_is_read_per_member_on_later_polls() -> None:
     assert results["a"].quality is Quality.GOOD
     assert results["b"].error_code == "modbus_exception_02"
     assert results["c"].quality is Quality.GOOD
+
+
+THREE_TAGS = [
+    request("a", "hr:0", "uint16"),
+    request("b", "hr:1", "uint16"),
+    request("c", "hr:2", "uint16"),
+]
+
+
+@pytest.mark.parametrize(("code", "suffix"), [(5, "05"), (6, "06")])
+async def test_busy_block_is_bad_this_poll_and_tried_whole_next_poll(
+    code: int, suffix: str
+) -> None:
+    busy = [True]
+
+    def handler(name: str, address: int, count: int, unit: int) -> FakeResponse:
+        if busy[0]:
+            return FakeResponse(exception_code=code)
+        return FakeResponse(registers=list(range(address, address + count)))
+
+    client = FakeClient(handler)
+    driver = fake_driver(client)
+    await driver.connect()
+    results = await driver.read(THREE_TAGS)
+    assert [r.error_code for r in results] == [f"modbus_exception_{suffix}"] * 3
+    assert [call[2] for call in client.calls] == [3]  # no per-member reads
+    client.calls.clear()
+    busy[0] = False
+    results = await driver.read(THREE_TAGS)
+    assert [r.quality for r in results] == [Quality.GOOD] * 3
+    assert [call[2] for call in client.calls] == [3]
+
+
+@pytest.mark.parametrize("code", [2, 3, 4])
+async def test_block_refusal_without_bad_member_is_not_remembered(
+    code: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    def handler(name: str, address: int, count: int, unit: int) -> FakeResponse:
+        if count > 1:
+            return FakeResponse(exception_code=code)
+        return FakeResponse(registers=[address])
+
+    client = FakeClient(handler)
+    driver = fake_driver(client)
+    await driver.connect()
+    with caplog.at_level(logging.INFO, logger="plc_data_collector.protocols.modbus"):
+        results = await driver.read(THREE_TAGS)
+    assert [r.quality for r in results] == [Quality.GOOD] * 3
+    assert [call[2] for call in client.calls] == [3, 1, 1, 1]
+    assert not [r for r in caplog.records if r.levelno >= logging.INFO]
+    client.calls.clear()
+    await driver.read(THREE_TAGS)
+    assert [call[2] for call in client.calls] == [3, 1, 1, 1]  # whole block first
+
+
+async def test_remembered_split_is_logged_once_at_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(name: str, address: int, count: int, unit: int) -> FakeResponse:
+        if count > 1 or address == 1:
+            return FakeResponse(exception_code=2)
+        return FakeResponse(registers=[address])
+
+    driver = fake_driver(FakeClient(handler))
+    await driver.connect()
+    with caplog.at_level(logging.INFO, logger="plc_data_collector.protocols.modbus"):
+        await driver.read(THREE_TAGS)
+        await driver.read(THREE_TAGS)
+    logged = [
+        r for r in caplog.records if r.getMessage() == "modbus_block_split_remembered"
+    ]
+    assert len(logged) == 1
+    record = logged[0]
+    assert record.levelno == logging.INFO
+    assert record.__dict__["connection_id"] == "plc"
+    assert record.__dict__["unit_id"] == 1
+    assert record.__dict__["area"] == "hr"
+    assert record.__dict__["start"] == 0
+    assert record.__dict__["count"] == 3
+    assert record.__dict__["exception_code"] == 2
+
+
+async def test_busy_member_does_not_remember_split() -> None:
+    def handler(name: str, address: int, count: int, unit: int) -> FakeResponse:
+        if count > 1:
+            return FakeResponse(exception_code=2)
+        if address == 1:
+            return FakeResponse(exception_code=6)
+        return FakeResponse(registers=[address])
+
+    client = FakeClient(handler)
+    driver = fake_driver(client)
+    await driver.connect()
+    results = by_id(await driver.read(THREE_TAGS))
+    assert results["b"].error_code == "modbus_exception_06"
+    client.calls.clear()
+    await driver.read(THREE_TAGS)
+    assert client.calls[0][2] == 3
 
 
 async def test_tag_timeout_longer_than_connection_timeout_is_honoured() -> None:

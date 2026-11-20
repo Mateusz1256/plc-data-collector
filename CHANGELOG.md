@@ -20,8 +20,9 @@ Versioning.
   and shows. See `docs/protocols/modbus.md`.
 - Block reads: neighbouring Tags are read in one request, bounded by
   `max_registers_per_read`, `max_bits_per_read` and `max_gap`. A block the
-  device refuses is re-read Tag by Tag, so one bad register never makes the
-  other Tags bad. Errors are stored as `modbus_exception_NN` and other
+  device refuses for a register is re-read Tag by Tag, so one bad register
+  never makes the other Tags bad; a busy answer (05, 06) is retried whole on
+  the next poll. Errors are stored as `modbus_exception_NN` and other
   `modbus_*` codes.
 - Tag `protocol_options` (ADR 0003): structured per-Tag protocol settings,
   validated per protocol on Panel save, JSON import and in the driver.

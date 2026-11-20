@@ -46,6 +46,9 @@ _CLIENT_TIMEOUT_S = 600.0
 # Exceptions that concern the whole request, not one register: function not
 # supported, gateway path unavailable, gateway target did not answer.
 _WHOLE_BLOCK_EXCEPTIONS = frozenset({0x01, 0x0A, 0x0B})
+# Exceptions that say "not now" (acknowledge, server device busy): the block is
+# bad for this poll and is tried whole again on the next one.
+_TRY_LATER_EXCEPTIONS = frozenset({0x05, 0x06})
 
 _ResolveKey = tuple[str, str, frozenset[tuple[str, object]]]
 
@@ -151,7 +154,7 @@ class ModbusDriver:
         self._closed_by: TransientCommunicationError | None = None
         self._plans: dict[_ResolveKey, ModbusTagPlan | str] = {}
         self._blocks: dict[tuple[_ResolveKey, ...], list[ReadBlock]] = {}
-        # Blocks whose request was refused for one register: read member by member.
+        # Blocks with a Tag the device refuses on its own: read member by member.
         self._split: set[ReadBlock] = set()
 
     @property
@@ -296,7 +299,8 @@ class ModbusDriver:
         self, client: ModbusClient, block: ReadBlock, timeout_s: float
     ) -> dict[str, TagResult]:
         if block in self._split:
-            return await self._read_members(client, block, timeout_s)
+            results, _ = await self._read_members(client, block, timeout_s)
+            return results
         response = await self._request(
             client, block.unit_id, block.area, block.start, block.count, timeout_s
         )
@@ -305,30 +309,46 @@ class ModbusDriver:
             return self._decode_block(block, response, received_at)
 
         code = _exception_code(response)
-        if len(block.members) == 1 or code in _WHOLE_BLOCK_EXCEPTIONS:
+        if (
+            len(block.members) == 1
+            or code in _WHOLE_BLOCK_EXCEPTIONS
+            or code in _TRY_LATER_EXCEPTIONS
+        ):
             return self._refused(block, block.members, code, received_at)
         # One refused register must not hide the Tags that can be read, so read
-        # every member on its own, now and on later polls.
+        # every member on its own. Later polls read the block the same way only
+        # when a member is refused on its own; otherwise the device may have
+        # refused the size of the request just this once.
         LOGGER.debug(
             "modbus_block_refused_reading_members",
-            extra={
-                "connection_id": self._connection.id,
-                "unit_id": block.unit_id,
-                "area": block.area.value,
-                "start": block.start,
-                "count": block.count,
-                "exception_code": code,
-            },
+            extra=self._block_log(block, code),
         )
-        if len(self._split) >= _CACHE_LIMIT:
-            self._split.clear()
-        self._split.add(block)
-        return await self._read_members(client, block, timeout_s)
+        results, member_refused = await self._read_members(client, block, timeout_s)
+        if member_refused:
+            if len(self._split) >= _CACHE_LIMIT:
+                self._split.clear()
+            self._split.add(block)
+            LOGGER.info(
+                "modbus_block_split_remembered", extra=self._block_log(block, code)
+            )
+        return results
+
+    def _block_log(self, block: ReadBlock, code: int | None) -> dict[str, object]:
+        return {
+            "connection_id": self._connection.id,
+            "unit_id": block.unit_id,
+            "area": block.area.value,
+            "start": block.start,
+            "count": block.count,
+            "exception_code": code,
+        }
 
     async def _read_members(
         self, client: ModbusClient, block: ReadBlock, timeout_s: float
-    ) -> dict[str, TagResult]:
+    ) -> tuple[dict[str, TagResult], bool]:
+        """Read each member alone; also return whether the device refused one."""
         results: dict[str, TagResult] = {}
+        refused = False
         for member in block.members:
             plan = member[1]
             single = ReadBlock(
@@ -344,14 +364,12 @@ class ModbusDriver:
             )
             received_at = self._now()
             if response.isError():
-                results.update(
-                    self._refused(
-                        single, single.members, _exception_code(response), received_at
-                    )
-                )
+                code = _exception_code(response)
+                refused = refused or code not in _TRY_LATER_EXCEPTIONS
+                results.update(self._refused(single, single.members, code, received_at))
             else:
                 results.update(self._decode_block(single, response, received_at))
-        return results
+        return results, refused
 
     async def _request(
         self,
