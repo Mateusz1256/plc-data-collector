@@ -343,7 +343,7 @@ def connection_from_form(
     )
     endpoint = ""
     host = ""
-    port = 0
+    port: int | None = None
     for field in form.fields:
         raw = data.get(field.name, "")
         if field.target == "endpoint":
@@ -355,19 +355,24 @@ def connection_from_form(
             if not host:
                 errors[field.name] = f"Enter the {field.label.lower()}."
         elif field.target == "endpoint_port":
-            port = _parse_int(field, raw, errors) or 0
+            port = _parse_int(field, raw, errors)
         elif field.target == "secret":
             _apply_secret(field, raw, data, options, errors)
         else:
             _apply_option(field, raw, data, options, errors)
 
-    if form.endpoint_scheme is not None and not errors:
-        endpoint = format_endpoint(host, port)
-        try:
-            parse_endpoint(endpoint)
-        except ConfigurationError:
-            host_field = next(f for f in form.fields if f.target == "endpoint_host")
-            errors[host_field.name] = "Enter a host name or IP address."
+    if form.endpoint_scheme is not None:
+        host_field = next(f for f in form.fields if f.target == "endpoint_host")
+        if host and host_field.name not in errors:
+            # Check the host alone, with a placeholder port, so a bad host and a
+            # bad port are both reported in one submit.
+            try:
+                parse_endpoint(format_endpoint(host, 502))
+            except ConfigurationError:
+                errors[host_field.name] = "Enter a host name or IP address."
+        if not errors:
+            assert port is not None  # A missing or bad port left an error.
+            endpoint = format_endpoint(host, port)
 
     if errors:
         raise FormErrors(errors)

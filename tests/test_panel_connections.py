@@ -1069,7 +1069,7 @@ def test_edit_modbus_connection_shows_host_and_port(
     html = signed_in_client.get("/panel/connections/press2").text
 
     assert 'value="press2-plc"' in html
-    assert 'value="502"' in html
+    assert re.search(r'<input[^>]*name="port"[^>]*value="502"', html)
     details = re.search(r"<details.*?</details>", html, re.S)
     assert details is not None
     for name in ("max_registers_per_read", "max_bits_per_read", "max_gap"):
@@ -1120,3 +1120,82 @@ def test_modbus_host_with_path_is_refused(signed_in_client: TestClient) -> None:
 
     assert response.status_code == 400
     assert "Enter a host name or IP address." in response.text
+
+
+def test_modbus_host_and_port_errors_arrive_together(
+    signed_in_client: TestClient,
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_modbus_form(host="a/b", port="70000")
+    )
+
+    assert response.status_code == 400
+    assert "Enter a host name or IP address." in response.text
+    assert "Enter a whole number from 1 to 65535." in response.text
+
+
+@pytest.mark.parametrize("host", ["::1", "[::1]"])
+def test_modbus_ipv6_host(
+    signed_in_client: TestClient, fake_host: FakeHost, host: str
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_modbus_form(host=host), follow_redirects=False
+    )
+
+    assert response.status_code == 303
+    stored = _stores(fake_host).config.get_connection("press2")
+    assert stored is not None
+    assert stored.endpoint == "tcp://[::1]:502"
+    html = signed_in_client.get("/panel/connections/press2").text
+    assert re.search(r'<input[^>]*name="host"[^>]*value="::1"', html)
+
+
+def test_edit_modbus_connection_with_unparsable_endpoint(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    signed_in_client.post("/panel/connections", data=_modbus_form())
+    with fake_host.engine.begin() as connection:
+        connection.execute(
+            connections.update()
+            .where(connections.c.id == "press2")
+            .values(endpoint="not an endpoint")
+        )
+
+    response = signed_in_client.get("/panel/connections/press2")
+
+    assert response.status_code == 200
+    assert re.search(r'<input[^>]*name="host"[^>]*value=""', response.text)
+
+
+def test_new_modbus_form_shows_defaults(signed_in_client: TestClient) -> None:
+    html = signed_in_client.get("/panel/connections/new?protocol=modbus").text
+
+    for name, value in (
+        ("port", "502"),
+        ("unit_id", "1"),
+        ("max_registers_per_read", "125"),
+        ("max_bits_per_read", "2000"),
+        ("max_gap", "0"),
+    ):
+        assert re.search(rf'<input[^>]*name="{name}"[^>]*value="{value}"', html), name
+    for name, value in (
+        ("byte_order", "ab"),
+        ("word_order", "hi"),
+        ("address_numbering", "zero"),
+    ):
+        assert re.search(
+            rf'<select[^>]*name="{name}".*?<option value="{value}" selected',
+            html,
+            re.S,
+        ), name
+    assert "<details" in html and "<details open" not in html
+
+
+def test_advanced_field_error_opens_details(signed_in_client: TestClient) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_modbus_form(max_gap="999")
+    )
+
+    assert response.status_code == 400
+    assert "<details" in response.text
+    assert re.search(r"<details[^>]*\bopen\b", response.text)
