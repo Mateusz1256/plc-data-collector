@@ -167,6 +167,13 @@ nothing is remembered and the next poll tries the whole block again.
 The last four are not stored per Tag: a timeout or a lost connection fails the
 whole poll, and the worker reconnects as it does for OPC UA.
 
+A timeout counts for the whole Connection, not for one unit. Behind a gateway
+that stays silent for a unit that does not answer, instead of returning
+exception 0B, one dead unit fails the poll of every Tag on that Connection,
+including Tags of other units, and the worker reconnects on every poll. The
+workaround is one Connection per unit: the same host and port, each with its
+own default `unit_id`.
+
 ## Paste tags (CSV)
 
 On a Connection's page, "Paste tags" creates many Tags from a register map
