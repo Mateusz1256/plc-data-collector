@@ -19,6 +19,17 @@ _Avoid_: Scan class, poll group
 One addressed value inside a controller or meter that the collector reads.
 _Avoid_: Variable, point, signal, zmienna
 
+**Tag protocol options**:
+Structured settings of one Tag that depend on its protocol, such as a Modbus
+data type or byte order. The Tag's address says where to read; the options say
+how.
+_Avoid_: Address suffix, tag flags
+
+**Address numbering**:
+How a Connection's addresses are typed and shown in the Panel (zero-based,
+one-based or Modicon). The stored address is always zero-based.
+_Avoid_: Address offset, base
+
 **Archived**:
 A Connection, Tag Group or Tag removed from the configuration whose stored
 readings are kept.
@@ -41,6 +52,11 @@ A secret that lets one application read collected data through the REST API.
 _Avoid_: Token, password
 
 ### Data flow
+
+**Block read**:
+One protocol request that reads several neighbouring Tags together, instead of
+one request per Tag.
+_Avoid_: Batch, bulk read
 
 **Poll Result**:
 The outcome of reading one Tag Group once: the values of its Tags plus the
