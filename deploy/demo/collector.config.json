@@ -9,12 +9,32 @@
       "protocol_options": {
         "auto_reconnect": false
       }
+    },
+    {
+      "id": "press2_modbus",
+      "protocol": "modbus",
+      "endpoint": "tcp://modbus-sim:5020",
+      "enabled": true,
+      "timeout_ms": 2000,
+      "protocol_options": {
+        "unit_id": 1,
+        "address_numbering": "modicon",
+        "max_gap": 4
+      }
     }
   ],
   "tag_groups": [
     {
       "id": "line1_fast",
       "connection_id": "line1_opcua",
+      "interval_ms": 1000,
+      "timeout_ms": 2000,
+      "overlap_policy": "skip",
+      "enabled": true
+    },
+    {
+      "id": "press2_fast",
+      "connection_id": "press2_modbus",
       "interval_ms": 1000,
       "timeout_ms": 2000,
       "overlap_policy": "skip",
@@ -29,7 +49,9 @@
       "address": "ns=2;s=Line1.Temperature",
       "value_type": "numeric",
       "enabled": true,
-      "metadata": { "unit": "C" }
+      "metadata": {
+        "unit": "C"
+      }
     },
     {
       "id": "line1_pressure",
@@ -38,7 +60,9 @@
       "address": "ns=2;s=Line1.Pressure",
       "value_type": "numeric",
       "enabled": true,
-      "metadata": { "unit": "bar" }
+      "metadata": {
+        "unit": "bar"
+      }
     },
     {
       "id": "line1_part_count",
@@ -57,6 +81,219 @@
       "value_type": "text",
       "enabled": true,
       "metadata": {}
+    },
+    {
+      "id": "press2_pressure",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 hydraulic pressure",
+      "address": "hr:100",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "bar"
+      },
+      "protocol_options": {
+        "data_type": "float32"
+      }
+    },
+    {
+      "id": "press2_oil_temperature",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 oil temperature",
+      "address": "hr:102",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "C"
+      },
+      "protocol_options": {
+        "data_type": "float32"
+      }
+    },
+    {
+      "id": "press2_cycle_counter",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 cycle counter",
+      "address": "hr:104",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "uint32"
+      }
+    },
+    {
+      "id": "press2_ram_position",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 ram position",
+      "address": "hr:106",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "mm"
+      },
+      "protocol_options": {
+        "data_type": "int16",
+        "scale": 0.1
+      }
+    },
+    {
+      "id": "press2_running",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 running",
+      "address": "hr:107.0",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bit"
+      }
+    },
+    {
+      "id": "press2_fault",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 fault",
+      "address": "hr:107.1",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bit"
+      }
+    },
+    {
+      "id": "press2_door_closed_status",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 door closed (status word)",
+      "address": "hr:107.3",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bit"
+      }
+    },
+    {
+      "id": "press2_motor_current",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 motor current",
+      "address": "hr:110",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "A"
+      },
+      "protocol_options": {
+        "data_type": "float32",
+        "word_order": "lo"
+      }
+    },
+    {
+      "id": "press2_recipe",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 recipe",
+      "address": "hr:120",
+      "value_type": "text",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "string",
+        "length": 8
+      }
+    },
+    {
+      "id": "press2_pump_on",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 pump on",
+      "address": "co:0",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press2_alarm_horn",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 alarm horn",
+      "address": "co:1",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press2_door_closed",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 door closed",
+      "address": "di:0",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press2_guard_closed",
+      "tag_group_id": "press2_fast",
+      "name": "Press 2 guard closed",
+      "address": "di:7",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "meter2_voltage_l1",
+      "tag_group_id": "press2_fast",
+      "name": "Meter 2 voltage L1",
+      "address": "ir:0",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "V"
+      },
+      "protocol_options": {
+        "data_type": "float32",
+        "unit_id": 2
+      }
+    },
+    {
+      "id": "meter2_current_l1",
+      "tag_group_id": "press2_fast",
+      "name": "Meter 2 current L1",
+      "address": "ir:2",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "A"
+      },
+      "protocol_options": {
+        "data_type": "float32",
+        "unit_id": 2
+      }
+    },
+    {
+      "id": "meter2_energy",
+      "tag_group_id": "press2_fast",
+      "name": "Meter 2 energy",
+      "address": "ir:100",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {
+        "unit": "Wh"
+      },
+      "protocol_options": {
+        "data_type": "uint64",
+        "unit_id": 2,
+        "word_order": "lo"
+      }
     }
   ]
 }

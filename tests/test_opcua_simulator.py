@@ -146,7 +146,8 @@ def test_namespace_constants() -> None:
 def test_demo_config_loads() -> None:
     config = load_collector_config(DEMO_CONFIG, environ={})
 
-    assert {tag.address for tag in config.tags} == {
+    opcua_groups = {g.id for g in config.tag_groups if g.connection_id == "line1_opcua"}
+    assert {t.address for t in config.tags if t.tag_group_id in opcua_groups} == {
         TEMPERATURE,
         PRESSURE,
         PART_COUNT,
@@ -157,6 +158,7 @@ def test_demo_config_loads() -> None:
         "opc.tcp://opcua-sim:4840/plc-data-collector/sim/"
     )
     assert config.tag_groups[0].interval_ms == 1000
+    assert config.tag_groups[0].id == "line1_fast"
 
 
 @pytest.mark.parametrize(
