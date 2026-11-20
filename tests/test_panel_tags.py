@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from html import unescape
 from urllib.parse import parse_qs
@@ -987,3 +988,112 @@ def test_modbus_error_keeps_the_wrong_bit_visible(
     assert response.status_code == 400
     form_start = response.text.index('action="/panel/connections/press2/tags"')
     assert _input_value(response.text[form_start:], "bit") == "3"
+
+
+# Paste tags
+
+PASTE_TEXT = (
+    "name;read_from;address;data_type;scale\r\n"
+    "Ram position;hr;40107;int16;0,1\r\n"
+    "Oil temperature;hr;40121;float32;\r\n"
+)
+
+
+def _paste(text: str, action: str) -> dict[str, str]:
+    return {"text": text, "tag_group_id": "press_fast", "action": action}
+
+
+def test_paste_form_lists_columns(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    for headers in ({}, {"HX-Request": "true"}):
+        page = signed_in_client.get(
+            "/panel/connections/press2/tags/paste", headers=headers
+        )
+        assert page.status_code == 200
+        assert 'name="text"' in page.text
+        assert "read_from" in page.text
+        assert 'name="tag_group_id"' in page.text
+
+
+def test_paste_route_preview_and_save(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    url = "/panel/connections/press2/tags/paste"
+
+    preview = signed_in_client.post(url, data=_paste(PASTE_TEXT, "preview"))
+
+    assert preview.status_code == 200
+    assert "press2_ram_position" in preview.text
+    assert "press2_oil_temperature" in preview.text
+    assert "hr:106" not in preview.text
+    assert "40107" in preview.text
+    assert stores.config.all_tag_ids() == set()
+
+    saved = signed_in_client.post(url, data=_paste(PASTE_TEXT, "save"))
+
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/panel/connections/press2"
+    assert stores.config.all_tag_ids() == {
+        "press2_ram_position",
+        "press2_oil_temperature",
+    }
+    page = signed_in_client.get("/panel/connections/press2")
+    assert "Added 2 tags." in page.text
+
+
+def test_paste_route_bad_row_saves_nothing(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    text = "name,read_from,address,data_type\nGood,hr,40001,int16\nBad,hr,40002,bool\n"
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags/paste", data=_paste(text, "save")
+    )
+
+    assert response.status_code == 400
+    assert "row-failed" in response.text
+    assert stores.config.all_tag_ids() == set()
+
+
+def test_paste_route_whole_paste_error_and_unknown_connection(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    bad = signed_in_client.post(
+        "/panel/connections/press2/tags/paste",
+        data=_paste("a,colour\n1,2\n", "preview"),
+    )
+    missing = signed_in_client.get("/panel/connections/nope/tags/paste")
+
+    assert bad.status_code == 400
+    assert "Unknown column" in bad.text
+    assert missing.status_code == 404
+
+
+def test_paste_route_ids_taken_meanwhile(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = _seed_modbus(fake_host)
+    original = stores.config.create_tags
+
+    def race(new_tags: Sequence[TagConfig]) -> None:
+        stores.config.create_tag(new_tags[0])
+        original(new_tags)
+
+    monkeypatch.setattr(stores.config, "create_tags", race)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags/paste", data=_paste(PASTE_TEXT, "save")
+    )
+
+    assert response.status_code == 409
+    assert "Some IDs were taken meanwhile. Preview again." in response.text
+    assert stores.config.all_tag_ids() == {"press2_ram_position"}

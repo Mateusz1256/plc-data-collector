@@ -375,3 +375,6 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 
 .advanced { margin: 0 0 var(--space-4, 16px); }
 .advanced > summary { cursor: pointer; color: var(--ink-muted); margin-bottom: 8px; }
+
+/* Paste tags */
+textarea.input { min-height: 8rem; resize: vertical; }

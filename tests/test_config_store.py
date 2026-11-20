@@ -676,3 +676,30 @@ def test_store_replace_all_switches_protocol_with_new_tags(
     active, _ = store.load_active()
     assert [c.id for c in active.connections] == ["m1"]
     assert active.tags[0].address == "hr:1"
+
+
+def test_create_tags_is_atomic(store: ConfigStore) -> None:
+    _seed(store)
+    store.upsert_tag_group(_group("g2"))
+    store.archive_tag_group("g2")
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError):
+        store.create_tags([_tag("t2"), _tag("t3", "g2")])
+
+    assert store.revision() == revision
+    assert store.all_tag_ids() == {"t1"}
+
+
+def test_create_tags_one_revision_and_refuses_active_ids(store: ConfigStore) -> None:
+    _seed(store)
+    revision = store.revision()
+
+    store.create_tags([_tag("t2"), _tag("t3")])
+
+    assert store.revision() == revision + 1
+    assert store.all_tag_ids() == {"t1", "t2", "t3"}
+    with pytest.raises(ConfigurationError) as caught:
+        store.create_tags([_tag("t4"), _tag("t2")])
+    assert caught.value.code == "duplicate_id"
+    assert store.all_tag_ids() == {"t1", "t2", "t3"}

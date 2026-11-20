@@ -5,6 +5,7 @@
 <span class="num secondary" style="flex: 1 1 auto">{{ plural(tag_section.tag_rows | length, "tag") }}</span>
 {% if tag_section.group_choices %}
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-target="#tag-form-slot" hx-swap="innerHTML">Add tag</a>
+<a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-target="#tag-form-slot" hx-swap="innerHTML">Paste tags</a>
 {% endif %}
 </div>
 <div id="tag-form-slot">

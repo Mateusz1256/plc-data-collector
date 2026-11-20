@@ -40,6 +40,12 @@ from plc_data_collector.panel.tag_forms import (
     group_values,
     group_values_from_data,
 )
+from plc_data_collector.panel.tag_paste import (
+    PasteResult,
+    PasteRow,
+    example_paste,
+    parse_paste,
+)
 
 GROUP_DELETED_MESSAGE = (
     "Tag group deleted. Saved changes take effect after you apply them from the banner."
@@ -50,6 +56,7 @@ TAG_DELETED_MESSAGE = (
 CONNECTION_NOT_FOUND = "This connection doesn't exist or was deleted."
 GROUP_NOT_FOUND = "This tag group doesn't exist or was deleted."
 TAG_NOT_FOUND = "This tag doesn't exist or was deleted."
+PASTE_IDS_TAKEN = "Some IDs were taken meanwhile. Preview again."
 # Attempts at a free generated Tag ID when concurrent creates take the same one.
 ID_ATTEMPTS = 5
 
@@ -191,6 +198,74 @@ def create_tags_router() -> APIRouter:
             values = adapter.defaults(connection, group_choices(config, connection_id))
         ui = FormUi("new", None, values, {})
         return await _tag_form(request, stores, connection, adapter, ui, config)
+
+    @router.get(
+        "/connections/{connection_id}/tags/paste",
+        include_in_schema=False,
+        dependencies=[AdminRequired],
+    )
+    async def paste_form(
+        request: Request, connection_id: str, stores: PanelStores
+    ) -> HTMLResponse:
+        connection = await _connection(stores, connection_id)
+        if connection is None:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        return await _paste_page(request, stores, connection, text="", group_id="")
+
+    @router.post(
+        "/connections/{connection_id}/tags/paste",
+        include_in_schema=False,
+        dependencies=[AdminRequired, SameSiteRequired],
+    )
+    async def paste_tags(
+        request: Request, connection_id: str, stores: PanelStores
+    ) -> Response:
+        connection = await _connection(stores, connection_id)
+        if connection is None:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        data = await _form_data(request)
+        text = data.get("text", "")
+        group_id = data.get("tag_group_id", "")
+        config = await _load_config(stores)
+        choices = group_choices(config, connection_id)
+        result = await _parse_paste(stores, connection, choices, text, group_id)
+        if data.get("action") == "save" and result.ok:
+            tags = [row.tag for row in result.rows if row.tag is not None]
+            try:
+                await asyncio.to_thread(stores.config.create_tags, tags)
+            except ConfigurationError as error:
+                message = (
+                    PASTE_IDS_TAKEN if error.code == "duplicate_id" else error.message
+                )
+                return await _paste_page(
+                    request,
+                    stores,
+                    connection,
+                    text=text,
+                    group_id=group_id,
+                    status_code=status.HTTP_409_CONFLICT,
+                    error=message,
+                )
+            for tag in tags:
+                await asyncio.to_thread(
+                    audit.configuration_changed, stores, "tag", tag.id, "created"
+                )
+            flash(request, f"Added {len(tags)} {'tag' if len(tags) == 1 else 'tags'}.")
+            return _back_to(connection_id)
+        refused_save = data.get("action") == "save" and not result.ok
+        return await _paste_page(
+            request,
+            stores,
+            connection,
+            text=text,
+            group_id=group_id,
+            result=result,
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+                if refused_save or result.error
+                else status.HTTP_200_OK
+            ),
+        )
 
     @router.get(
         "/tags/{tag_id}/edit",
@@ -379,6 +454,90 @@ async def _create_with_generated_id(
                 audit.configuration_changed, stores, "tag", tag.id, "created"
             )
             return
+
+
+async def _parse_paste(
+    stores: Stores,
+    connection: ConnectionConfig,
+    choices: list[tuple[str, str]],
+    text: str,
+    group_id: str,
+) -> PasteResult:
+    allowed = {gid for gid, _ in choices}
+    default_group = (
+        group_id if group_id in allowed else (choices[0][0] if choices else "")
+    )
+    taken = await asyncio.to_thread(stores.config.all_tag_ids)
+    return parse_paste(
+        text,
+        adapter=tag_adapter_for(connection.protocol),
+        connection=connection,
+        default_group_id=default_group,
+        allowed_group_ids=allowed,
+        taken_ids=taken,
+    )
+
+
+def _paste_row_view(
+    row: PasteRow, adapter: TagFormAdapter, connection: ConnectionConfig
+) -> dict[str, object]:
+    """Return what the preview table shows for one pasted line."""
+    values = row.values
+    if row.tag is not None:
+        read_from, address, value_type = adapter.table_cells(row.tag, connection)
+    else:
+        read_from = values.get("read_from", "")
+        address = values.get("address", "")
+        value_type = values.get("data_type") or values.get("value_type", "")
+    return {
+        "line": row.line,
+        "name": row.tag.name if row.tag else values.get("name", ""),
+        "read_from": read_from,
+        "address": address,
+        "value_type": value_type,
+        "group": row.tag.tag_group_id if row.tag else values.get("tag_group", ""),
+        "tag_id": row.tag.id if row.tag else "",
+        "errors": list(row.errors.items()),
+    }
+
+
+async def _paste_page(
+    request: Request,
+    stores: Stores,
+    connection: ConnectionConfig,
+    *,
+    text: str,
+    group_id: str,
+    result: PasteResult | None = None,
+    status_code: int = 200,
+    error: str | None = None,
+) -> HTMLResponse:
+    config = await _load_config(stores)
+    adapter = tag_adapter_for(connection.protocol)
+    choices = group_choices(config, connection.id)
+    rows = (
+        [_paste_row_view(row, adapter, connection) for row in result.rows]
+        if result
+        else []
+    )
+    context: dict[str, object] = {
+        "connection_id": connection.id,
+        "connection_name": connection.name,
+        "title": "Paste tags",
+        "nav": "connections",
+        "text": text,
+        "selected_group": group_id,
+        "group_choices": choices,
+        "columns": adapter.columns,
+        "required": adapter.required_columns,
+        "example": example_paste(connection),
+        "read_from_column": adapter.read_from_column,
+        "rows": rows,
+        "can_save": result is not None and result.ok,
+        "error": error or (result.error if result else None),
+    }
+    template = "_tag_paste.html" if _is_htmx(request) else "tag_paste.html"
+    return render(request, template, context, status_code=status_code)
 
 
 def _group_store_errors(error: ConfigurationError) -> dict[str, str]:

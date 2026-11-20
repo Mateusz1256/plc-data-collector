@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/connections">Connections</a> / <a href="/panel/connections/{{ connection_id }}">{{ connection_name }}</a> / Paste tags</nav>
+<div class="title-row"><h1 class="page-title">Paste tags</h1></div>
+</div>
+<section class="panel" aria-label="Paste tags">
+{% include "_tag_paste.html" %}
+</section>
+{% endblock %}

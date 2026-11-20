@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import Connection, Engine, Row, Select, Table, literal, select, update
@@ -198,6 +198,19 @@ class ConfigStore:
             revision = _lock_revision(connection)
             _refuse_active_id(connection, tags, "tag", tag.id)
             _write_tag(connection, tag)
+            self._finish_write(connection, revision)
+
+    def create_tags(self, new_tags: Sequence[TagConfig]) -> None:
+        """Create several Tags in one transaction and one revision.
+
+        Refuses any active duplicate ID (``duplicate_id``) and validates each
+        Tag like ``create_tag``; on any failure nothing is stored.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            for tag in new_tags:
+                _refuse_active_id(connection, tags, "tag", tag.id)
+                _write_tag(connection, tag)
             self._finish_write(connection, revision)
 
     def upsert_connection(self, config: ConnectionConfig) -> None:
