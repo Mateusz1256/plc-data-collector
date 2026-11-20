@@ -85,6 +85,36 @@ def test_migrations_match_metadata(tmp_path: Path) -> None:
     assert diff == []
 
 
+def test_metadata_tags_protocol_options_defaults_like_migration_0004() -> None:
+    engine = create_database_engine("sqlite:///:memory:")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO connections (id, name, protocol, endpoint, enabled,"
+                " timeout_ms, protocol_options)"
+                " VALUES ('c', 'c', 'mock', 'mock://x', 1, 1000, '{}')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tag_groups (id, connection_id, interval_ms, timeout_ms,"
+                " overlap_policy, enabled) VALUES ('g', 'c', 1000, 1000, 'skip', 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tags (id, tag_group_id, name, address, enabled,"
+                " metadata_json) VALUES ('t', 'g', 't', 'a', 1, '{}')"
+            )
+        )
+        stored = connection.scalar(text("SELECT protocol_options FROM tags"))
+    assert stored == "{}"
+    server_default = metadata.tables["tags"].c.protocol_options.server_default
+    assert server_default is not None
+    assert str(getattr(server_default, "arg", "")) == "'{}'"
+
+
 def test_run_migrations_works_from_other_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
