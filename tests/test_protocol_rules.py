@@ -108,3 +108,39 @@ def test_validate_config_rejects_bad_modbus_endpoint() -> None:
     assert info.value.message.startswith("Connection 'm1': ")
     assert info.value.code == "invalid_modbus_endpoint"
     assert info.value.details["connection_id"] == "m1"
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        {"data_type": "int16", "unit_id": True},
+        {"data_type": "int16", "unit_id": "2"},
+        {"data_type": "int16", "unit_id": 2.0},
+        {"data_type": "string", "length": True},
+        {"data_type": "int16", "scale": True},
+        {"data_type": "int16", "offset": "1"},
+    ],
+)
+def test_modbus_tag_options_are_not_coerced(options: dict[str, object]) -> None:
+    with pytest.raises(ConfigurationError) as info:
+        validate_config(_config(options=options, value_type=ValueType.NUMERIC))
+    assert info.value.code == "invalid_modbus_tag"
+
+
+def test_modbus_validate_tag_returns_normalised_options() -> None:
+    config = _config(
+        options={
+            "data_type": "int16",
+            "unit_id": 2,
+            "scale": 2,
+            "byte_order": None,
+            "word_order": None,
+        },
+        value_type=ValueType.NUMERIC,
+    )
+    connection = config.connections[0]
+
+    options = rules_for("modbus").validate_tag(config.tags[0], connection)
+
+    assert options == {"data_type": "int16", "unit_id": 2, "scale": 2.0}
+    assert isinstance(options["scale"], float)

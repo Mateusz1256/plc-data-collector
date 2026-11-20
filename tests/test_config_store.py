@@ -583,6 +583,62 @@ def test_store_refuses_bad_modbus_tag(store: ConfigStore) -> None:
     assert [t.id for t in store.load_active()[0].tags] == ["t1"]
 
 
+def test_store_writes_normalised_modbus_tag_options(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    tag = TagConfig(
+        id="t1",
+        tag_group_id="g1",
+        name="t1",
+        address="hr:1",
+        value_type=ValueType.NUMERIC,
+        protocol_options={"data_type": "int16", "scale": 2, "byte_order": None},
+    )
+
+    store.upsert_tag(tag)
+
+    stored = store.get_tag("t1")
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16", "scale": 2.0}
+    assert isinstance(stored.protocol_options["scale"], float)
+
+
+def test_import_normalises_and_refuses_coerced_modbus_options(
+    store: ConfigStore,
+) -> None:
+    def payload(options: dict[str, object]) -> dict[str, object]:
+        return {
+            "connections": [
+                {"id": "m1", "protocol": "modbus", "endpoint": "tcp://plc:502"}
+            ],
+            "tag_groups": [{"id": "g1", "connection_id": "m1", "interval_ms": 1000}],
+            "tags": [
+                {
+                    "id": "t1",
+                    "tag_group_id": "g1",
+                    "name": "t1",
+                    "address": "hr:1",
+                    "value_type": "integer",
+                    "protocol_options": options,
+                }
+            ],
+        }
+
+    with pytest.raises(ConfigurationError) as info:
+        parse_collector_config(payload({"data_type": "int16", "unit_id": True}))
+    assert "unit_id" in info.value.message
+
+    store.replace_all(
+        parse_collector_config(
+            payload({"data_type": "int16", "unit_id": 2, "word_order": None})
+        )
+    )
+
+    stored = store.get_tag("t1")
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16", "unit_id": 2}
+
+
 def test_store_refuses_bad_modbus_connection(store: ConfigStore) -> None:
     revision = store.revision()
 

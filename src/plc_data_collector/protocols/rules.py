@@ -18,8 +18,13 @@ class ProtocolRules(Protocol):
         """Raise ``ConfigurationError`` when the Connection is invalid."""
         ...
 
-    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
-        """Raise ``ConfigurationError`` when the Tag is invalid on its Connection."""
+    def validate_tag(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object]:
+        """Return the Tag's protocol_options in stored (normalised) form.
+
+        Raise ``ConfigurationError`` when the Tag is invalid on its Connection.
+        """
         ...
 
 
@@ -29,20 +34,25 @@ class _PermissiveRules:
     def validate_connection(self, connection: ConnectionConfig) -> None:
         return None
 
-    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
-        return None
+    def validate_tag(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object]:
+        return dict(tag.protocol_options)
 
 
 class _OpcUaRules(_PermissiveRules):
     """OPC UA: any address; Tags have no protocol options."""
 
-    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
+    def validate_tag(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object]:
         if tag.protocol_options:
             names = ", ".join(repr(name) for name in sorted(tag.protocol_options))
             raise ConfigurationError(
                 f"OPC UA Tags take no protocol_options; remove {names}.",
                 code="opcua_tag_options_not_supported",
             )
+        return {}
 
 
 def rules_for(protocol: str) -> ProtocolRules:

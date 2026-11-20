@@ -172,17 +172,21 @@ class ModbusConnectionOptions(BaseModel):
 
 
 class ModbusTagOptions(BaseModel):
-    """Tag-level Modbus options."""
+    """Tag-level Modbus options.
+
+    Numbers are strict (``true`` or ``"2"`` is refused, not coerced), so the
+    stored options are exactly what ``to_options`` writes back.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     data_type: DataType
-    length: int | None = Field(default=None, ge=1, le=MAX_REGISTERS)
+    length: int | None = Field(default=None, ge=1, le=MAX_REGISTERS, strict=True)
     byte_order: ByteOrder | None = None
     word_order: WordOrder | None = None
-    unit_id: int | None = Field(default=None, ge=0, le=255)
-    scale: float | None = Field(default=None, allow_inf_nan=False)
-    offset: float | None = Field(default=None, allow_inf_nan=False)
+    unit_id: int | None = Field(default=None, ge=0, le=255, strict=True)
+    scale: float | None = Field(default=None, allow_inf_nan=False, strict=True)
+    offset: float | None = Field(default=None, allow_inf_nan=False, strict=True)
 
     @field_validator("scale")
     @classmethod
@@ -513,8 +517,10 @@ class ModbusRules:
         parse_endpoint(connection.endpoint)
         ModbusConnectionOptions.from_options(connection.protocol_options)
 
-    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
-        """Resolve the tag and check its value type matches the derived one."""
+    def validate_tag(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object]:
+        """Resolve the tag, check its value type and return normalised options."""
         options = ModbusConnectionOptions.from_options(connection.protocol_options)
         plan = resolve_tag(tag.address, tag.protocol_options, options)
         if tag.value_type != plan.value_type:
@@ -525,3 +531,5 @@ class ModbusRules:
                 f" gives {plan.value_type}",
                 code="modbus_value_type_mismatch",
             )
+        # resolve_tag has validated the options, so this cannot fail.
+        return ModbusTagOptions.model_validate(dict(tag.protocol_options)).to_options()

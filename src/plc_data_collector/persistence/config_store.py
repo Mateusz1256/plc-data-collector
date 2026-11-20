@@ -623,9 +623,10 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
     if group_row is None:
         raise _unknown_reference("tag_group", tag.tag_group_id)
     owner = _load_connection(connection, group_row.connection_id)
+    protocol_options = dict(tag.protocol_options)
     if owner is not None:
         try:
-            rules_for(owner.protocol).validate_tag(tag, owner)
+            protocol_options = rules_for(owner.protocol).validate_tag(tag, owner)
         except ConfigurationError as error:
             raise prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error
     statement = insert_for(connection, tags).values(
@@ -636,7 +637,7 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
         value_type=tag.value_type.value,
         enabled=tag.enabled,
         metadata_json=dict(tag.metadata),
-        protocol_options=dict(tag.protocol_options),
+        protocol_options=protocol_options,
         archived_at=None,
     )
     connection.execute(
