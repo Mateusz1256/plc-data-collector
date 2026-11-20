@@ -287,6 +287,10 @@ def parse_display_address(area: Area, text: str, numbering: AddressNumbering) ->
     stripped = text.strip()
     if not re.fullmatch(r"[0-9]+", stripped, re.ASCII):
         raise _address_error(f"Address {text!r} must be a number.")
+    if len(stripped) > 6:
+        raise _address_error(
+            f"Address {stripped[:12]}... is outside the Modbus address space."
+        )
     if numbering is AddressNumbering.MODICON:
         if len(stripped) not in (5, 6):
             raise _address_error(
@@ -428,14 +432,19 @@ def _not_finite() -> PermanentProtocolError:
 
 
 def _register_bytes(
-    plan: ModbusTagPlan, registers: Sequence[int], *, words: bool
+    plan: ModbusTagPlan,
+    registers: Sequence[int],
+    *,
+    words: bool,
+    span: int | None = None,
 ) -> bytes:
-    if len(registers) < plan.span:
+    span = plan.span if span is None else span
+    if len(registers) < span:
         raise PermanentProtocolError(
-            f"Expected {plan.span} registers, got {len(registers)}.",
+            f"Expected {span} registers, got {len(registers)}.",
             code="modbus_short_read",
         )
-    values = [int(r) & 0xFFFF for r in registers[: plan.span]]
+    values = [int(r) & 0xFFFF for r in registers[:span]]
     if words and plan.word_order is WordOrder.LO:
         values.reverse()
     if plan.byte_order is ByteOrder.BA:
@@ -451,7 +460,8 @@ def decode_registers(plan: ModbusTagPlan, registers: Sequence[int]) -> TagValue:
             raise PermanentProtocolError(
                 "Missing register for bit tag.", code="modbus_short_read"
             )
-        return TagValue.boolean(bool((int(registers[0]) >> plan.bit) & 1))
+        raw = _register_bytes(plan, registers[:1], words=False, span=1)
+        return TagValue.boolean(bool((int.from_bytes(raw, "big") >> plan.bit) & 1))
     if data_type is DataType.STRING:
         raw = _register_bytes(plan, registers, words=False)
         raw = raw.split(b"\x00", 1)[0].rstrip(b" ")

@@ -292,3 +292,16 @@ def test_connection_options_defaults_and_rejections() -> None:
         with pytest.raises(ConfigurationError) as info:
             ModbusConnectionOptions.from_options(bad)
         assert info.value.code == "invalid_modbus_connection"
+
+
+@pytest.mark.parametrize(("register", "expected"), [(0x0800, True), (0x0008, False)])
+def test_decode_bit_applies_byte_order(register: int, expected: bool) -> None:
+    p = plan("hr:0.3", data_type="bit", byte_order="ba")
+    assert decode_registers(p, [register]).boolean_value is expected
+
+
+@pytest.mark.parametrize("numbering", list(AddressNumbering))
+def test_parse_display_address_huge_input(numbering: AddressNumbering) -> None:
+    with pytest.raises(ConfigurationError) as info:
+        parse_display_address(Area.HOLDING_REGISTERS, "9" * 5000, numbering)
+    assert info.value.code == "invalid_modbus_address"
