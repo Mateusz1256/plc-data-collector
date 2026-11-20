@@ -177,3 +177,49 @@ def test_paste_unknown_group_is_a_row_error(group: str) -> None:
     text = f"name,read_from,address,data_type,tag_group\nA,hr,40001,int16,{group}\n"
 
     assert "tag_group" in _parse(text).rows[0].errors
+
+
+def test_paste_huge_field_is_a_paste_error() -> None:
+    text = "name,read_from,address,data_type\n" + "x" * 200_000 + ",hr,40001,int16\n"
+
+    result = _parse(text)
+
+    assert result.error is not None
+    assert "can't be read as a table" in result.error
+
+
+def test_paste_lone_cr_line_endings() -> None:
+    result = _parse(
+        "name,read_from,address,data_type\rA,hr,40001,int16\rB,hr,40002,int16"
+    )
+
+    assert result.ok
+    assert [row.line for row in result.rows] == [2, 3]
+
+
+def test_paste_oversize_text() -> None:
+    result = _parse("name\n" + "a" * 1_000_001)
+
+    assert result.error is not None
+    assert "over 1 MB" in result.error
+
+
+def test_paste_trailing_delimiters_are_ignored() -> None:
+    text = "name;read_from;address;data_type;;\nA;hr;40001;int16;;\n"
+
+    assert _parse(text).ok
+
+
+def test_paste_value_under_empty_header_is_a_row_error() -> None:
+    result = _parse("name;read_from;address;data_type;\nA;hr;40001;int16;oops\n")
+
+    assert result.rows[0].errors == {"form": "This value has no column name."}
+
+
+def test_paste_multiline_record_reports_first_line() -> None:
+    text = 'name,read_from,address,data_type\n"A\nB",hr,40001,int16\nC,hr,40001,int16\n'
+
+    result = _parse(text)
+
+    assert result.rows[0].line == 2
+    assert result.rows[1].errors["address"] == "Same register as line 2."

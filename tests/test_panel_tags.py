@@ -1057,6 +1057,7 @@ def test_paste_route_bad_row_saves_nothing(
 
     assert response.status_code == 400
     assert "row-failed" in response.text
+    assert "data_type: " in response.text
     assert stores.config.all_tag_ids() == set()
 
 
@@ -1097,3 +1098,4 @@ def test_paste_route_ids_taken_meanwhile(
     assert response.status_code == 409
     assert "Some IDs were taken meanwhile. Preview again." in response.text
     assert stores.config.all_tag_ids() == {"press2_ram_position"}
+    assert "press2_ram_position_2" in response.text

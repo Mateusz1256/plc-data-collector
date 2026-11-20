@@ -237,12 +237,14 @@ def create_tags_router() -> APIRouter:
                 message = (
                     PASTE_IDS_TAKEN if error.code == "duplicate_id" else error.message
                 )
+                fresh = await _parse_paste(stores, connection, choices, text, group_id)
                 return await _paste_page(
                     request,
                     stores,
                     connection,
                     text=text,
                     group_id=group_id,
+                    result=fresh,
                     status_code=status.HTTP_409_CONFLICT,
                     error=message,
                 )
@@ -479,7 +481,11 @@ async def _parse_paste(
 
 
 def _paste_row_view(
-    row: PasteRow, adapter: TagFormAdapter, connection: ConnectionConfig
+    row: PasteRow,
+    adapter: TagFormAdapter,
+    connection: ConnectionConfig,
+    headers: Mapping[str, str],
+    group_labels: Mapping[str, str],
 ) -> dict[str, object]:
     """Return what the preview table shows for one pasted line."""
     values = row.values
@@ -489,15 +495,19 @@ def _paste_row_view(
         read_from = values.get("read_from", "")
         address = values.get("address", "")
         value_type = values.get("data_type") or values.get("value_type", "")
+    group_id = row.tag.tag_group_id if row.tag else values.get("tag_group", "")
     return {
         "line": row.line,
         "name": row.tag.name if row.tag else values.get("name", ""),
         "read_from": read_from,
         "address": address,
         "value_type": value_type,
-        "group": row.tag.tag_group_id if row.tag else values.get("tag_group", ""),
+        "group": group_labels.get(group_id, group_id),
         "tag_id": row.tag.id if row.tag else "",
-        "errors": list(row.errors.items()),
+        "errors": [
+            ("" if column == "form" else headers.get(column, column), message)
+            for column, message in row.errors.items()
+        ],
     }
 
 
@@ -516,7 +526,10 @@ async def _paste_page(
     adapter = tag_adapter_for(connection.protocol)
     choices = group_choices(config, connection.id)
     rows = (
-        [_paste_row_view(row, adapter, connection) for row in result.rows]
+        [
+            _paste_row_view(row, adapter, connection, result.headers, dict(choices))
+            for row in result.rows
+        ]
         if result
         else []
     )

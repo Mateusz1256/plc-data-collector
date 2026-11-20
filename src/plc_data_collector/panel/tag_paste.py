@@ -11,7 +11,7 @@ from __future__ import annotations
 import csv
 import io
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
 from plc_data_collector.panel.protocol_forms import FormErrors
@@ -27,6 +27,11 @@ GROUP_COLUMN = "tag_group"
 
 EMPTY_ERROR = "Paste a header row and at least one tag."
 ROW_LIMIT_ERROR = f"Paste at most {MAX_PASTE_ROWS} tags at a time."
+MAX_PASTE_CHARS = 1_000_000
+TEXT_LIMIT_ERROR = (
+    f"The pasted text is too long (over 1 MB). Paste at most {MAX_PASTE_ROWS} rows."
+)
+UNNAMED_VALUE_ERROR = "This value has no column name."
 EXTRA_CELLS_ERROR = "This line has more values than the header has columns."
 
 
@@ -46,6 +51,8 @@ class PasteResult:
 
     rows: list[PasteRow]
     error: str | None = None
+    # Header names as typed, by normalised column name.
+    headers: dict[str, str] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -85,28 +92,44 @@ def parse_paste(
     Rows that fail keep their errors, keyed by column; nothing is raised for a
     bad row. Problems with the paste as a whole come back as ``error``.
     """
-    text = text.removeprefix("﻿")
-    lines = text.splitlines()
-    first = next((line for line in lines if line.strip()), None)
+    if len(text) > MAX_PASTE_CHARS:
+        return PasteResult([], TEXT_LIMIT_ERROR)
+    text = text.removeprefix("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    first = next((line for line in text.split("\n") if line.strip()), None)
     if first is None:
         return PasteResult([], EMPTY_ERROR)
-    reader = csv.reader(io.StringIO(text), delimiter=detect_delimiter(first))
+    reader = csv.reader(
+        io.StringIO(text, newline=""), delimiter=detect_delimiter(first)
+    )
 
     header: list[str] | None = None
+    typed: dict[str, str] = {}
     raw_rows: list[tuple[int, list[str]]] = []
-    for cells in reader:
-        if not any(cell.strip() for cell in cells):
-            continue
-        if header is None:
-            header = [_normalise(cell) for cell in cells]
-            continue
-        raw_rows.append((reader.line_num, cells))
+    try:
+        while True:
+            start = reader.line_num + 1
+            cells = next(reader, None)
+            if cells is None:
+                break
+            if not any(cell.strip() for cell in cells):
+                continue
+            if header is None:
+                header = []
+                for cell in cells:
+                    column = _normalise(cell)
+                    header.append(column)
+                    if column:
+                        typed.setdefault(column, cell.strip())
+                continue
+            raw_rows.append((start, cells))
+    except csv.Error as error:
+        return PasteResult([], f"This text can't be read as a table: {error}.")
     if header is None:
         return PasteResult([], EMPTY_ERROR)
 
     allowed_columns = adapter.columns
     for column in header:
-        if column not in allowed_columns:
+        if column and column not in allowed_columns:
             return PasteResult(
                 [],
                 f"Unknown column '{column}'. Use: {', '.join(allowed_columns)}.",
@@ -114,7 +137,8 @@ def parse_paste(
     missing = [name for name in adapter.required_columns if name not in header]
     if missing:
         return PasteResult([], f"Missing required column: {', '.join(missing)}.")
-    if len(set(header)) != len(header):
+    named = [column for column in header if column]
+    if len(set(named)) != len(named):
         return PasteResult([], "Each column can appear only once.")
     if not raw_rows:
         return PasteResult([], EMPTY_ERROR)
@@ -125,14 +149,20 @@ def parse_paste(
     seen: dict[tuple[str, int], int] = {}
     rows: list[PasteRow] = []
     for line, cells in raw_rows:
-        values = {column: "" for column in header}
+        values = {column: "" for column in named}
+        unnamed_value = False
         for column, cell in zip(header, cells, strict=False):
-            values[column] = cell.strip()
+            if column:
+                values[column] = cell.strip()
+            elif cell.strip():
+                unnamed_value = True
         if not values.get(GROUP_COLUMN):
             values[GROUP_COLUMN] = default_group_id
         errors: dict[str, str] = {}
         tag: TagConfig | None = None
-        if any(cell.strip() for cell in cells[len(header) :]):
+        if unnamed_value:
+            errors["form"] = UNNAMED_VALUE_ERROR
+        elif any(cell.strip() for cell in cells[len(header) :]):
             errors["form"] = EXTRA_CELLS_ERROR
         else:
             name = values.get("name", "")
@@ -157,7 +187,7 @@ def parse_paste(
                     seen[key] = line
                     taken.add(tag_id)
         rows.append(PasteRow(line, values, tag, errors))
-    return PasteResult(rows)
+    return PasteResult(rows, headers=typed)
 
 
 def _register_key(tag: TagConfig, connection: ConnectionConfig) -> tuple[str, int]:

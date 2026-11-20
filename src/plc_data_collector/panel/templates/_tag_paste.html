@@ -35,7 +35,7 @@
 <td class="addr">{{ row.value_type }}</td>
 <td class="addr">{{ row.group }}</td>
 <td class="addr">{{ row.tag_id }}</td>
-<td>{% if row.errors %}{% for column, message in row.errors %}<div class="row-detail">{{ column }}: {{ message }}</div>{% endfor %}{% else %}<span class="secondary">None</span>{% endif %}</td>
+<td>{% if row.errors %}{% for column, message in row.errors %}<div class="row-detail">{% if column %}{{ column }}: {% endif %}{{ message }}</div>{% endfor %}{% else %}<span class="secondary">None</span>{% endif %}</td>
 </tr>
 {% endfor %}
 </tbody>
