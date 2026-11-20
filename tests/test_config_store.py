@@ -536,3 +536,76 @@ def test_upsert_tag_overwrites_protocol_options(store: ConfigStore) -> None:
 
     assert stored is not None
     assert dict(stored.protocol_options) == {"data_type": "int16"}
+
+
+def _modbus_connection(**changes: object) -> ConnectionConfig:
+    return ConnectionConfig(
+        id="m1",
+        protocol="modbus",
+        endpoint=str(changes.pop("endpoint", "tcp://plc:502")),
+        protocol_options=dict(changes),
+    )
+
+
+def test_store_refuses_bad_modbus_tag(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    revision = store.revision()
+
+    bad = TagConfig(
+        id="t1",
+        tag_group_id="g1",
+        name="t1",
+        address="hr:1",
+        value_type=ValueType.BOOLEAN,
+        protocol_options={"data_type": "bool"},
+    )
+    with pytest.raises(ConfigurationError):
+        store.create_tag(bad)
+    with pytest.raises(ConfigurationError):
+        store.upsert_tag(bad)
+
+    assert store.revision() == revision
+    assert store.load_active()[0].tags == ()
+
+    good = replace(
+        bad,
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "int16"},
+    )
+    store.create_tag(good)
+    assert [t.id for t in store.load_active()[0].tags] == ["t1"]
+
+
+def test_store_refuses_bad_modbus_connection(store: ConfigStore) -> None:
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError):
+        store.upsert_connection(_modbus_connection(endpoint="plc:502"))
+    with pytest.raises(ConfigurationError):
+        store.create_connection(_modbus_connection(unit_id=999))
+
+    assert store.revision() == revision
+    assert store.load_active()[0].connections == ()
+
+
+def test_store_replace_all_refuses_bad_modbus_tag(store: ConfigStore) -> None:
+    config = CollectorConfig(
+        connections=(_modbus_connection(),),
+        tag_groups=(_group("g1", "m1"),),
+        tags=(
+            TagConfig(
+                id="t1",
+                tag_group_id="g1",
+                name="t1",
+                address="hr:1",
+                value_type=ValueType.BOOLEAN,
+                protocol_options={"data_type": "bool"},
+            ),
+        ),
+    )
+
+    with pytest.raises(ConfigurationError):
+        store.replace_all(config)
+
+    assert store.revision() == 0

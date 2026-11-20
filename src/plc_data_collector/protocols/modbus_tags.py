@@ -15,7 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from plc_data_collector.domain import (
     ConfigurationError,
+    ConnectionConfig,
     PermanentProtocolError,
+    TagConfig,
     TagValue,
     ValueType,
 )
@@ -492,3 +494,25 @@ def decode_bits(plan: ModbusTagPlan, bits: Sequence[bool]) -> TagValue:
     if not bits:
         raise PermanentProtocolError("Missing bit value.", code="modbus_short_read")
     return TagValue.boolean(bool(bits[0]))
+
+
+class ModbusRules:
+    """Validation of Modbus Connections and Tags."""
+
+    def validate_connection(self, connection: ConnectionConfig) -> None:
+        """Check the endpoint and the connection options."""
+        parse_endpoint(connection.endpoint)
+        ModbusConnectionOptions.from_options(connection.protocol_options)
+
+    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
+        """Resolve the tag and check its value type matches the derived one."""
+        options = ModbusConnectionOptions.from_options(connection.protocol_options)
+        plan = resolve_tag(tag.address, tag.protocol_options, options)
+        if tag.value_type != plan.value_type:
+            raise ConfigurationError(
+                f"value_type is {tag.value_type} but {plan.data_type}"
+                f"{' with scale' if plan.scale is not None else ''}"
+                f"{' with offset' if plan.offset is not None else ''}"
+                f" gives {plan.value_type}",
+                code="modbus_value_type_mismatch",
+            )

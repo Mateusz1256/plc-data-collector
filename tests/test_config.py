@@ -152,3 +152,35 @@ def test_tag_protocol_options_are_loaded(tmp_path: Path) -> None:
     config = load_collector_config(config_path, environ={})
 
     assert dict(config.tags[0].protocol_options) == {"data_type": "int16"}
+
+
+def test_import_refuses_bad_modbus_tag() -> None:
+    from plc_data_collector.app.config import parse_collector_config
+
+    payload = {
+        "connections": [
+            {"id": "m1", "protocol": "modbus", "endpoint": "tcp://plc:502"}
+        ],
+        "tag_groups": [{"id": "g1", "connection_id": "m1", "interval_ms": 1000}],
+        "tags": [
+            {
+                "id": "p2_temp",
+                "tag_group_id": "g1",
+                "name": "p2_temp",
+                "address": "hr:1",
+                "value_type": "boolean",
+                "protocol_options": {"data_type": "bool"},
+            }
+        ],
+    }
+
+    with pytest.raises(ConfigurationError, match="p2_temp"):
+        parse_collector_config(payload)
+
+
+def test_opcua_config_still_valid() -> None:
+    from plc_data_collector.app.config import parse_collector_config
+
+    config = parse_collector_config(valid_config())
+
+    assert config.connections[0].protocol == "opcua"

@@ -33,6 +33,7 @@ from plc_data_collector.persistence.schema import (
     tags,
 )
 from plc_data_collector.persistence.sql import insert_for
+from plc_data_collector.protocols.rules import rules_for
 
 
 class ConfigStore:
@@ -400,6 +401,7 @@ class ConfigStore:
     def _write_connection(
         self, connection: Connection, config: ConnectionConfig
     ) -> None:
+        rules_for(config.protocol).validate_connection(config)
         plain, secret = split_secrets(config.protocol_options)
         statement = insert_for(connection, connections).values(
             id=config.id,
@@ -520,16 +522,39 @@ def _write_tag_group(connection: Connection, group: TagGroupConfig) -> None:
 
 
 def _write_tag(connection: Connection, tag: TagConfig) -> None:
-    if (
-        connection.execute(
-            select(tag_groups.c.id).where(
-                tag_groups.c.id == tag.tag_group_id,
-                tag_groups.c.archived_at.is_(None),
-            )
-        ).first()
-        is None
-    ):
+    group_row = connection.execute(
+        select(tag_groups.c.connection_id).where(
+            tag_groups.c.id == tag.tag_group_id,
+            tag_groups.c.archived_at.is_(None),
+        )
+    ).first()
+    if group_row is None:
         raise _unknown_reference("tag_group", tag.tag_group_id)
+    owner = connection.execute(
+        select(
+            connections.c.id,
+            connections.c.protocol,
+            connections.c.endpoint,
+            connections.c.protocol_options,
+        ).where(connections.c.id == group_row.connection_id)
+    ).first()
+    if owner is not None:
+        try:
+            rules_for(owner.protocol).validate_tag(
+                tag,
+                ConnectionConfig(
+                    id=owner.id,
+                    protocol=owner.protocol,
+                    endpoint=owner.endpoint,
+                    protocol_options=owner.protocol_options or {},
+                ),
+            )
+        except ConfigurationError as error:
+            raise ConfigurationError(
+                f"Tag '{tag.id}': {error.message}",
+                code=error.code,
+                details={**error.details, "tag_id": tag.id},
+            ) from error
     statement = insert_for(connection, tags).values(
         id=tag.id,
         tag_group_id=tag.tag_group_id,

@@ -21,6 +21,7 @@ from plc_data_collector.domain import (
     TagGroupConfig,
     ValueType,
 )
+from plc_data_collector.protocols.rules import validate_config
 
 ENV_PREFIX = "PLC_DATA_COLLECTOR_"
 
@@ -212,7 +213,16 @@ def parse_collector_config(raw: Mapping[str, object]) -> CollectorConfig:
             details={"errors": error.errors(include_url=False)},
         ) from error
 
-    return model.to_domain()
+    config = model.to_domain()
+    try:
+        validate_config(config)
+    except ConfigurationError as error:
+        raise ConfigurationError(
+            f"Invalid configuration: {error.message}",
+            code=error.code,
+            details=error.details,
+        ) from error
+    return config
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
