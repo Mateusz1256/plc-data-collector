@@ -10,6 +10,8 @@ from plc_data_collector.protocols.mock import (
     MockDriver,
     create_mock_driver,
 )
+from plc_data_collector.protocols.modbus import ModbusDriver, create_modbus_driver
+from plc_data_collector.protocols.modbus_tags import MODBUS_PROTOCOL
 from plc_data_collector.protocols.opcua import (
     OPCUA_PROTOCOL,
     OpcUaDriver,
@@ -24,21 +26,25 @@ def default_driver_registry() -> DriverRegistry:
         [
             (MOCK_PROTOCOL, create_mock_driver),
             (OPCUA_PROTOCOL, create_opcua_driver),
+            (MODBUS_PROTOCOL, create_modbus_driver),
         ]
     )
 
 
 __all__ = [
     "MOCK_PROTOCOL",
+    "MODBUS_PROTOCOL",
     "OPCUA_PROTOCOL",
     "CommunicationDriver",
     "DriverCapabilities",
     "DriverFactory",
     "DriverRegistry",
     "MockDriver",
+    "ModbusDriver",
     "OpcUaDriver",
     "build_driver_registry",
     "create_mock_driver",
+    "create_modbus_driver",
     "create_opcua_driver",
     "default_driver_registry",
 ]

@@ -196,7 +196,7 @@ async def test_message_hides_credentials() -> None:
 
 
 async def test_unknown_protocol_reports_code_without_driver() -> None:
-    connection = ConnectionConfig(id="x", protocol="modbus", endpoint="tcp://h:502")
+    connection = ConnectionConfig(id="x", protocol="profinet", endpoint="tcp://h:502")
 
     result = await _probe(connection, default_driver_registry(), None)
 

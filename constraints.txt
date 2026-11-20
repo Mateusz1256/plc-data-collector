@@ -39,6 +39,7 @@ pycparser==3.12
 pydantic==2.11.3
 pydantic_core==2.33.1
 Pygments==2.21.0
+pymodbus==3.16.2
 pyOpenSSL==26.4.0
 pytest==9.1.1
 pytest-asyncio==1.4.0

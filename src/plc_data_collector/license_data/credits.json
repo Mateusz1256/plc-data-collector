@@ -222,6 +222,16 @@
     },
     {
       "bundled_in_distribution": true,
+      "copyright_notice": "Copyright 2008-2025 Pymodbus.",
+      "license": "BSD-3-Clause",
+      "name": "pymodbus",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License: BSD-3-Clause` and the package LICENSE file.",
+      "purpose": "asynchronous Modbus TCP client used by the `modbus` protocol driver",
+      "source": "https://pypi.org/project/pymodbus/3.16.2/",
+      "version": "3.16.2"
+    },
+    {
+      "bundled_in_distribution": true,
       "copyright_notice": "See package license file.",
       "license": "Apache License, Version 2.0",
       "name": "pyOpenSSL",
