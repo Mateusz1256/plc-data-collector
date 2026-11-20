@@ -130,3 +130,25 @@ def test_load_collector_config_reports_validation_location(tmp_path: Path) -> No
 
     with pytest.raises(ConfigurationError, match=r"connections\.0\.timeout_ms"):
         load_collector_config(config_path, environ={})
+
+
+def test_import_without_tag_protocol_options_defaults_to_empty(
+    tmp_path: Path,
+) -> None:
+    config_path = write_config(tmp_path / "collector.config.json", valid_config())
+
+    config = load_collector_config(config_path, environ={})
+
+    assert dict(config.tags[0].protocol_options) == {}
+
+
+def test_tag_protocol_options_are_loaded(tmp_path: Path) -> None:
+    payload = valid_config()
+    tags = payload["tags"]
+    assert isinstance(tags, list)
+    tags[0]["protocol_options"] = {"data_type": "int16"}
+    config_path = write_config(tmp_path / "collector.config.json", payload)
+
+    config = load_collector_config(config_path, environ={})
+
+    assert dict(config.tags[0].protocol_options) == {"data_type": "int16"}

@@ -93,6 +93,7 @@ failed (`quality = 'bad'`).
 | `value_type` | `VARCHAR(32)` | yes | `numeric`, `integer`, `boolean`, `text` or `binary`. Always set by 0.3.0. |
 | `enabled` | `BOOLEAN` | no | Disabled Tags are not read. |
 | `metadata_json` | `JSON` | no | Extra attributes. `unit` holds the unit shown in the Panel and the API, for example `{"unit": "C"}`. |
+| `protocol_options` | `JSON` | no | Protocol settings of the Tag, for example the Modbus data type; `{}` for OPC UA. |
 | `archived_at` | `VARCHAR(32)` | yes | When the Tag was archived; empty while it is active. |
 
 ## `tag_groups`

@@ -262,3 +262,35 @@ def test_import_keeps_stored_endpoint_credentials_when_host_matches() -> None:
     document["connections"][0]["endpoint"] = "opc.tcp://other:4840"  # type: ignore[index]
     moved = parse_import(json.dumps(document).encode(), current=current)
     assert moved.connections[0].endpoint == "opc.tcp://other:4840"
+
+
+def test_export_round_trips_tag_protocol_options() -> None:
+    config = _config()
+    config = replace(
+        config,
+        tags=(replace(config.tags[0], protocol_options={"scale": 0.1}),),
+    )
+
+    exported = export_config(config)
+
+    assert exported["tags"][0]["protocol_options"] == {"scale": 0.1}  # type: ignore[index]
+    assert parse_import(json.dumps(exported).encode(), current=config) == config
+
+
+def test_export_always_contains_tag_protocol_options() -> None:
+    exported = export_config(_config())
+
+    assert exported["tags"][0]["protocol_options"] == {}  # type: ignore[index]
+
+
+def test_diff_reports_tag_protocol_options_change() -> None:
+    current = _config()
+    new = replace(
+        current,
+        tags=(replace(current.tags[0], protocol_options={"scale": 0.1}),),
+    )
+
+    diff = diff_configs(current, new)
+
+    assert diff.changed == (ConfigChange("tag", "t1", "Temperature"),)
+    assert diff.total == 1

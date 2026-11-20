@@ -346,6 +346,7 @@ def tag_from_form(
             value_type=ValueType(raw_type),
             enabled=bool(data.get("enabled")),
             metadata=metadata,
+            protocol_options=existing.protocol_options if existing else {},
         )
     except ConfigurationError as error:
         raise FormErrors({"form": error.message}) from None

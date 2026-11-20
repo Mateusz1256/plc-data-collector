@@ -227,6 +227,7 @@ def test_list_tags_with_current_from_cache(
         "value_type": "numeric",
         "unit": "°C",
         "enabled": True,
+        "protocol_options": {},
         "current": {
             "value": 21.5,
             "quality": "good",
@@ -669,3 +670,27 @@ def test_history_breaks_received_at_ties_by_event_id(fake_host: FakeHost) -> Non
     rows, _ = stores.readings.history("count", at, NOW, 10)
 
     assert [row.value.raw for row in rows if row.value is not None] == [1, 2, 3]
+
+
+def test_api_tag_includes_protocol_options(
+    api_client: TestClient, fake_host: FakeHost, auth: dict[str, str]
+) -> None:
+    stores = _stores(fake_host)
+    _seed_config(stores)
+    stores.config.upsert_tag(
+        TagConfig(
+            id="register",
+            tag_group_id="fast",
+            name="Register",
+            address="hr:1",
+            value_type=ValueType.INTEGER,
+            protocol_options={"data_type": "int16"},
+        )
+    )
+
+    response = api_client.get("/api/v1/tags", headers=auth)
+
+    assert response.status_code == 200, response.text
+    tags = {tag["id"]: tag for tag in response.json()["tags"]}
+    assert tags["register"]["protocol_options"] == {"data_type": "int16"}
+    assert tags["temperature"]["protocol_options"] == {}

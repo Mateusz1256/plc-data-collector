@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import ClassVar
 
@@ -789,3 +790,25 @@ def test_poll_error_message_is_truncated_to_module_limit() -> None:
     assert len(message) == POLL_ERROR_MESSAGE_MAX_LENGTH
     assert message.startswith("distinct failure number 000; ")
     assert message.endswith("...")
+
+
+@pytest.mark.asyncio
+async def test_worker_passes_protocol_options_to_driver() -> None:
+    seen: list[TagRequest] = []
+
+    class RecordingDriver(FakeWorkerDriver):
+        async def read(self, tags: Sequence[TagRequest]) -> list[TagResult]:
+            seen.extend(tags)
+            return await super().read(tags)
+
+    registry = DriverRegistry()
+    registry.register("fake", RecordingDriver)
+    worker = ConnectionWorker(make_connection(), registry, clock=FixedClock())
+    await worker.connect()
+    tag = replace(make_tag(), protocol_options={"data_type": "int16"})
+
+    await worker.poll_group(make_group(), (tag,))
+
+    assert [dict(request.protocol_options) for request in seen] == [
+        {"data_type": "int16"}
+    ]

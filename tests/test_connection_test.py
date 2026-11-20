@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
+from dataclasses import replace
 from typing import ClassVar
 
 import pytest
@@ -14,6 +16,8 @@ from plc_data_collector.app.connection_test import (
 from plc_data_collector.domain import (
     ConnectionConfig,
     TagConfig,
+    TagRequest,
+    TagResult,
     TransientCommunicationError,
     ValueType,
 )
@@ -241,3 +245,25 @@ async def test_driver_construction_error_reports_type_not_text() -> None:
     assert result.ok is False
     assert "RuntimeError" in result.message
     assert "ctor-leak" not in result.message
+
+
+async def test_probe_passes_protocol_options() -> None:
+    seen: list[TagRequest] = []
+
+    class RecordingDriver(SpyMockDriver):
+        async def read(self, tags: Sequence[TagRequest]) -> list[TagResult]:
+            seen.extend(tags)
+            return await super().read(tags)
+
+    registry = build_driver_registry(
+        [(MOCK_PROTOCOL, lambda connection: RecordingDriver(connection))]
+    )
+    tag = replace(_probe_tag(), protocol_options={"data_type": "int16"})
+
+    await _probe(
+        _connection(tags={"line1_temperature": {"value": 21.5}}), registry, tag
+    )
+
+    assert [dict(request.protocol_options) for request in seen] == [
+        {"data_type": "int16"}
+    ]

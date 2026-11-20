@@ -356,6 +356,7 @@ def test_tag_edit_keeps_id_and_other_metadata(
             address="ns=2;s=Old",
             value_type=ValueType.NUMERIC,
             metadata={"unit": "C", "note": "kept"},
+            protocol_options={"data_type": "int16"},
         )
     )
 
@@ -370,6 +371,7 @@ def test_tag_edit_keeps_id_and_other_metadata(
     assert tag.name == "New name"
     assert tag.value_type is ValueType.INTEGER
     assert tag.metadata == {"note": "kept"}
+    assert dict(tag.protocol_options) == {"data_type": "int16"}
     assert stores.config.get_tag("line1_opcua_new_name") is None
     assert stores.config.get_tag("x") is None
 

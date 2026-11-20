@@ -337,6 +337,7 @@ async def _create_with_generated_id(
             value_type=template.value_type,
             enabled=template.enabled,
             metadata=template.metadata,
+            protocol_options=template.protocol_options,
         )
         try:
             await asyncio.to_thread(stores.config.create_tag, tag)

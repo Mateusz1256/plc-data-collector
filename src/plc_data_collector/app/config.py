@@ -59,6 +59,7 @@ class CollectorConfig:
                     "value_type": tag.value_type.value,
                     "enabled": tag.enabled,
                     "metadata": _mask_mapping(tag.metadata),
+                    "protocol_options": _mask_mapping(tag.protocol_options),
                 }
                 for tag in self.tags
             ],
@@ -104,6 +105,7 @@ class TagConfigModel(BaseModel):
     value_type: ValueType
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+    protocol_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class CollectorConfigModel(BaseModel):
@@ -175,6 +177,7 @@ class CollectorConfigModel(BaseModel):
                         value_type=tag.value_type,
                         enabled=tag.enabled,
                         metadata=tag.metadata,
+                        protocol_options=tag.protocol_options,
                     )
                     for tag in self.tags
                 ),

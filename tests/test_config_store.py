@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -522,3 +523,16 @@ def test_tag_protocol_options_round_trip(store: ConfigStore) -> None:
 
     assert tag is not None
     assert dict(tag.protocol_options) == options
+
+
+def test_upsert_tag_overwrites_protocol_options(store: ConfigStore) -> None:
+    store.upsert_connection(_connection())
+    store.upsert_tag_group(_group())
+    tag = replace(_tag("t9"), protocol_options={"data_type": "float32"})
+    store.upsert_tag(tag)
+
+    store.upsert_tag(replace(tag, protocol_options={"data_type": "int16"}))
+    stored = store.get_tag("t9")
+
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16"}

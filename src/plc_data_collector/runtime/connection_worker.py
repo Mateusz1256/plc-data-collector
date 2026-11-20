@@ -534,6 +534,7 @@ def _tag_request_from_config(tag: TagConfig, timeout_ms: int) -> TagRequest:
         address=tag.address,
         value_type=tag.value_type,
         timeout_ms=timeout_ms,
+        protocol_options=tag.protocol_options,
     )
 
 
