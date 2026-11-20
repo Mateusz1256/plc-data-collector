@@ -7,6 +7,7 @@ import pytest
 from asyncua import ua
 from asyncua.server.server import Server
 from asyncua.ua import status_codes
+from modbus_support import free_port
 
 from plc_data_collector.domain import (
     ConfigurationError,
@@ -283,7 +284,7 @@ async def test_opcua_driver_requires_connection_before_read() -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_opcua_driver_reads_from_local_asyncua_server() -> None:
-    endpoint = "opc.tcp://127.0.0.1:48580/plc-data-collector-test/"
+    endpoint = f"opc.tcp://127.0.0.1:{free_port()}/plc-data-collector-test/"
     server = Server()
     await server.init()
     server.set_endpoint(endpoint)
