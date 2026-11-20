@@ -32,6 +32,7 @@ from plc_data_collector.panel.protocol_forms import (
     ID_HELP,
     FormErrors,
     ProtocolForm,
+    connection_form_values,
     connection_from_form,
     display_endpoint,
     form_for,
@@ -587,15 +588,7 @@ def _values_from_connection(
         "timeout_ms": str(connection.timeout_ms),
         "enabled": connection.enabled,
     }
-    for field in form.fields:
-        if field.target == "endpoint":
-            values[field.name] = display_endpoint(connection.endpoint)
-        elif field.target == "option":
-            option = connection.protocol_options.get(field.name, field.default)
-            if field.kind == "bool":
-                values[field.name] = option is True
-            elif option is not None:
-                values[field.name] = str(option)
+    values.update(connection_form_values(form, connection))
     return values
 
 

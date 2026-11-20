@@ -6,6 +6,7 @@ A protocol's form is data: adding a protocol to the Panel means adding a
 
 from __future__ import annotations
 
+import contextlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,9 +15,13 @@ from urllib.parse import urlsplit
 
 from plc_data_collector.app.config import _mask_endpoint
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig
+from plc_data_collector.protocols.modbus_tags import (
+    format_endpoint,
+    parse_endpoint,
+)
 
 FieldKind = Literal["text", "url", "int", "bool", "password", "select"]
-FieldTarget = Literal["endpoint", "option", "secret"]
+FieldTarget = Literal["endpoint", "endpoint_host", "endpoint_port", "option", "secret"]
 
 # IDs of Connections, Tag Groups and Tags created in the Panel.
 ID_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,128}")
@@ -61,6 +66,11 @@ class FormField:
     default: object = None
     # For a url field: the allowed schemes; when set, a port is required too.
     schemes: tuple[str, ...] = ()
+    # For an int field: the inclusive range of accepted values.
+    min_value: int | None = None
+    max_value: int | None = None
+    # Rendered inside a collapsed "Advanced" section.
+    advanced: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,9 @@ class ProtocolForm:
     fields: tuple[FormField, ...]
     available: bool = True
     available_in: str | None = None
+    # When set, the endpoint is ``<scheme>://host:port`` built from separate
+    # ``endpoint_host`` and ``endpoint_port`` fields.
+    endpoint_scheme: str | None = None
 
     @property
     def endpoint_field(self) -> FormField | None:
@@ -123,9 +136,100 @@ PROTOCOL_FORMS: tuple[ProtocolForm, ...] = (
         protocol="modbus",
         label="Modbus TCP",
         summary="Host, port and unit ID",
-        fields=(),
-        available=False,
-        available_in="0.4.0",
+        endpoint_scheme="tcp",
+        fields=(
+            FormField(
+                name="host",
+                label="Host",
+                kind="text",
+                target="endpoint_host",
+                required=True,
+                help="Host name or IP address, for example press2-plc",
+            ),
+            FormField(
+                name="port",
+                label="Port",
+                kind="int",
+                target="endpoint_port",
+                required=True,
+                default=502,
+                min_value=1,
+                max_value=65535,
+            ),
+            FormField(
+                name="unit_id",
+                label="Unit ID",
+                kind="int",
+                target="option",
+                default=1,
+                min_value=0,
+                max_value=255,
+            ),
+            FormField(
+                name="byte_order",
+                label="Byte order",
+                kind="select",
+                target="option",
+                default="ab",
+                choices=(("ab", "Big-endian (AB)"), ("ba", "Little-endian (BA)")),
+            ),
+            FormField(
+                name="word_order",
+                label="Word order",
+                kind="select",
+                target="option",
+                default="hi",
+                choices=(("hi", "High word first"), ("lo", "Low word first")),
+                help="For 32- and 64-bit values split across registers.",
+            ),
+            FormField(
+                name="address_numbering",
+                label="Address numbering",
+                kind="select",
+                target="option",
+                default="zero",
+                choices=(
+                    ("zero", "Zero-based (0, 1, …)"),
+                    ("one", "One-based (1, 2, …)"),
+                    ("modicon", "Modicon (40001, 30001, …)"),
+                ),
+            ),
+            FormField(
+                name="max_registers_per_read",
+                label="Max registers per request",
+                kind="int",
+                target="option",
+                default=125,
+                min_value=1,
+                max_value=125,
+                advanced=True,
+            ),
+            FormField(
+                name="max_bits_per_read",
+                label="Max coils/inputs per request",
+                kind="int",
+                target="option",
+                default=2000,
+                min_value=1,
+                max_value=2000,
+                advanced=True,
+            ),
+            FormField(
+                name="max_gap",
+                label="Max gap to read through",
+                kind="int",
+                target="option",
+                default=0,
+                min_value=0,
+                max_value=125,
+                advanced=True,
+                help=(
+                    "Registers read and thrown away to join nearby tags into one "
+                    "request. Raise it only if the device allows reading unused "
+                    "registers."
+                ),
+            ),
+        ),
     ),
     ProtocolForm(
         protocol="s7",
@@ -238,14 +342,32 @@ def connection_from_form(
         else {}
     )
     endpoint = ""
+    host = ""
+    port = 0
     for field in form.fields:
         raw = data.get(field.name, "")
         if field.target == "endpoint":
             endpoint = _parse_endpoint(field, raw, existing, errors)
+        elif field.target == "endpoint_host":
+            host = raw.strip()
+            if host.startswith("[") and host.endswith("]"):
+                host = host[1:-1]
+            if not host:
+                errors[field.name] = f"Enter the {field.label.lower()}."
+        elif field.target == "endpoint_port":
+            port = _parse_int(field, raw, errors) or 0
         elif field.target == "secret":
             _apply_secret(field, raw, data, options, errors)
         else:
             _apply_option(field, raw, data, options, errors)
+
+    if form.endpoint_scheme is not None and not errors:
+        endpoint = format_endpoint(host, port)
+        try:
+            parse_endpoint(endpoint)
+        except ConfigurationError:
+            host_field = next(f for f in form.fields if f.target == "endpoint_host")
+            errors[host_field.name] = "Enter a host name or IP address."
 
     if errors:
         raise FormErrors(errors)
@@ -262,6 +384,53 @@ def connection_from_form(
         )
     except ConfigurationError as error:
         raise FormErrors({"form": error.message}) from None
+
+
+def connection_form_values(
+    form: ProtocolForm, connection: ConnectionConfig
+) -> dict[str, object]:
+    """Return the field values the edit form shows for ``connection``."""
+    values: dict[str, object] = {}
+    host, port = "", None
+    if form.endpoint_scheme is not None:
+        with contextlib.suppress(ConfigurationError):
+            host, port = parse_endpoint(connection.endpoint)
+    for field in form.fields:
+        if field.target == "endpoint":
+            values[field.name] = display_endpoint(connection.endpoint)
+        elif field.target == "endpoint_host":
+            values[field.name] = host
+        elif field.target == "endpoint_port":
+            if port is not None:
+                values[field.name] = str(port)
+        elif field.target == "option":
+            option = connection.protocol_options.get(field.name, field.default)
+            if field.kind == "bool":
+                values[field.name] = option is True
+            elif option is not None:
+                values[field.name] = str(option)
+    return values
+
+
+def _parse_int(field: FormField, raw: str, errors: dict[str, str]) -> int | None:
+    """Parse an int field and check its range; record the error and return None."""
+    value = raw.strip()
+    if not value:
+        if field.required:
+            errors[field.name] = f"Enter the {field.label.lower()}."
+        return None
+    number = _parse_digits(value)
+    low, high = field.min_value, field.max_value
+    if number is not None and (
+        (low is not None and number < low) or (high is not None and number > high)
+    ):
+        number = None
+    if number is None:
+        if low is not None and high is not None:
+            errors[field.name] = f"Enter a whole number from {low} to {high}."
+        else:
+            errors[field.name] = INT_ERROR
+    return number
 
 
 def _parse_digits(raw: str) -> int | None:
@@ -356,10 +525,8 @@ def _apply_option(
         options.pop(field.name, None)
         return
     if field.kind == "int":
-        number = _parse_digits(value)
-        if number is None:
-            errors[field.name] = INT_ERROR
-        else:
+        number = _parse_int(field, value, errors)
+        if number is not None:
             options[field.name] = number
         return
     if field.kind == "select" and value not in {key for key, _ in field.choices}:
