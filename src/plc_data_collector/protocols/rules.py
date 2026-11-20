@@ -40,7 +40,7 @@ def rules_for(protocol: str) -> ProtocolRules:
     return _PermissiveRules()
 
 
-def _prefixed(
+def prefixed(
     error: ConfigurationError, prefix: str, details: dict[str, object]
 ) -> ConfigurationError:
     return ConfigurationError(
@@ -57,7 +57,7 @@ def validate_config(config: CollectorConfig) -> None:
         try:
             rules_for(connection.protocol).validate_connection(connection)
         except ConfigurationError as error:
-            raise _prefixed(
+            raise prefixed(
                 error,
                 f"Connection '{connection.id}'",
                 {"connection_id": connection.id},
@@ -70,4 +70,4 @@ def validate_config(config: CollectorConfig) -> None:
         try:
             rules_for(owner.protocol).validate_tag(tag, owner)
         except ConfigurationError as error:
-            raise _prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error
+            raise prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error

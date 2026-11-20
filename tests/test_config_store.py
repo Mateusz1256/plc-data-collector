@@ -609,3 +609,70 @@ def test_store_replace_all_refuses_bad_modbus_tag(store: ConfigStore) -> None:
         store.replace_all(config)
 
     assert store.revision() == 0
+
+
+def test_store_refuses_connection_switch_with_incompatible_tags(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(
+            ConnectionConfig(id="c1", protocol="modbus", endpoint="tcp://plc:502")
+        )
+
+    assert info.value.message.startswith("Connection 'c1': Tag 't1': ")
+    assert info.value.details["tag_id"] == "t1"
+    assert store.revision() == revision
+    assert store.load_active()[0].connections[0].protocol == "opcua"
+
+
+def test_store_refuses_group_move_to_incompatible_connection(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    store.upsert_connection(_modbus_connection())
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_tag_group(_group("g1", "m1"))
+
+    assert info.value.message.startswith("Tag group 'g1': Tag 't1': ")
+    assert info.value.details["tag_id"] == "t1"
+    assert store.revision() == revision
+    assert store.load_active()[0].tag_groups[0].connection_id == "c1"
+
+
+def test_store_connection_error_is_prefixed(store: ConfigStore) -> None:
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(_modbus_connection(endpoint="plc:502"))
+
+    assert info.value.message.startswith("Connection 'm1': ")
+    assert info.value.details["connection_id"] == "m1"
+
+
+def test_store_replace_all_switches_protocol_with_new_tags(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    config = CollectorConfig(
+        connections=(_modbus_connection(),),
+        tag_groups=(_group("g1", "m1"),),
+        tags=(
+            TagConfig(
+                id="t1",
+                tag_group_id="g1",
+                name="t1",
+                address="hr:1",
+                value_type=ValueType.INTEGER,
+                protocol_options={"data_type": "int16"},
+            ),
+        ),
+    )
+
+    store.replace_all(config)
+
+    active, _ = store.load_active()
+    assert [c.id for c in active.connections] == ["m1"]
+    assert active.tags[0].address == "hr:1"
