@@ -26,6 +26,9 @@ MODBUS_PROTOCOL = "modbus"
 MAX_REGISTERS = 125
 MAX_BITS = 2000
 _ADDRESS_SPACE = 65536
+# Integer values are stored in a signed 64-bit column.
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
 
 
 class Area(StrEnum):
@@ -481,6 +484,12 @@ def decode_registers(plan: ModbusTagPlan, registers: Sequence[int]) -> TagValue:
         raise _not_finite()
     if plan.scale is None and plan.offset is None:
         if isinstance(number, int):
+            if not INT64_MIN <= number <= INT64_MAX:
+                raise PermanentProtocolError(
+                    f"Value {number} does not fit a 64-bit signed integer; "
+                    "set scale to 1 to store it as a float.",
+                    code="modbus_value_out_of_range",
+                )
             return TagValue.integer(number)
         return TagValue.numeric(number)
     scaled = float(number) * (plan.scale or 1) + (plan.offset or 0)

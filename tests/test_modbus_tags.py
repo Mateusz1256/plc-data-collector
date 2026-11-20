@@ -245,6 +245,28 @@ def test_decode_non_finite_after_scaling() -> None:
     assert info.value.code == "modbus_value_not_finite"
 
 
+def test_decode_uint64_above_int64_range_is_refused() -> None:
+    p = plan("hr:0", data_type="uint64")
+    with pytest.raises(PermanentProtocolError) as info:
+        decode_registers(p, [0xFFFF] * 4)
+    assert info.value.code == "modbus_value_out_of_range"
+    assert info.value.message == (
+        "Value 18446744073709551615 does not fit a 64-bit signed integer; "
+        "set scale to 1 to store it as a float."
+    )
+
+
+def test_decode_uint64_at_int64_max_is_integer() -> None:
+    p = plan("hr:0", data_type="uint64")
+    value = decode_registers(p, [0x7FFF, 0xFFFF, 0xFFFF, 0xFFFF])
+    assert value == TagValue.integer(2**63 - 1)
+
+
+def test_decode_uint64_with_scale_is_numeric() -> None:
+    p = plan("hr:0", data_type="uint64", scale=1)
+    assert decode_registers(p, [0xFFFF] * 4).numeric_value == pytest.approx(2.0**64)
+
+
 def test_decode_bits() -> None:
     assert decode_bits(plan("di:0", data_type="bool"), [True]) == TagValue.boolean(True)
     assert decode_bits(plan("co:0", data_type="bool"), [False]) == TagValue.boolean(
