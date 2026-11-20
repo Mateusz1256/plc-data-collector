@@ -677,10 +677,16 @@ def test_api_tag_includes_protocol_options(
 ) -> None:
     stores = _stores(fake_host)
     _seed_config(stores)
+    stores.config.upsert_connection(
+        ConnectionConfig(id="press", protocol="modbus", endpoint="tcp://plc:502")
+    )
+    stores.config.upsert_tag_group(
+        TagGroupConfig(id="press_fast", connection_id="press", interval_ms=1000)
+    )
     stores.config.upsert_tag(
         TagConfig(
             id="register",
-            tag_group_id="fast",
+            tag_group_id="press_fast",
             name="Register",
             address="hr:1",
             value_type=ValueType.INTEGER,

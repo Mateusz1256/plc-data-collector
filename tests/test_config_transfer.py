@@ -266,14 +266,18 @@ def test_import_keeps_stored_endpoint_credentials_when_host_matches() -> None:
 
 def test_export_round_trips_tag_protocol_options() -> None:
     config = _config()
+    options = {"data_type": "int16", "scale": 0.1}
     config = replace(
         config,
-        tags=(replace(config.tags[0], protocol_options={"scale": 0.1}),),
+        connections=(
+            ConnectionConfig(id="line-1", protocol="modbus", endpoint="tcp://plc:502"),
+        ),
+        tags=(replace(config.tags[0], address="hr:1", protocol_options=options),),
     )
 
     exported = export_config(config)
 
-    assert exported["tags"][0]["protocol_options"] == {"scale": 0.1}  # type: ignore[index]
+    assert exported["tags"][0]["protocol_options"] == options  # type: ignore[index]
     assert parse_import(json.dumps(exported).encode(), current=config) == config
 
 

@@ -33,10 +33,24 @@ class _PermissiveRules:
         return None
 
 
+class _OpcUaRules(_PermissiveRules):
+    """OPC UA: any address; Tags have no protocol options."""
+
+    def validate_tag(self, tag: TagConfig, connection: ConnectionConfig) -> None:
+        if tag.protocol_options:
+            names = ", ".join(repr(name) for name in sorted(tag.protocol_options))
+            raise ConfigurationError(
+                f"OPC UA Tags take no protocol_options; remove {names}.",
+                code="opcua_tag_options_not_supported",
+            )
+
+
 def rules_for(protocol: str) -> ProtocolRules:
     """Return the rules for a protocol; unknown protocols accept everything."""
     if protocol == MODBUS_PROTOCOL:
         return ModbusRules()
+    if protocol == "opcua":
+        return _OpcUaRules()
     return _PermissiveRules()
 
 

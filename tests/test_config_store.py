@@ -505,8 +505,8 @@ def test_move_endpoint_credentials_into_options(store: ConfigStore) -> None:
 
 
 def test_tag_protocol_options_round_trip(store: ConfigStore) -> None:
-    store.upsert_connection(_connection())
-    store.upsert_tag_group(_group())
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
     options = {"data_type": "float32", "scale": 0.1}
     store.create_tag(
         TagConfig(
@@ -526,12 +526,18 @@ def test_tag_protocol_options_round_trip(store: ConfigStore) -> None:
 
 
 def test_upsert_tag_overwrites_protocol_options(store: ConfigStore) -> None:
-    store.upsert_connection(_connection())
-    store.upsert_tag_group(_group())
-    tag = replace(_tag("t9"), protocol_options={"data_type": "float32"})
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    tag = replace(_tag("t9"), address="hr:1", protocol_options={"data_type": "float32"})
     store.upsert_tag(tag)
 
-    store.upsert_tag(replace(tag, protocol_options={"data_type": "int16"}))
+    store.upsert_tag(
+        replace(
+            tag,
+            value_type=ValueType.INTEGER,
+            protocol_options={"data_type": "int16"},
+        )
+    )
     stored = store.get_tag("t9")
 
     assert stored is not None
@@ -609,6 +615,51 @@ def test_store_replace_all_refuses_bad_modbus_tag(store: ConfigStore) -> None:
         store.replace_all(config)
 
     assert store.revision() == 0
+
+
+def test_store_refuses_opcua_tag_protocol_options(store: ConfigStore) -> None:
+    _seed(store)
+    revision = store.revision()
+    bad = replace(_tag("t2"), protocol_options={"data_type": "int16"})
+
+    for write in (store.create_tag, store.upsert_tag):
+        with pytest.raises(ConfigurationError) as info:
+            write(bad)
+        assert info.value.code == "opcua_tag_options_not_supported"
+    with pytest.raises(ConfigurationError):
+        store.create_tags([bad])
+    with pytest.raises(ConfigurationError):
+        store.replace_all(
+            CollectorConfig(
+                connections=(_connection(),),
+                tag_groups=(_group(),),
+                tags=(bad,),
+            )
+        )
+
+    assert store.revision() == revision
+
+
+def test_store_refuses_switch_to_opcua_with_modbus_tags(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    store.upsert_tag(
+        TagConfig(
+            id="t1",
+            tag_group_id="g1",
+            name="t1",
+            address="hr:1",
+            value_type=ValueType.INTEGER,
+            protocol_options={"data_type": "int16"},
+        )
+    )
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(
+            ConnectionConfig(id="m1", protocol="opcua", endpoint="opc.tcp://h:4840")
+        )
+
+    assert info.value.message.startswith("Connection 'm1': Tag 't1': ")
 
 
 def test_store_refuses_connection_switch_with_incompatible_tags(

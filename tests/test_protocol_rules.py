@@ -39,20 +39,45 @@ def _config(
     )
 
 
-def test_rules_for_unknown_protocol_accepts_anything() -> None:
-    connection = ConnectionConfig(id="c", protocol="opcua", endpoint="whatever")
-    tag = TagConfig(
+def _opcua_tag(options: dict[str, object]) -> TagConfig:
+    return TagConfig(
         id="t",
         tag_group_id="g",
         name="t",
         address="junk",
         value_type=ValueType.TEXT,
-        protocol_options={"anything": 1},
+        protocol_options=options,
     )
+
+
+def test_permissive_rules_accept_any_address() -> None:
+    connection = ConnectionConfig(id="c", protocol="opcua", endpoint="whatever")
     rules = rules_for("opcua")
     rules.validate_connection(connection)
-    rules.validate_tag(tag, connection)
-    rules_for("mock").validate_tag(tag, connection)
+    rules.validate_tag(_opcua_tag({}), connection)
+    rules_for("mock").validate_tag(_opcua_tag({"anything": 1}), connection)
+
+
+def test_opcua_rules_refuse_tag_protocol_options() -> None:
+    connection = ConnectionConfig(id="c", protocol="opcua", endpoint="whatever")
+    with pytest.raises(ConfigurationError) as info:
+        rules_for("opcua").validate_tag(_opcua_tag({"anything": 1}), connection)
+    assert info.value.code == "opcua_tag_options_not_supported"
+    assert info.value.message == (
+        "OPC UA Tags take no protocol_options; remove 'anything'."
+    )
+
+
+def test_validate_config_refuses_opcua_tag_options() -> None:
+    config = CollectorConfig(
+        connections=(ConnectionConfig(id="o1", protocol="opcua", endpoint="x"),),
+        tag_groups=(TagGroupConfig(id="g", connection_id="o1", interval_ms=1000),),
+        tags=(_opcua_tag({"data_type": "int16"}),),
+    )
+    with pytest.raises(ConfigurationError) as info:
+        validate_config(config)
+    assert info.value.message.startswith("Tag 't': OPC UA Tags take no")
+    assert info.value.details["tag_id"] == "t"
 
 
 def test_valid_modbus_config_passes() -> None:
