@@ -146,6 +146,9 @@ class ModbusDriver:
         self._client_factory = client_factory
         self._clock = clock
         self._client: ModbusClient | None = None
+        # The transient error that closed the client; repeated by read() until
+        # connect() succeeds, so a retry reports the real cause.
+        self._closed_by: TransientCommunicationError | None = None
         self._plans: dict[_ResolveKey, ModbusTagPlan | str] = {}
         self._blocks: dict[tuple[_ResolveKey, ...], list[ReadBlock]] = {}
         # Blocks whose request was refused for one register: read member by member.
@@ -178,9 +181,11 @@ class ModbusDriver:
             self._close_quietly(client)
             raise self._connect_failed()
         self._client = client
+        self._closed_by = None
 
     async def disconnect(self) -> None:
         """Close the connection."""
+        self._closed_by = None
         client, self._client = self._client, None
         if client is not None:
             self._close_quietly(client)
@@ -197,12 +202,19 @@ class ModbusDriver:
         discarding partial results so the worker can reconnect and retry.
         """
         client = self._client
-        if client is None or not client.connected:
+        if client is None:
+            if self._closed_by is not None:
+                raise self._repeat(self._closed_by)
             raise TransientCommunicationError(
                 "Modbus client is not connected.",
                 code="modbus_not_connected",
                 details={"connection_id": self._connection.id},
             )
+        if not client.connected:
+            # The transport closed under the client, for example a server reset.
+            self._closed_by = self._connection_lost()
+            self._close_quietly(client)
+            raise self._repeat(self._closed_by)
 
         results: dict[str, TagResult] = {}
         keys: list[_ResolveKey] = []
@@ -229,8 +241,9 @@ class ModbusDriver:
             block_timeout = min(timeouts[tag_id] for tag_id, _ in block.members)
             try:
                 results.update(await self._read_block(client, block, block_timeout))
-            except TransientCommunicationError:
+            except TransientCommunicationError as error:
                 # The transport state is unknown after a timeout or reset.
+                self._closed_by = error
                 self._close_quietly(client)
                 raise
         return [results[tag.tag_id] for tag in tags]
@@ -374,11 +387,7 @@ class ModbusDriver:
             ) from error
         except (ConnectionException, ModbusException, OSError, ValueError) as error:
             # Includes malformed responses: reconnecting resynchronises framing.
-            raise TransientCommunicationError(
-                "Modbus connection lost.",
-                code="modbus_connection_lost",
-                details={"connection_id": self._connection.id},
-            ) from error
+            raise self._connection_lost() from error
         return response
 
     def _decode_block(
@@ -463,6 +472,20 @@ class ModbusDriver:
         return f"The device answered with Modbus exception {code:02X}."
 
     # -- helpers ----------------------------------------------------------
+
+    def _connection_lost(self) -> TransientCommunicationError:
+        return TransientCommunicationError(
+            "Modbus connection lost.",
+            code="modbus_connection_lost",
+            details={"connection_id": self._connection.id},
+        )
+
+    def _repeat(
+        self, error: TransientCommunicationError
+    ) -> TransientCommunicationError:
+        return TransientCommunicationError(
+            error.message, code=error.code, details=dict(error.details)
+        )
 
     def _connect_failed(self) -> TransientCommunicationError:
         return TransientCommunicationError(

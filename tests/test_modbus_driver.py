@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable, Mapping
+import contextlib
+from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime
 from typing import cast
 
@@ -13,13 +14,17 @@ from plc_data_collector.domain import (
     CollectorError,
     ConnectionConfig,
     Quality,
+    TagConfig,
+    TagGroupConfig,
     TagRequest,
     TagResult,
     TransientCommunicationError,
     ValueType,
+    WorkerState,
 )
-from plc_data_collector.protocols import create_modbus_driver
+from plc_data_collector.protocols import build_driver_registry, create_modbus_driver
 from plc_data_collector.protocols.modbus import ModbusClient, ModbusDriver
+from plc_data_collector.runtime import ConnectionWorker
 
 NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -700,3 +705,114 @@ async def test_per_request_timeout_is_used() -> None:
     with pytest.raises(CollectorError) as error:
         await driver.read([tag])
     assert error.value.code == "modbus_timeout"
+
+
+@contextlib.asynccontextmanager
+async def silent_server() -> AsyncIterator[str]:
+    """A TCP server that accepts connections and never answers."""
+
+    async def swallow(
+        reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            while await reader.read(1024):
+                pass
+        finally:
+            writer.close()
+
+    server = await asyncio.start_server(swallow, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        yield f"tcp://127.0.0.1:{port}"
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def _no_sleep(_: float) -> None:
+    return None
+
+
+def _worker(endpoint: str) -> ConnectionWorker:
+    registry = build_driver_registry([("modbus", create_modbus_driver)])
+    return ConnectionWorker(
+        connection(endpoint, timeout_ms=300),
+        registry,
+        retry_sleep=_no_sleep,
+        jitter=lambda: 0.5,
+    )
+
+
+_GROUP = TagGroupConfig(id="g", connection_id="plc", interval_ms=1000)
+_TAGS = (
+    TagConfig(
+        id="a",
+        tag_group_id="g",
+        name="A",
+        address="hr:0",
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "uint16"},
+    ),
+)
+
+
+async def test_worker_stores_timeout_not_not_connected() -> None:
+    async with silent_server() as endpoint:
+        worker = _worker(endpoint)
+        await worker.connect()
+        try:
+            poll = await worker.poll_group(_GROUP, _TAGS)
+            status = worker.status()
+        finally:
+            await worker.disconnect()
+    assert [r.error_code for r in poll.results] == ["modbus_timeout"]
+    assert poll.execution.error_message == "Modbus read timed out."
+    assert worker.metrics().last_error == "Modbus read timed out."
+    assert status.state is WorkerState.DEGRADED
+
+
+async def test_worker_stores_connection_lost_not_not_connected(
+    modbus_server: ModbusTestServer,
+) -> None:
+    modbus_server.set_registers(1, "hr", 0, [5])
+    await modbus_server.start()
+    worker = _worker(modbus_server.endpoint)
+    await worker.connect()
+    try:
+        first = await worker.poll_group(_GROUP, _TAGS)
+        assert first.results[0].quality is Quality.GOOD
+        await modbus_server.stop()
+        await asyncio.sleep(0.05)
+        poll = await worker.poll_group(_GROUP, _TAGS)
+        status = worker.status()
+    finally:
+        await worker.disconnect()
+    assert [r.error_code for r in poll.results] == ["modbus_connection_lost"]
+    assert poll.execution.error_message == "Modbus connection lost."
+    assert worker.metrics().last_error == "Modbus connection lost."
+    assert status.state is WorkerState.DEGRADED
+
+
+async def test_read_after_transient_error_repeats_that_error() -> None:
+    def handler(*_: object) -> FakeResponse:
+        raise ConnectionException("lost")
+
+    client = FakeClient(cast(Handler, handler))
+    driver = fake_driver(client)
+    await driver.connect()
+    tags = [request("a", "hr:0", "uint16")]
+    with pytest.raises(TransientCommunicationError):
+        await driver.read(tags)
+    with pytest.raises(TransientCommunicationError) as again:
+        await driver.read(tags)
+    assert again.value.code == "modbus_connection_lost"
+    assert again.value.message == "Modbus connection lost."
+
+    client.handler = holding([4])
+    await driver.connect()
+    [result] = await driver.read(tags)
+    assert result.quality is Quality.GOOD
+    await driver.disconnect()
+    with pytest.raises(TransientCommunicationError) as closed:
+        await driver.read(tags)
+    assert closed.value.code == "modbus_not_connected"
