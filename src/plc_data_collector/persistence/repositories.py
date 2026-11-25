@@ -9,6 +9,7 @@ from sqlalchemy.engine import CursorResult
 
 from plc_data_collector.domain import (
     PollExecution,
+    Quality,
     RuntimeComponentStatus,
     StorageError,
     TagValue,
@@ -22,6 +23,10 @@ from plc_data_collector.persistence.schema import (
 )
 from plc_data_collector.persistence.sql import insert_for as _insert
 from plc_data_collector.runtime import WorkerPollResult
+
+# integer_value is a signed 64-bit column (BIGINT on both databases).
+_INT64_MIN = -(2**63)
+_INT64_MAX = 2**63 - 1
 
 
 class ReadingRepository:
@@ -133,8 +138,24 @@ def _reading_values(
         "error_message": result.error_message,
     }
     if value is not None:
-        values.update(_tag_value_columns(value))
+        if _integer_out_of_range(value):
+            # One driver value that the column cannot hold must not fail the
+            # whole batch (and every later replay), so store it as bad.
+            values.update(
+                quality=Quality.BAD.value,
+                error_code="value_out_of_range",
+                error_message=(
+                    f"Value {value.integer_value} does not fit a 64-bit signed integer."
+                ),
+            )
+        else:
+            values.update(_tag_value_columns(value))
     return values
+
+
+def _integer_out_of_range(value: TagValue) -> bool:
+    number = value.integer_value
+    return number is not None and not _INT64_MIN <= number <= _INT64_MAX
 
 
 def _reading_value_type(connection: Connection, record: TagReadingRecord) -> str:

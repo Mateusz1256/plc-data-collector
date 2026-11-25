@@ -1,0 +1,50 @@
+{#- Paste tags from CSV: the form, and below it the preview of the last paste.
+    Preview and Save post the same text; Save parses it again on the server. -#}
+{% from "_state.html" import state_marker %}
+<form class="inline-form" method="post" action="/panel/connections/{{ connection_id }}/tags/paste" aria-label="Paste tags">
+<h3>Paste tags</h3>
+{% if error %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<div class="field">
+<label for="paste-text">Tags</label>
+<textarea class="input mono" name="text" id="paste-text" rows="10" spellcheck="false" autocapitalize="off" aria-describedby="paste-help">{{ text }}</textarea>
+<small class="field-help" id="paste-help">Paste rows from a spreadsheet or a file, with a header row. Columns can be separated by tabs, semicolons or commas. Columns: {{ columns | join(", ") }}. Required: {{ required | join(", ") }}. Example:</small>
+<pre class="mono secondary" style="margin: 0; overflow-x: auto">{{ example }}</pre>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="paste-group">Tag group for rows without one</label>
+<select class="input" name="tag_group_id" id="paste-group">
+{% for group_id, label in group_choices %}
+<option value="{{ group_id }}"{% if group_id == selected_group %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+</div>
+</div>
+{% if rows %}
+<h3>Preview</h3>
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Line</th><th scope="col">Name</th>{% if read_from_column %}<th scope="col">Read from</th>{% endif %}<th scope="col">Address</th><th scope="col">Type</th><th scope="col">Group</th><th scope="col">ID</th><th scope="col">Problem</th></tr></thead>
+<tbody>
+{% for row in rows %}
+<tr class="{{ 'row-failed' if row.errors else '' }}">
+<td class="num">{{ row.line }}</td>
+<td><strong>{{ row.name }}</strong></td>
+{% if read_from_column %}<td>{{ row.read_from }}</td>{% endif %}
+<td class="addr{% if read_from_column %} num{% endif %}">{{ row.address }}</td>
+<td class="addr">{{ row.value_type }}</td>
+<td class="addr">{{ row.group }}</td>
+<td class="addr">{{ row.tag_id }}</td>
+<td>{% if row.errors %}{% for column, message in row.errors %}<div class="row-detail">{% if column %}{{ column }}: {% endif %}{{ message }}</div>{% endfor %}{% else %}<span class="secondary">None</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+<div class="form-actions">
+<button type="submit" class="btn" name="action" value="preview">Preview</button>
+{% if can_save %}<button type="submit" class="btn btn-primary" name="action" value="save">Add {{ plural(rows | length, "tag") }}</button>{% endif %}
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+</form>

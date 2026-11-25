@@ -10,7 +10,7 @@ import asyncio
 import base64
 import math
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Security, status
 from fastapi.security import APIKeyHeader
@@ -71,6 +71,7 @@ class TagOut(BaseModel):
     value_type: ValueType
     unit: str | None
     enabled: bool
+    protocol_options: dict[str, Any]
     current: CurrentValueOut | None
 
 
@@ -250,6 +251,7 @@ def _tag_out(tag: TagConfig, connection_id: str, live: LiveValue | None) -> TagO
         value_type=tag.value_type,
         unit=unit if isinstance(unit, str) and unit else None,
         enabled=tag.enabled,
+        protocol_options=dict(tag.protocol_options),
         current=None if live is None else _current_out(live.result),
     )
 

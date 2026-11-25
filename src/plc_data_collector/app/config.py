@@ -21,6 +21,7 @@ from plc_data_collector.domain import (
     TagGroupConfig,
     ValueType,
 )
+from plc_data_collector.protocols.rules import validate_config
 
 ENV_PREFIX = "PLC_DATA_COLLECTOR_"
 
@@ -59,6 +60,7 @@ class CollectorConfig:
                     "value_type": tag.value_type.value,
                     "enabled": tag.enabled,
                     "metadata": _mask_mapping(tag.metadata),
+                    "protocol_options": _mask_mapping(tag.protocol_options),
                 }
                 for tag in self.tags
             ],
@@ -104,6 +106,7 @@ class TagConfigModel(BaseModel):
     value_type: ValueType
     enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+    protocol_options: dict[str, Any] = Field(default_factory=dict)
 
 
 class CollectorConfigModel(BaseModel):
@@ -175,6 +178,7 @@ class CollectorConfigModel(BaseModel):
                         value_type=tag.value_type,
                         enabled=tag.enabled,
                         metadata=tag.metadata,
+                        protocol_options=tag.protocol_options,
                     )
                     for tag in self.tags
                 ),
@@ -209,7 +213,16 @@ def parse_collector_config(raw: Mapping[str, object]) -> CollectorConfig:
             details={"errors": error.errors(include_url=False)},
         ) from error
 
-    return model.to_domain()
+    config = model.to_domain()
+    try:
+        validate_config(config)
+    except ConfigurationError as error:
+        raise ConfigurationError(
+            f"Invalid configuration: {error.message}",
+            code=error.code,
+            details=error.details,
+        ) from error
+    return config
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:

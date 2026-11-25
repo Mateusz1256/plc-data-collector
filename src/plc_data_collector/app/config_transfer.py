@@ -120,6 +120,7 @@ def export_config(config: CollectorConfig) -> dict[str, object]:
                 "value_type": tag.value_type.value,
                 "enabled": tag.enabled,
                 "metadata": _plain(tag.metadata),
+                "protocol_options": _plain(tag.protocol_options),
             }
             for tag in config.tags
         ],

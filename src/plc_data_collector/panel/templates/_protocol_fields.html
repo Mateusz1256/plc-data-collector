@@ -13,8 +13,7 @@
 {%- if errors.get(name) %} aria-invalid="true"{% endif -%}
 {%- endmacro %}
 
-{% macro protocol_fields(form, values, errors, saved_secrets) %}
-{% for field in form.fields %}
+{% macro one_field(field, values, errors, saved_secrets) %}
 {% if field.kind == "bool" %}
 <label class="check">
 <input type="checkbox" name="{{ field.name }}" id="field-{{ field.name }}"{% if values.get(field.name) %} checked{% endif %}{{ described_by(field.name, field.help, errors) }}>
@@ -48,10 +47,24 @@
 {% else %}
 <div class="field">
 <label for="field-{{ field.name }}">{{ field.label }}</label>
-<input class="input{% if field.kind == 'url' or field.target == 'endpoint' %} mono{% endif %}" type="{{ 'number' if field.kind == 'int' else 'text' }}" name="{{ field.name }}" id="field-{{ field.name }}" value="{{ values.get(field.name, '') }}"{% if field.required %} required{% endif %} spellcheck="false" autocapitalize="off"{{ described_by(field.name, field.help, errors) }}>
+<input class="input{% if field.kind == 'url' or field.target == 'endpoint' %} mono{% endif %}" type="{{ 'number' if field.kind == 'int' else 'text' }}"{% if field.kind == 'int' %} step="1"{% if field.min_value is not none %} min="{{ field.min_value }}"{% endif %}{% if field.max_value is not none %} max="{{ field.max_value }}"{% endif %}{% endif %} name="{{ field.name }}" id="field-{{ field.name }}" value="{{ values.get(field.name, '') }}"{% if field.required %} required{% endif %} spellcheck="false" autocapitalize="off"{{ described_by(field.name, field.help, errors) }}>
 {% if field.help %}<small class="field-help" id="field-{{ field.name }}-help">{{ field.help }}</small>{% endif %}
 {{ field_error(field.name, errors) }}
 </div>
 {% endif %}
+{% endmacro %}
+
+{% macro protocol_fields(form, values, errors, saved_secrets) %}
+{% for field in form.fields if not field.advanced %}
+{{ one_field(field, values, errors, saved_secrets) }}
 {% endfor %}
+{% set advanced = form.fields | selectattr("advanced") | list %}
+{% if advanced %}
+<details class="advanced"{% if advanced | selectattr("name", "in", errors) | list %} open{% endif %}>
+<summary>Advanced</summary>
+{% for field in advanced %}
+{{ one_field(field, values, errors, saved_secrets) }}
+{% endfor %}
+</details>
+{% endif %}
 {% endmacro %}

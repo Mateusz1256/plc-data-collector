@@ -5,23 +5,26 @@
 <span class="num secondary" style="flex: 1 1 auto">{{ plural(tag_section.tag_rows | length, "tag") }}</span>
 {% if tag_section.group_choices %}
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-target="#tag-form-slot" hx-swap="innerHTML">Add tag</a>
+<a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-target="#tag-form-slot" hx-swap="innerHTML">Paste tags</a>
 {% endif %}
 </div>
 <div id="tag-form-slot">
 {% if tag_section.tag_ui %}
-{% with ui = tag_section.tag_ui, connection_id = tag_section.connection_id, group_choices = tag_section.group_choices, value_types = value_types %}{% include "_tag_form.html" %}{% endwith %}
+{% with ui = tag_section.tag_ui, connection_id = tag_section.connection_id, group_choices = tag_section.group_choices, form_template = tag_section.tag_form_template, extra = tag_section.tag_form_context %}{% include "_tag_form.html" %}{% endwith %}
 {% endif %}
 </div>
 {% if tag_section.tag_rows %}
 <div class="panel-scroll">
 <table class="tbl">
-<thead><tr><th scope="col">Tag</th><th scope="col">Address</th><th scope="col">Type</th><th scope="col">Group</th><th scope="col">Last read</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<thead><tr><th scope="col">Tag</th>{% if tag_section.read_from_column %}<th scope="col">Read from</th>{% endif %}<th scope="col">Address</th><th scope="col">Type</th><th scope="col">Group</th><th scope="col">Last read</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
 <tbody>
 {% for row in tag_section.tag_rows %}
 <tr data-tag="{{ row.tag.id }}" class="{{ row.row_class }}">
 <td><strong>{{ row.tag.name }}</strong>{% if row.tag.metadata.get("unit") %} <span class="secondary">({{ row.tag.metadata["unit"] }})</span>{% endif %}<div class="secondary addr">{{ row.tag.id }}</div></td>
-<td class="addr">{{ row.tag.address }}</td>
-<td class="addr">{{ row.tag.value_type.value }}</td>
+{% set read_from, address, value_type = row.cells %}
+{% if tag_section.read_from_column %}<td>{{ read_from }}</td>{% endif %}
+<td class="addr{% if tag_section.read_from_column %} num{% endif %}">{{ address }}</td>
+<td class="addr">{{ value_type }}</td>
 <td class="addr">{{ row.group_label }}</td>
 <td>{{ state_marker(row.badge) }}{% if row.message %}<div class="row-detail secondary">{{ row.message }}</div>{% endif %}</td>
 <td class="actions"><a class="btn btn-quiet" href="/panel/tags/{{ row.tag.id }}/edit" hx-get="/panel/tags/{{ row.tag.id }}/edit" hx-target="#tag-form-slot" hx-swap="innerHTML">Edit<span class="visually-hidden"> {{ row.tag.name }}</span></a></td>

@@ -9,13 +9,14 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from collections.abc import Collection, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.domain import (
     ConfigurationError,
+    ConnectionConfig,
     Quality,
     TagConfig,
     TagGroupConfig,
@@ -31,6 +32,9 @@ from plc_data_collector.panel.protocol_forms import (
 )
 from plc_data_collector.panel.rendering import StateBadge, format_interval, state_badge
 from plc_data_collector.runtime.live_values import freshness
+
+if TYPE_CHECKING:
+    from plc_data_collector.panel.tag_adapters import TagFormAdapter
 
 DEFAULT_GROUP_INTERVAL_MS = 1000
 DEFAULT_GROUP_TIMEOUT_MS = 800
@@ -71,6 +75,8 @@ class TagRow:
     group_label: str
     badge: StateBadge
     message: str | None
+    # Read from, Address and Type, as the Connection's Tag form adapter shows them.
+    cells: tuple[str, str, str] = ("", "", "")
 
     @property
     def row_class(self) -> str:
@@ -88,6 +94,11 @@ class TagSection:
     group_choices: list[tuple[str, str]]
     group_ui: FormUi | None
     tag_ui: FormUi | None
+    # Whether the Tags table has a Read from column (Modbus areas).
+    read_from_column: bool = False
+    # The protocol part of the Tag form and what it needs to render.
+    tag_form_template: str = ""
+    tag_form_context: Mapping[str, object] = field(default_factory=dict)
 
     def tag_count(self, group_id: str | None) -> int:
         """Return how many active Tags the Tag Group has."""
@@ -97,7 +108,8 @@ class TagSection:
 def build_tag_section(
     host: CollectorHost,
     config: CollectorConfig,
-    connection_id: str,
+    connection: ConnectionConfig,
+    adapter: TagFormAdapter,
     *,
     group_ui: FormUi | None = None,
     tag_ui: FormUi | None = None,
@@ -105,9 +117,12 @@ def build_tag_section(
 ) -> TagSection:
     """Collect the Tag Groups and Tags of one Connection for display.
 
-    ``now`` (default: the current time) decides which good values are stale.
+    ``adapter`` is the Tag form of the Connection's protocol; it decides how
+    the table shows addresses and what the open Tag form needs. ``now``
+    (default: the current time) decides which good values are stale.
     """
     now = now or datetime.now(UTC)
+    connection_id = connection.id
     groups = [g for g in config.tag_groups if g.connection_id == connection_id]
     group_ids = {g.id for g in groups}
     tags_by_group: dict[str, list[TagConfig]] = defaultdict(list)
@@ -119,13 +134,21 @@ def build_tag_section(
         connection_id=connection_id,
         group_rows=[GroupRow(g, len(tags_by_group[g.id])) for g in groups],
         tag_rows=[
-            _tag_row(host, tag, connection_id, labels[g.id], g, now)
+            replace(
+                _tag_row(host, tag, connection_id, labels[g.id], g, now),
+                cells=adapter.table_cells(tag, connection),
+            )
             for g in groups
             for tag in tags_by_group[g.id]
         ],
         group_choices=list(labels.items()),
         group_ui=group_ui,
         tag_ui=tag_ui,
+        read_from_column=adapter.read_from_column,
+        tag_form_template=adapter.template,
+        tag_form_context=(
+            adapter.template_context(tag_ui.values, connection) if tag_ui else {}
+        ),
     )
 
 
@@ -265,90 +288,140 @@ def _parse_ms(raw: str) -> int | None:
 # Tag form
 
 
-def tag_defaults(group_choices: list[tuple[str, str]]) -> dict[str, object]:
-    """Return the values a new Tag form starts with."""
-    return {
-        "name": "",
-        "tag_group_id": group_choices[0][0] if group_choices else "",
-        "address": "",
-        "value_type": ValueType.NUMERIC.value,
-        "unit": "",
-        "enabled": True,
-    }
+class GenericTagForm:
+    """The Tag form of protocols without their own: raw address and value type.
 
-
-def tag_values(tag: TagConfig) -> dict[str, object]:
-    """Return the form values of a saved Tag."""
-    unit = tag.metadata.get(UNIT_KEY)
-    return {
-        "name": tag.name,
-        "tag_group_id": tag.tag_group_id,
-        "address": tag.address,
-        "value_type": tag.value_type.value,
-        "unit": unit if isinstance(unit, str) else "",
-        "enabled": tag.enabled,
-    }
-
-
-def tag_values_from_data(data: Mapping[str, str]) -> dict[str, object]:
-    """Return submitted Tag values to show again."""
-    return {
-        "name": data.get("name", ""),
-        "tag_group_id": data.get("tag_group_id", ""),
-        "address": data.get("address", ""),
-        "value_type": data.get("value_type", ""),
-        "unit": data.get("unit", ""),
-        "enabled": bool(data.get("enabled")),
-    }
-
-
-def tag_from_form(
-    data: Mapping[str, str],
-    *,
-    tag_id: str | None,
-    allowed_group_ids: Collection[str],
-    existing: TagConfig | None,
-) -> TagConfig:
-    """Build a Tag from submitted ``data`` under the given ``tag_id``.
-
-    ``allowed_group_ids`` are the Tag Groups of the Tag's own Connection; a
-    group outside them is refused. Metadata other than the unit is kept from
-    ``existing``. Raises ``FormErrors`` keyed by field name.
+    Used for OPC UA and every protocol that has no adapter of its own; the
+    address is stored as typed and the value type is chosen by hand.
     """
-    errors: dict[str, str] = {}
+
+    template = "_tag_form_generic.html"
+    columns: tuple[str, ...] = ("name", "tag_group", "address", "value_type", "unit")
+    required_columns: tuple[str, ...] = ("name", "address", "value_type")
+    read_from_column = False
+
+    def defaults(
+        self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]
+    ) -> dict[str, object]:
+        """Return the values a new Tag form starts with."""
+        return {
+            "name": "",
+            "tag_group": group_choices[0][0] if group_choices else "",
+            "address": "",
+            "value_type": ValueType.NUMERIC.value,
+            "unit": "",
+            "enabled": True,
+        }
+
+    def values(self, tag: TagConfig, connection: ConnectionConfig) -> dict[str, object]:
+        """Return the form values of a saved Tag."""
+        return {
+            "name": tag.name,
+            "tag_group": tag.tag_group_id,
+            "address": tag.address,
+            "value_type": tag.value_type.value,
+            "unit": tag_unit(tag),
+            "enabled": tag.enabled,
+        }
+
+    def values_from_data(self, data: Mapping[str, str]) -> dict[str, object]:
+        """Return submitted Tag values to show again."""
+        values: dict[str, object] = {name: data.get(name, "") for name in self.columns}
+        values["enabled"] = bool(data.get("enabled"))
+        return values
+
+    def build(
+        self,
+        data: Mapping[str, str],
+        *,
+        connection: ConnectionConfig,
+        tag_id: str | None,
+        allowed_group_ids: Collection[str],
+        existing: TagConfig | None,
+        enabled: bool | None = None,
+    ) -> TagConfig:
+        """Build a Tag from submitted ``data`` under the given ``tag_id``.
+
+        ``allowed_group_ids`` are the Tag Groups of the Tag's own Connection; a
+        group outside them is refused. Metadata other than the unit and the
+        protocol options are kept from ``existing``. Raises ``FormErrors``
+        keyed by field name.
+        """
+        errors: dict[str, str] = {}
+        name, group_id = check_name_and_group(data, allowed_group_ids, errors)
+        address = data.get("address", "").strip()
+        if not address:
+            errors["address"] = "Enter an address."
+        raw_type = data.get("value_type", "").strip()
+        if raw_type not in VALUE_TYPE_CHOICES:
+            errors["value_type"] = CHOICE_ERROR
+        if errors or tag_id is None:
+            raise FormErrors(errors)
+        try:
+            return TagConfig(
+                id=tag_id,
+                tag_group_id=group_id,
+                name=name,
+                address=address,
+                value_type=ValueType(raw_type),
+                enabled=True if enabled is None else enabled,
+                metadata=metadata_with_unit(existing, data),
+                protocol_options=existing.protocol_options if existing else {},
+            )
+        except ConfigurationError as error:
+            raise FormErrors({"form": error.message}) from None
+
+    def next_values(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object] | None:
+        """Return None: the form closes after a save."""
+        return None
+
+    def table_cells(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> tuple[str, str, str]:
+        """Return the Read from, Address and Type cells of a Tags table row."""
+        return ("", tag.address, tag.value_type.value)
+
+    def template_context(
+        self, values: Mapping[str, object], connection: ConnectionConfig
+    ) -> dict[str, object]:
+        """Return what the form template needs besides the values."""
+        return {"value_types": VALUE_TYPE_CHOICES}
+
+
+def tag_unit(tag: TagConfig) -> str:
+    """Return the unit stored in a Tag's metadata, or an empty string."""
+    unit = tag.metadata.get(UNIT_KEY)
+    return unit if isinstance(unit, str) else ""
+
+
+def check_name_and_group(
+    data: Mapping[str, str],
+    allowed_group_ids: Collection[str],
+    errors: dict[str, str],
+) -> tuple[str, str]:
+    """Check the fields every Tag form has; add errors to ``errors``."""
     name = data.get("name", "").strip()
     if not name:
         errors["name"] = "Enter a name."
-    address = data.get("address", "").strip()
-    if not address:
-        errors["address"] = "Enter an address."
-    group_id = data.get("tag_group_id", "").strip()
+    group_id = data.get("tag_group", "").strip()
     if group_id not in allowed_group_ids:
-        errors["tag_group_id"] = GROUP_CHOICE_ERROR
-    raw_type = data.get("value_type", "").strip()
-    if raw_type not in VALUE_TYPE_CHOICES:
-        errors["value_type"] = CHOICE_ERROR
-    if errors or tag_id is None:
-        raise FormErrors(errors)
+        errors["tag_group"] = GROUP_CHOICE_ERROR
+    return name, group_id
 
+
+def metadata_with_unit(
+    existing: TagConfig | None, data: Mapping[str, str]
+) -> dict[str, object]:
+    """Return ``existing`` metadata with the submitted unit set or removed."""
     metadata: dict[str, object] = dict(existing.metadata) if existing else {}
     unit = data.get("unit", "").strip()
     if unit:
         metadata[UNIT_KEY] = unit
     else:
         metadata.pop(UNIT_KEY, None)
-    try:
-        return TagConfig(
-            id=tag_id,
-            tag_group_id=group_id,
-            name=name,
-            address=address,
-            value_type=ValueType(raw_type),
-            enabled=bool(data.get("enabled")),
-            metadata=metadata,
-        )
-    except ConfigurationError as error:
-        raise FormErrors({"form": error.message}) from None
+    return metadata
 
 
 def generate_tag_id(connection_id: str, name: str, taken: Collection[str]) -> str:

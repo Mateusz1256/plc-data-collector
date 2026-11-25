@@ -1,6 +1,6 @@
 # PLC Data Collector
 
-An asyncio service that polls industrial controllers over OPC UA, stores the Tag readings in PostgreSQL, and has a web Panel and a REST API.
+An asyncio service that polls industrial controllers over OPC UA and Modbus TCP, stores the Tag readings in PostgreSQL, and has a web Panel and a REST API.
 
 <!--
 Demo GIF placeholder. To record it: start the stack (Quick start below), sign in
@@ -23,6 +23,7 @@ Production data lives in controllers that are awkward to query: values are addre
 - Optional retention that deletes readings older than a set number of days.
 - Connection secrets (for example OPC UA passwords) encrypted in the database.
 - OPC UA driver (`asyncua`) with batched reads, source timestamps and per-Tag quality.
+- Modbus TCP driver (`pymodbus`), read-only: Coils, Discrete inputs, Holding and Input registers, all common data types, byte and word order, unit ID, scale and offset, block reads, and Tag entry by form or by pasting CSV. See [docs/protocols/modbus.md](docs/protocols/modbus.md).
 - Mock driver for local development and deterministic tests.
 - One isolated worker per Connection, with automatic reconnect.
 - Fixed-interval scheduler per Tag Group that never overlaps its own cycles.
@@ -31,18 +32,18 @@ Production data lives in controllers that are awkward to query: values are addre
 - Durable on-disk Spool that holds Poll Results while PostgreSQL is down and replays them afterwards.
 - PostgreSQL storage with Alembic migrations applied at startup (SQLite is the fallback when no database URL is set).
 - HTTP endpoints for liveness, readiness, runtime state and build information.
-- Built-in OPC UA simulator and a Docker Compose demo stack.
+- Built-in OPC UA and Modbus simulators and a Docker Compose demo stack.
 - Read-only toward controllers: the collector never writes to a PLC.
 
 ## Tech stack
 
-Python 3.12, asyncio, `asyncua` (OPC UA), SQLAlchemy 2 with `pg8000` (PostgreSQL), Alembic, FastAPI with uvicorn, Jinja2 and htmx (Panel), `cryptography` (Fernet), Pydantic, pytest, ruff, mypy, Docker and GitHub Actions.
+Python 3.12, asyncio, `asyncua` (OPC UA), `pymodbus` (Modbus TCP), SQLAlchemy 2 with `pg8000` (PostgreSQL), Alembic, FastAPI with uvicorn, Jinja2 and htmx (Panel), `cryptography` (Fernet), Pydantic, pytest, ruff, mypy, Docker and GitHub Actions.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    PLC[OPC UA server] --> W[ConnectionWorker]
+    PLC[OPC UA server or Modbus device] --> W[ConnectionWorker]
     W --> S[PollScheduler]
     S --> Q[Reading Queue]
     Q --> D[Database Writer]
@@ -66,7 +67,7 @@ The Panel, the data API (`/api/v1`) and the operational endpoints (`/health/*`, 
 
 ## Quick start
 
-You need Docker with Compose. The stack starts PostgreSQL 17, an OPC UA simulator of a production line, and the collector.
+You need Docker with Compose. The stack starts PostgreSQL 17, an OPC UA simulator of a production line, a Modbus TCP simulator of a press and a meter, and the collector.
 
 ```bash
 git clone https://github.com/Mateusz1256/plc-data-collector.git
@@ -77,7 +78,7 @@ docker compose up
 
 Replace the clone URL with the address of your copy of this repository. The `.env` file holds demo credentials; change the passwords for anything beyond a local demo.
 
-When the log shows the collector polling, open the Panel at `http://localhost:8080/` and sign in with the password set in `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` in `.env`. The Live page shows the four Tags of the demo Connection `line1_opcua`, updated every second. The port comes from `COLLECTOR_API_PORT` in `.env`, default `8080`, and is published on 127.0.0.1 only; the comment in `docker-compose.yml` explains how to expose it to other hosts deliberately.
+When the log shows the collector polling, open the Panel at `http://localhost:8080/` and sign in with the password set in `PLC_DATA_COLLECTOR_ADMIN_PASSWORD` in `.env`. The Live page shows the four Tags of the demo Connection `line1_opcua`, updated every second, and the Modbus Connection `press2_modbus` with its own Tags. The port comes from `COLLECTOR_API_PORT` in `.env`, default `8080`, and is published on 127.0.0.1 only; the comment in `docker-compose.yml` explains how to expose it to other hosts deliberately.
 
 Other endpoints to check:
 
@@ -104,7 +105,7 @@ Configuration is three lists: Connections, Tag Groups and Tags. A Tag Group belo
 Sign in at `/panel/login` with the admin password. Then:
 
 1. On **Connections**, choose "Add connection", pick a protocol and enter the endpoint. "Test connection" checks that the controller answers.
-2. On the Connection's page, add a Tag Group with its read interval, then add Tags to it with an address and a value type (`numeric`, `integer`, `boolean`, `text` or `binary`).
+2. On the Connection's page, add a Tag Group with its read interval, then add Tags to it. OPC UA Tags have an address and a value type (`numeric`, `integer`, `boolean`, `text` or `binary`); Modbus Tags have a register address and a data type instead, and "Paste tags" adds many at once from CSV.
 3. Saved changes do not affect collection yet: a banner shows what is pending. Choose "Apply changes" to restart collection with the saved configuration.
 
 Deleting a Connection, Tag Group or Tag archives it: it is no longer polled or shown, and its stored readings stay ([ADR 0002](docs/adr/0002-archive-instead-of-delete.md)).
@@ -182,6 +183,26 @@ Secrets never appear in logs, API responses, the Panel or exports. Do not commit
 
 Run the service (collector, Panel and API in one process) outside Docker with `plc-data-collector --run-service`, adding `--config <file>` to seed an empty database. Service-manager examples are in `docs/deployment/service-packaging.md`.
 
+### Modbus TCP quick look
+
+The demo stack's `modbus-sim` serves a press (unit 1) and an energy meter (unit 2) on port 5020; run it alone with `python -m plc_data_collector.simulators.modbus`. Addresses are zero-based. The demo Connection `press2_modbus` uses Modicon numbering, so the pressure below is typed as `40101`.
+
+| Unit | Address | Type | Value |
+| --- | --- | --- | --- |
+| 1 | `hr:100` | `float32` | Hydraulic pressure, bar |
+| 1 | `hr:102` | `float32` | Oil temperature, degC |
+| 1 | `hr:104` | `uint32` | Cycle counter |
+| 1 | `hr:106` | `int16` | Ram position times 10 (scale 0.1) |
+| 1 | `hr:107` | bits 0, 1, 3 | Running, fault, door closed |
+| 1 | `hr:110` | `float32`, low word first | Motor current, A |
+| 1 | `hr:120` | `string`, length 8 | Recipe name |
+| 1 | `co:0`, `co:1` | `bool` | Pump on, alarm horn |
+| 1 | `di:0`, `di:7` | `bool` | Door closed, guard closed |
+| 2 | `ir:0`, `ir:2` | `float32` | Voltage L1 (V), current L1 (A) |
+| 2 | `ir:100` | `uint64`, low word first | Energy, Wh |
+
+To read a real device, add a Modbus TCP Connection with its host, port and unit ID, set byte order, word order and address numbering to match its manual, then add Tags. [docs/protocols/modbus.md](docs/protocols/modbus.md) covers numbering, byte and word order, block reads and error codes.
+
 ## Reading the data
 
 There are two ways to read collected data.
@@ -240,15 +261,16 @@ The time range compares `received_at` as text against bounds in its stored forma
 
 **Worker isolation and reconnect.** Each Connection has its own worker and driver instance (`runtime/connection_worker.py`), so a dead controller degrades only its own worker. When a poll fails for every Tag, the worker calls the driver's `health_check()` and reconnects if it fails; Tags then report `connection_unavailable` until the link is back. Reconnects are counted in the `reconnect_attempts` metric. The runtime starts even when a controller is unreachable, and the supervisor waits for PostgreSQL up to a bounded timeout before exiting non-zero (`app/supervisor.py`).
 
-**Driver contract.** Protocols plug in through one async `CommunicationDriver` interface with `connect`, `disconnect`, `read` and `health_check` (`protocols/driver.py`), created per Connection by a registry (`protocols/registry.py`). Adding a protocol means implementing that interface; the OPC UA (`protocols/opcua.py`) and mock (`protocols/mock.py`) drivers are the two implementations today.
+**Driver contract.** Protocols plug in through one async `CommunicationDriver` interface with `connect`, `disconnect`, `read` and `health_check` (`protocols/driver.py`), created per Connection by a registry (`protocols/registry.py`). Adding a protocol means implementing that interface; the OPC UA (`protocols/opcua.py`), Modbus (`protocols/modbus.py`) and mock (`protocols/mock.py`) drivers are the implementations today. Protocol-specific Tag settings are structured options validated by per-protocol rules ([ADR 0003](docs/adr/0003-protocol-tag-settings-are-structured-options.md)).
 
 **PostgreSQL and the `tag_readings` row format.** PostgreSQL is the storage target because readings are relational, queried with SQL and joined to configuration. Each Tag reading is one row (`persistence/schema.py`) with `source_timestamp`, `received_at`, `quality`, `value_type`, one typed column per value kind (`numeric_value`, `integer_value`, `boolean_value`, `text_value`, `binary_value`) and `error_code` / `error_message`. Failed reads are stored too, as rows with bad quality, so gaps are visible. Migrations ship inside the package (`persistence/migrations`) and run at startup (`persistence/migrate.py`).
 
 ## Known limitations and roadmap
 
-Known limitations of 0.3.0:
+Known limitations of 0.4.0:
 
-- OPC UA is the only real protocol; the mock driver is for development.
+- OPC UA and Modbus TCP are the real protocols; the mock driver is for development. Modbus is read-only, with no RTU or serial and no TLS.
+- Saving a large CSV paste writes one audit entry per Tag.
 - The Panel has one admin password and no user accounts. Serve it over HTTPS (for example behind a reverse proxy) beyond a trusted network.
 - `/health/*`, `/api/runtime/*` and `/api/about` have no authentication; they carry operational state, not collected data.
 - Every API key can read every Tag.
@@ -258,7 +280,7 @@ Known limitations of 0.3.0:
 
 Roadmap:
 
-- 0.4.0: Modbus TCP.
+- 0.4.0: Modbus TCP (done).
 - 0.5.0: Siemens S7.
 - 0.6.0: M-Bus.
 - 1.0.0: stabilization.

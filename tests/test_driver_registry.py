@@ -149,3 +149,9 @@ async def test_driver_contract_does_not_swallow_cancellation() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await driver.connect()
+
+
+def test_registry_has_modbus() -> None:
+    from plc_data_collector.protocols import default_driver_registry
+
+    assert "modbus" in default_driver_registry().registered_protocols()

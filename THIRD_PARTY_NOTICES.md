@@ -287,6 +287,17 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by cffi. License verified from package metadata
   field `License-Expression: BSD-3-Clause`.
 
+### pymodbus
+
+- Version: 3.16.2
+- Purpose: asynchronous Modbus TCP client used by the `modbus` protocol driver
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/pymodbus/3.16.2/
+- Copyright notice: Copyright 2008-2025 Pymodbus.
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License: BSD-3-Clause` and the package LICENSE file.
+
 ### pyOpenSSL
 
 - Version: 26.4.0

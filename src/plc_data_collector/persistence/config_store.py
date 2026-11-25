@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import Connection, Engine, Row, Table, select, update
+from sqlalchemy import Connection, Engine, Row, Select, Table, literal, select, update
 
 from plc_data_collector.app.config import (
     CollectorConfig,
@@ -33,6 +33,7 @@ from plc_data_collector.persistence.schema import (
     tags,
 )
 from plc_data_collector.persistence.sql import insert_for
+from plc_data_collector.protocols.rules import prefixed, rules_for
 
 
 class ConfigStore:
@@ -199,6 +200,19 @@ class ConfigStore:
             _write_tag(connection, tag)
             self._finish_write(connection, revision)
 
+    def create_tags(self, new_tags: Sequence[TagConfig]) -> None:
+        """Create several Tags in one transaction and one revision.
+
+        Refuses any active duplicate ID (``duplicate_id``) and validates each
+        Tag like ``create_tag``; on any failure nothing is stored.
+        """
+        with self._engine.begin() as connection:
+            revision = _lock_revision(connection)
+            for tag in new_tags:
+                _refuse_active_id(connection, tags, "tag", tag.id)
+                _write_tag(connection, tag)
+            self._finish_write(connection, revision)
+
     def upsert_connection(self, config: ConnectionConfig) -> None:
         """Create or update a Connection, restoring it when archived."""
         with self._engine.begin() as connection:
@@ -264,9 +278,10 @@ class ConfigStore:
                     details={"expected": expected_revision, "actual": revision},
                 )
             for item in config.connections:
-                self._write_connection(connection, item)
+                # Every Tag is validated by _write_tag below, against the new set.
+                self._write_connection(connection, item, check_tags=False)
             for group in config.tag_groups:
-                _write_tag_group(connection, group)
+                _write_tag_group(connection, group, check_tags=False)
             for tag in config.tags:
                 _write_tag(connection, tag)
 
@@ -398,8 +413,29 @@ class ConfigStore:
         )
 
     def _write_connection(
-        self, connection: Connection, config: ConnectionConfig
+        self,
+        connection: Connection,
+        config: ConnectionConfig,
+        *,
+        check_tags: bool = True,
     ) -> None:
+        rules = rules_for(config.protocol)
+        prefix = f"Connection '{config.id}'"
+        try:
+            rules.validate_connection(config)
+        except ConfigurationError as error:
+            raise prefixed(error, prefix, {"connection_id": config.id}) from error
+        if check_tags:
+            _validate_existing_tags(
+                connection,
+                config,
+                select(tag_groups.c.id).where(
+                    tag_groups.c.connection_id == config.id,
+                    tag_groups.c.archived_at.is_(None),
+                ),
+                prefix,
+                {"connection_id": config.id},
+            )
         plain, secret = split_secrets(config.protocol_options)
         statement = insert_for(connection, connections).values(
             id=config.id,
@@ -484,7 +520,56 @@ def _unknown_reference(kind: str, parent_id: str) -> ConfigurationError:
     )
 
 
-def _write_tag_group(connection: Connection, group: TagGroupConfig) -> None:
+def _load_connection(
+    connection: Connection, connection_id: str
+) -> ConnectionConfig | None:
+    row = connection.execute(
+        select(
+            connections.c.id,
+            connections.c.protocol,
+            connections.c.endpoint,
+            connections.c.protocol_options,
+        ).where(connections.c.id == connection_id)
+    ).first()
+    if row is None:
+        return None
+    return ConnectionConfig(
+        id=row.id,
+        protocol=row.protocol,
+        endpoint=row.endpoint,
+        protocol_options=row.protocol_options or {},
+    )
+
+
+def _validate_existing_tags(
+    connection: Connection,
+    owner: ConnectionConfig,
+    group_ids: Select[tuple[str]],
+    prefix: str,
+    details: dict[str, object],
+) -> None:
+    """Check the active Tags of the given Tag Groups against ``owner``."""
+    rules = rules_for(owner.protocol)
+    rows = connection.execute(
+        select(tags)
+        .where(tags.c.tag_group_id.in_(group_ids), tags.c.archived_at.is_(None))
+        .order_by(tags.c.id)
+    ).all()
+    for row in rows:
+        tag = _tag_from_row(row)
+        try:
+            rules.validate_tag(tag, owner)
+        except ConfigurationError as error:
+            raise prefixed(
+                error,
+                f"{prefix}: Tag '{tag.id}'",
+                {**details, "tag_id": tag.id},
+            ) from error
+
+
+def _write_tag_group(
+    connection: Connection, group: TagGroupConfig, *, check_tags: bool = True
+) -> None:
     if (
         connection.execute(
             select(connections.c.id).where(
@@ -495,6 +580,15 @@ def _write_tag_group(connection: Connection, group: TagGroupConfig) -> None:
         is None
     ):
         raise _unknown_reference("connection", group.connection_id)
+    owner = _load_connection(connection, group.connection_id)
+    if check_tags and owner is not None:
+        _validate_existing_tags(
+            connection,
+            owner,
+            select(literal(group.id)),
+            f"Tag group '{group.id}'",
+            {"tag_group_id": group.id},
+        )
     statement = insert_for(connection, tag_groups).values(
         id=group.id,
         connection_id=group.connection_id,
@@ -520,16 +614,21 @@ def _write_tag_group(connection: Connection, group: TagGroupConfig) -> None:
 
 
 def _write_tag(connection: Connection, tag: TagConfig) -> None:
-    if (
-        connection.execute(
-            select(tag_groups.c.id).where(
-                tag_groups.c.id == tag.tag_group_id,
-                tag_groups.c.archived_at.is_(None),
-            )
-        ).first()
-        is None
-    ):
+    group_row = connection.execute(
+        select(tag_groups.c.connection_id).where(
+            tag_groups.c.id == tag.tag_group_id,
+            tag_groups.c.archived_at.is_(None),
+        )
+    ).first()
+    if group_row is None:
         raise _unknown_reference("tag_group", tag.tag_group_id)
+    owner = _load_connection(connection, group_row.connection_id)
+    protocol_options = dict(tag.protocol_options)
+    if owner is not None:
+        try:
+            protocol_options = rules_for(owner.protocol).validate_tag(tag, owner)
+        except ConfigurationError as error:
+            raise prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error
     statement = insert_for(connection, tags).values(
         id=tag.id,
         tag_group_id=tag.tag_group_id,
@@ -538,6 +637,7 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
         value_type=tag.value_type.value,
         enabled=tag.enabled,
         metadata_json=dict(tag.metadata),
+        protocol_options=protocol_options,
         archived_at=None,
     )
     connection.execute(
@@ -550,6 +650,7 @@ def _write_tag(connection: Connection, tag: TagConfig) -> None:
                 "value_type": statement.excluded.value_type,
                 "enabled": statement.excluded.enabled,
                 "metadata_json": statement.excluded.metadata_json,
+                "protocol_options": statement.excluded.protocol_options,
                 "archived_at": None,
             },
         )
@@ -632,4 +733,5 @@ def _tag_from_row(row: Row[tuple[object, ...]]) -> TagConfig:
         value_type=ValueType(row.value_type),
         enabled=row.enabled,
         metadata=metadata,
+        protocol_options=row.protocol_options or {},
     )

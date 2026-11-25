@@ -130,3 +130,62 @@ def test_load_collector_config_reports_validation_location(tmp_path: Path) -> No
 
     with pytest.raises(ConfigurationError, match=r"connections\.0\.timeout_ms"):
         load_collector_config(config_path, environ={})
+
+
+def test_import_without_tag_protocol_options_defaults_to_empty(
+    tmp_path: Path,
+) -> None:
+    config_path = write_config(tmp_path / "collector.config.json", valid_config())
+
+    config = load_collector_config(config_path, environ={})
+
+    assert dict(config.tags[0].protocol_options) == {}
+
+
+def test_tag_protocol_options_are_loaded(tmp_path: Path) -> None:
+    payload = valid_config()
+    payload["connections"] = [
+        {"id": "opcua_demo", "protocol": "modbus", "endpoint": "tcp://plc:502"}
+    ]
+    tags = payload["tags"]
+    assert isinstance(tags, list)
+    tags[0]["address"] = "hr:1"
+    tags[0]["value_type"] = "integer"
+    tags[0]["protocol_options"] = {"data_type": "int16"}
+    config_path = write_config(tmp_path / "collector.config.json", payload)
+
+    config = load_collector_config(config_path, environ={})
+
+    assert dict(config.tags[0].protocol_options) == {"data_type": "int16"}
+
+
+def test_import_refuses_bad_modbus_tag() -> None:
+    from plc_data_collector.app.config import parse_collector_config
+
+    payload = {
+        "connections": [
+            {"id": "m1", "protocol": "modbus", "endpoint": "tcp://plc:502"}
+        ],
+        "tag_groups": [{"id": "g1", "connection_id": "m1", "interval_ms": 1000}],
+        "tags": [
+            {
+                "id": "p2_temp",
+                "tag_group_id": "g1",
+                "name": "p2_temp",
+                "address": "hr:1",
+                "value_type": "boolean",
+                "protocol_options": {"data_type": "bool"},
+            }
+        ],
+    }
+
+    with pytest.raises(ConfigurationError, match="p2_temp"):
+        parse_collector_config(payload)
+
+
+def test_opcua_config_still_valid() -> None:
+    from plc_data_collector.app.config import parse_collector_config
+
+    config = parse_collector_config(valid_config())
+
+    assert config.connections[0].protocol == "opcua"

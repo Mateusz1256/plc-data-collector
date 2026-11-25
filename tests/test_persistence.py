@@ -15,6 +15,7 @@ from plc_data_collector.domain import (
     ConnectionConfig,
     PollExecution,
     PollStatus,
+    Quality,
     RuntimeComponentStatus,
     TagConfig,
     TagGroupConfig,
@@ -36,6 +37,7 @@ from plc_data_collector.persistence.schema import (
     runtime_components,
     tag_readings,
 )
+from plc_data_collector.runtime import WorkerPollResult
 
 
 def utc_now() -> datetime:
@@ -172,6 +174,50 @@ def test_repositories_persist_failed_readings_with_configured_value_type() -> No
     assert row["value_type"] == "numeric"
     assert row["numeric_value"] is None
     assert row["error_code"] == "mock_timeout"
+
+
+@pytest.mark.parametrize("big", [2**64 - 1, 2**63, -(2**63) - 1])
+def test_out_of_range_integer_is_stored_bad_without_failing_the_batch(
+    big: int,
+) -> None:
+    engine = make_engine()
+    seed_configuration(engine)
+    repository = ReadingRepository(engine)
+    now = utc_now()
+    poll = WorkerPollResult(
+        execution=make_poll_execution(),
+        results=(
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.integer(big),
+                source_timestamp=now,
+                received_at=now,
+            ),
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.numeric(20.5),
+                source_timestamp=now,
+                received_at=now,
+            ),
+        ),
+    )
+
+    inserted = repository.save_poll_results([poll])
+
+    assert inserted == 2
+    with engine.connect() as connection:
+        rows = (
+            connection.execute(select(tag_readings).order_by(tag_readings.c.event_id))
+            .mappings()
+            .all()
+        )
+    bad, good = rows
+    assert bad["quality"] == Quality.BAD.value
+    assert bad["value_type"] == "integer"
+    assert bad["integer_value"] is None
+    assert bad["error_code"] == "value_out_of_range"
+    assert str(big) in bad["error_message"]
+    assert good["numeric_value"] == 20.5
 
 
 def test_duplicate_event_id_does_not_create_second_reading() -> None:

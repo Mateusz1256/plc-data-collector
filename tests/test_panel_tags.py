@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from html import unescape
+from urllib.parse import parse_qs
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +24,10 @@ from plc_data_collector.domain import (
     ValueType,
 )
 from plc_data_collector.panel.tag_forms import generate_tag_id
+from plc_data_collector.protocols.modbus_tags import (
+    ModbusConnectionOptions,
+    resolve_tag,
+)
 from plc_data_collector.runtime.connection_worker import WorkerPollResult
 
 SAVED_FLASH = "Saved changes take effect after you apply them from the banner."
@@ -83,7 +90,7 @@ def _group_form(**overrides: str) -> dict[str, str]:
 def _tag_form(**overrides: str) -> dict[str, str]:
     data = {
         "name": "Temperature",
-        "tag_group_id": "fast",
+        "tag_group": "fast",
         "address": "ns=2;s=Temp",
         "value_type": "numeric",
         "unit": "C",
@@ -329,10 +336,10 @@ def test_tag_for_other_connection_group_rejected(
 
     created = signed_in_client.post(
         "/panel/connections/line1_opcua/tags",
-        data=_tag_form(tag_group_id="other_group"),
+        data=_tag_form(tag_group="other_group"),
     )
     moved = signed_in_client.post(
-        "/panel/tags/t1", data=_tag_form(tag_group_id="other_group")
+        "/panel/tags/t1", data=_tag_form(tag_group="other_group")
     )
 
     assert created.status_code == 400
@@ -370,6 +377,7 @@ def test_tag_edit_keeps_id_and_other_metadata(
     assert tag.name == "New name"
     assert tag.value_type is ValueType.INTEGER
     assert tag.metadata == {"note": "kept"}
+    assert dict(tag.protocol_options) == {}
     assert stores.config.get_tag("line1_opcua_new_name") is None
     assert stores.config.get_tag("x") is None
 
@@ -546,3 +554,547 @@ def test_group_delete_says_how_many_tags_go_with_it(
 
     assert page.status_code == 200
     assert "Deleting this tag group also deletes its 3 tags." in page.text
+
+
+# Modbus Tags
+
+
+def _modbus_connection(numbering: str = "modicon") -> ConnectionConfig:
+    return ConnectionConfig(
+        id="press2",
+        name="Press 2",
+        protocol="modbus",
+        endpoint="tcp://press2-plc:502",
+        protocol_options={"address_numbering": numbering},
+    )
+
+
+def _seed_modbus(host: FakeHost, numbering: str = "modicon") -> Stores:
+    stores = _stores(host)
+    stores.config.upsert_connection(_modbus_connection(numbering))
+    stores.config.upsert_tag_group(_group("press_fast", "press2"))
+    return stores
+
+
+def _modbus_tag_form(**overrides: str) -> dict[str, str]:
+    data = {
+        "name": "Oil temperature",
+        "tag_group": "press_fast",
+        "read_from": "hr",
+        "address": "40121",
+        "data_type": "float32",
+        "length": "",
+        "bit": "",
+        "byte_order": "",
+        "word_order": "",
+        "unit_id": "",
+        "scale": "",
+        "offset": "",
+        "unit": "C",
+        "enabled": "on",
+    }
+    data.update(overrides)
+    return data
+
+
+def _input_value(html: str, name: str) -> str | None:
+    match = re.search(rf'<input[^>]*name="{name}"[^>]*>', html)
+    if match is None:
+        return None
+    value = re.search(r'value="([^"]*)"', match.group(0))
+    return value.group(1) if value else ""
+
+
+def _select_body(html: str, name: str) -> str | None:
+    pattern = rf'<select[^>]*name="{name}"[^>]*>(.*?)</select>'
+    match = re.search(pattern, html, re.DOTALL)
+    return match.group(1) if match else None
+
+
+def _selected(html: str, name: str) -> str | None:
+    body = _select_body(html, name)
+    option = re.search(r'<option value="([^"]*)" selected>', body or "")
+    return option.group(1) if option else None
+
+
+def _options(html: str, name: str) -> list[str]:
+    return re.findall(r'<option value="([^"]*)"', _select_body(html, name) or "")
+
+
+def test_modbus_tag_form_creates_tag(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form()
+    )
+
+    assert response.status_code == 303
+    tag = stores.config.get_tag("press2_oil_temperature")
+    assert tag is not None
+    assert tag.tag_group_id == "press_fast"
+    assert tag.address == "hr:120"
+    assert dict(tag.protocol_options) == {"data_type": "float32"}
+    assert tag.value_type is ValueType.NUMERIC
+    assert tag.metadata == {"unit": "C"}
+
+
+def test_modbus_fast_entry_proposes_next_address(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form()
+    )
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    path, _, query = location.partition("?")
+    assert path == "/panel/connections/press2/tags/new"
+    params = parse_qs(query)
+    assert params["address"] == ["40123"]
+    assert params["enabled"] == ["on"]
+    assert "name" not in params
+    page = signed_in_client.get(location)
+    assert page.status_code == 200
+    assert f'<p class="flash" role="status">{SAVED_FLASH}</p>' in page.text
+    form_start = page.text.index('action="/panel/connections/press2/tags"')
+    html = page.text[form_start:]
+    assert 'aria-label="New tag"' in html
+    assert _input_value(html, "address") == "40123"
+    assert _input_value(html, "name") == ""
+    assert _input_value(html, "unit") == "C"
+    assert _selected(html, "read_from") == "hr"
+    assert _selected(html, "data_type") == "float32"
+    assert _selected(html, "tag_group") == "press_fast"
+    assert re.search(r'<input type="checkbox" name="enabled" checked>', html)
+
+    reloaded = signed_in_client.get(location)
+
+    assert reloaded.status_code == 200
+    assert 'class="flash"' not in reloaded.text
+    assert stores.config.all_tag_ids() == {"press2_oil_temperature"}
+
+
+def test_fast_entry_keeps_an_unticked_box(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    data = _modbus_tag_form()
+    del data["enabled"]
+
+    response = signed_in_client.post("/panel/connections/press2/tags", data=data)
+
+    assert response.status_code == 303
+    assert "enabled" not in parse_qs(response.headers["location"].partition("?")[2])
+    tag = stores.config.get_tag("press2_oil_temperature")
+    assert tag is not None and tag.enabled is False
+
+
+def test_unticked_box_disables_opcua_tag(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    data = _tag_form()
+    del data["enabled"]
+
+    signed_in_client.post("/panel/connections/line1_opcua/tags", data=data)
+
+    tag = stores.config.get_tag("line1_opcua_temperature")
+    assert tag is not None and tag.enabled is False
+
+
+def test_opcua_create_still_closes_the_form(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/line1_opcua/tags", data=_tag_form()
+    )
+
+    assert response.status_code == 303
+
+
+def test_numbering_change_keeps_stored_address(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host, numbering="zero")
+    signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form(address="120")
+    )
+
+    stores.config.upsert_connection(_modbus_connection("modicon"))
+
+    tag = stores.config.get_tag("press2_oil_temperature")
+    assert tag is not None
+    assert tag.address == "hr:120"
+    page = signed_in_client.get("/panel/connections/press2").text
+    row = re.search(
+        r'<tr[^>]*data-tag="press2_oil_temperature"[^>]*>.*?</tr>', page, re.DOTALL
+    )
+    assert row is not None
+    assert "40121" in row.group(0)
+    connection = stores.config.get_connection("press2")
+    assert connection is not None
+    plan = resolve_tag(
+        tag.address,
+        tag.protocol_options,
+        ModbusConnectionOptions.from_options(connection.protocol_options),
+    )
+    assert plan.address == 120
+
+
+def test_modbus_tag_edit_round_trip(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host, numbering="zero")
+    stores.config.upsert_tag(
+        TagConfig(
+            id="t1",
+            tag_group_id="press_fast",
+            name="Door closed",
+            address="hr:100.3",
+            value_type=ValueType.BOOLEAN,
+            metadata={"note": "kept"},
+            protocol_options={"data_type": "bit", "unit_id": 2},
+        )
+    )
+
+    html = signed_in_client.get(
+        "/panel/tags/t1/edit", headers={"HX-Request": "true"}
+    ).text
+
+    assert _selected(html, "read_from") == "hr"
+    assert _input_value(html, "address") == "100"
+    assert _input_value(html, "bit") == "3"
+    assert _input_value(html, "unit_id") == "2"
+    assert _selected(html, "data_type") == "bit"
+
+    data = {
+        "name": "Door closed",
+        "tag_group": "press_fast",
+        "read_from": "hr",
+        "address": "100",
+        "data_type": "bit",
+        "length": "",
+        "bit": "3",
+        "byte_order": "",
+        "word_order": "",
+        "unit_id": "2",
+        "scale": "",
+        "offset": "",
+        "unit": "",
+        "enabled": "on",
+    }
+    response = signed_in_client.post("/panel/tags/t1", data=data)
+
+    assert response.status_code == 303
+    tag = stores.config.get_tag("t1")
+    assert tag is not None
+    assert tag.address == "hr:100.3"
+    assert dict(tag.protocol_options) == {"data_type": "bit", "unit_id": 2}
+    assert tag.value_type is ValueType.BOOLEAN
+    assert tag.metadata == {"note": "kept"}
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field", "fragment"),
+    [
+        ({"address": "30121"}, "address", "Input registers (FC04)"),
+        ({"data_type": "string"}, "length", "length"),
+        ({"scale": "0"}, "scale", "0"),
+        ({"data_type": "bool"}, "data_type", "bool"),
+        ({"read_from": "xx"}, "read_from", "Choose"),
+        ({"bit": "16", "data_type": "bit"}, "bit", "15"),
+        ({"data_type": "bit"}, "bit", "bit"),
+        ({"unit_id": "300"}, "unit_id", "255"),
+        ({"offset": "abc"}, "offset", "number"),
+        ({"data_type": "int16", "length": "4"}, "length", "string"),
+        (
+            {"data_type": "bit", "bit": "2", "scale": "2"},
+            "scale",
+            "isn't used with bit",
+        ),
+        (
+            {"data_type": "string", "length": "4", "offset": "1"},
+            "offset",
+            "isn't used with string",
+        ),
+    ],
+)
+def test_modbus_tag_form_errors(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    overrides: dict[str, str],
+    field: str,
+    fragment: str,
+) -> None:
+    stores = _seed_modbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form(**overrides)
+    )
+
+    assert response.status_code == 400
+    error = re.search(
+        rf'<small class="field-error" id="field-{field}-error">([^<]*)</small>',
+        response.text,
+    )
+    assert error is not None, response.text
+    assert fragment.lower() in unescape(error.group(1)).lower()
+    assert stores.config.all_tag_ids() == set()
+
+
+def test_modbus_tag_scale_decimal_comma(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+
+    signed_in_client.post(
+        "/panel/connections/press2/tags",
+        data=_modbus_tag_form(data_type="int16", scale="0,1", offset="-5"),
+    )
+
+    tag = stores.config.get_tag("press2_oil_temperature")
+    assert tag is not None
+    assert dict(tag.protocol_options) == {
+        "data_type": "int16",
+        "scale": 0.1,
+        "offset": -5.0,
+    }
+    assert tag.value_type is ValueType.NUMERIC
+
+
+def test_modbus_tags_table_columns(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    signed_in_client.post("/panel/connections/press2/tags", data=_modbus_tag_form())
+    stores.config.upsert_tag(
+        TagConfig(
+            id="t_bit",
+            tag_group_id="press_fast",
+            name="Ready",
+            address="hr:100.3",
+            value_type=ValueType.BOOLEAN,
+            protocol_options={"data_type": "bit"},
+        )
+    )
+
+    page = signed_in_client.get("/panel/connections/press2").text
+
+    tag_header = page[page.index('aria-label="Tags"') :]
+    header = re.search(r"<thead>.*?</thead>", tag_header, re.DOTALL)
+    assert header is not None
+    columns = re.findall(r'<th scope="col">([^<]*)</th>', header.group(0))
+    assert columns[:6] == ["Tag", "Read from", "Address", "Type", "Group", "Last read"]
+    row = re.search(
+        r'<tr[^>]*data-tag="press2_oil_temperature"[^>]*>.*?</tr>',
+        tag_header,
+        re.DOTALL,
+    )
+    assert row is not None
+    cells = re.findall(r"<td[^>]*>(.*?)</td>", row.group(0), re.DOTALL)
+    assert cells[1] == "Holding registers (FC03)"
+    assert cells[2] == "40121"
+    assert cells[3] == "float32"
+    bit_row = re.search(
+        r'<tr[^>]*data-tag="t_bit"[^>]*>.*?</tr>', tag_header, re.DOTALL
+    )
+    assert bit_row is not None
+    bit_cells = re.findall(r"<td[^>]*>(.*?)</td>", bit_row.group(0), re.DOTALL)
+    assert bit_cells[2] == "40101.3"
+    assert bit_cells[3] == "bit"
+
+
+def test_opcua_tags_table_keeps_its_columns(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    stores.config.upsert_tag(_tag("t1"))
+
+    page = signed_in_client.get("/panel/connections/line1_opcua").text
+
+    tags = page[page.index('aria-label="Tags"') :]
+    header = re.search(r"<thead>.*?</thead>", tags, re.DOTALL)
+    assert header is not None
+    columns = re.findall(r'<th scope="col">([^<]*)</th>', header.group(0))
+    assert columns[:5] == ["Tag", "Address", "Type", "Group", "Last read"]
+
+
+def test_modbus_form_rerender_filters_data_types(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    html = signed_in_client.get(
+        "/panel/connections/press2/tags/new",
+        params=_modbus_tag_form(read_from="co", address="00005", data_type="float32"),
+        headers={"HX-Request": "true"},
+    ).text
+
+    assert "<html" not in html
+    assert _selected(html, "read_from") == "co"
+    assert _options(html, "data_type") == ["bool"]
+    assert _input_value(html, "address") == "00005"
+    assert _input_value(html, "name") == "Oil temperature"
+    assert 'hx-get="/panel/connections/press2/tags/new"' in html
+
+
+def test_modbus_form_shows_span_hint_and_numbering_help(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    html = signed_in_client.get(
+        "/panel/connections/press2/tags/new",
+        params=_modbus_tag_form(),
+        headers={"HX-Request": "true"},
+    ).text
+
+    assert "float32 uses 2 registers: 40121 and 40122." in html
+    assert "bool" not in _options(html, "data_type")
+
+
+def test_modbus_redraw_drops_unused_bit_and_length(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    html = signed_in_client.get(
+        "/panel/connections/press2/tags/new",
+        params=_modbus_tag_form(data_type="float32", bit="3", length="4"),
+        headers={"HX-Request": "true"},
+    ).text
+
+    assert _input_value(html, "bit") == ""
+    assert _input_value(html, "length") == ""
+    assert 'hx-sync="closest form:replace"' in html
+
+
+def test_modbus_error_keeps_the_wrong_bit_visible(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags", data=_modbus_tag_form(bit="3")
+    )
+
+    assert response.status_code == 400
+    form_start = response.text.index('action="/panel/connections/press2/tags"')
+    assert _input_value(response.text[form_start:], "bit") == "3"
+
+
+# Paste tags
+
+PASTE_TEXT = (
+    "name;read_from;address;data_type;scale\r\n"
+    "Ram position;hr;40107;int16;0,1\r\n"
+    "Oil temperature;hr;40121;float32;\r\n"
+)
+
+
+def _paste(text: str, action: str) -> dict[str, str]:
+    return {"text": text, "tag_group_id": "press_fast", "action": action}
+
+
+def test_paste_form_lists_columns(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    for headers in ({}, {"HX-Request": "true"}):
+        page = signed_in_client.get(
+            "/panel/connections/press2/tags/paste", headers=headers
+        )
+        assert page.status_code == 200
+        assert 'name="text"' in page.text
+        assert "read_from" in page.text
+        assert 'name="tag_group_id"' in page.text
+
+
+def test_paste_route_preview_and_save(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    url = "/panel/connections/press2/tags/paste"
+
+    preview = signed_in_client.post(url, data=_paste(PASTE_TEXT, "preview"))
+
+    assert preview.status_code == 200
+    assert "press2_ram_position" in preview.text
+    assert "press2_oil_temperature" in preview.text
+    assert "hr:106" not in preview.text
+    assert "40107" in preview.text
+    assert stores.config.all_tag_ids() == set()
+
+    saved = signed_in_client.post(url, data=_paste(PASTE_TEXT, "save"))
+
+    assert saved.status_code == 303
+    assert saved.headers["location"] == "/panel/connections/press2"
+    assert stores.config.all_tag_ids() == {
+        "press2_ram_position",
+        "press2_oil_temperature",
+    }
+    page = signed_in_client.get("/panel/connections/press2")
+    assert "Added 2 tags." in page.text
+
+
+def test_paste_route_bad_row_saves_nothing(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_modbus(fake_host)
+    text = "name,read_from,address,data_type\nGood,hr,40001,int16\nBad,hr,40002,bool\n"
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags/paste", data=_paste(text, "save")
+    )
+
+    assert response.status_code == 400
+    assert "row-failed" in response.text
+    assert "data_type: " in response.text
+    assert stores.config.all_tag_ids() == set()
+
+
+def test_paste_route_whole_paste_error_and_unknown_connection(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_modbus(fake_host)
+
+    bad = signed_in_client.post(
+        "/panel/connections/press2/tags/paste",
+        data=_paste("a,colour\n1,2\n", "preview"),
+    )
+    missing = signed_in_client.get("/panel/connections/nope/tags/paste")
+
+    assert bad.status_code == 400
+    assert "Unknown column" in bad.text
+    assert missing.status_code == 404
+
+
+def test_paste_route_ids_taken_meanwhile(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stores = _seed_modbus(fake_host)
+    original = stores.config.create_tags
+
+    def race(new_tags: Sequence[TagConfig]) -> None:
+        stores.config.create_tag(new_tags[0])
+        original(new_tags)
+
+    monkeypatch.setattr(stores.config, "create_tags", race)
+
+    response = signed_in_client.post(
+        "/panel/connections/press2/tags/paste", data=_paste(PASTE_TEXT, "save")
+    )
+
+    assert response.status_code == 409
+    assert "Some IDs were taken meanwhile. Preview again." in response.text
+    assert stores.config.all_tag_ids() == {"press2_ram_position"}
+    assert "press2_ram_position_2" in response.text

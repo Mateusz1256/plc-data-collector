@@ -76,6 +76,18 @@ done
 echo "good tag_readings: $first -> $second"
 [ "$grew" -eq 1 ] || { echo "good readings did not grow" >&2; exit 1; }
 
+echo "== Checking that every Modbus tag has good-quality readings"
+# Tags of press2_modbus without a single good reading (must be none), and good rows.
+modbus_missing="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -tAc "select count(*) from tags t join tag_groups g on g.id = t.tag_group_id
+        where g.connection_id = 'press2_modbus' and not exists (
+          select 1 from tag_readings r where r.tag_id = t.id and r.quality = 'good')")"
+modbus_good="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -tAc "select count(*) from tag_readings where connection_id = 'press2_modbus' and quality = 'good'")"
+echo "press2_modbus good readings: $modbus_good, tags without one: $modbus_missing"
+{ [ "$modbus_good" -gt 0 ] && [ "$modbus_missing" -eq 0 ]; } \
+  || { echo "Modbus tags are missing good readings" >&2; exit 1; }
+
 echo "== Checking the Panel sign-in page"
 login_code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$API/panel/login" || true)"
 [ "$login_code" = "200" ] || { echo "GET /panel/login returned $login_code" >&2; exit 1; }

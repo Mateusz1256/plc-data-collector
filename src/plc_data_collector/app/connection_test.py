@@ -112,6 +112,7 @@ async def _connect_and_probe(
                 address=probe_tag.address,
                 value_type=probe_tag.value_type,
                 timeout_ms=connection.timeout_ms,
+                protocol_options=probe_tag.protocol_options,
             )
         ]
     )

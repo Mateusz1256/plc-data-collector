@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -501,3 +502,311 @@ def test_move_endpoint_credentials_into_options(store: ConfigStore) -> None:
     assert kept.endpoint == "opc.tcp://op:url-pw@plc:4840"
     assert kept.protocol_options["password"] == "stored-pw"
     assert store.move_endpoint_credentials() == ([], ["kept"])
+
+
+def test_tag_protocol_options_round_trip(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    options = {"data_type": "float32", "scale": 0.1}
+    store.create_tag(
+        TagConfig(
+            id="t9",
+            tag_group_id="g1",
+            name="T9",
+            address="hr:1",
+            value_type=ValueType.NUMERIC,
+            protocol_options=options,
+        )
+    )
+
+    tag = store.get_tag("t9")
+
+    assert tag is not None
+    assert dict(tag.protocol_options) == options
+
+
+def test_upsert_tag_overwrites_protocol_options(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    tag = replace(_tag("t9"), address="hr:1", protocol_options={"data_type": "float32"})
+    store.upsert_tag(tag)
+
+    store.upsert_tag(
+        replace(
+            tag,
+            value_type=ValueType.INTEGER,
+            protocol_options={"data_type": "int16"},
+        )
+    )
+    stored = store.get_tag("t9")
+
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16"}
+
+
+def _modbus_connection(**changes: object) -> ConnectionConfig:
+    return ConnectionConfig(
+        id="m1",
+        protocol="modbus",
+        endpoint=str(changes.pop("endpoint", "tcp://plc:502")),
+        protocol_options=dict(changes),
+    )
+
+
+def test_store_refuses_bad_modbus_tag(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    revision = store.revision()
+
+    bad = TagConfig(
+        id="t1",
+        tag_group_id="g1",
+        name="t1",
+        address="hr:1",
+        value_type=ValueType.BOOLEAN,
+        protocol_options={"data_type": "bool"},
+    )
+    with pytest.raises(ConfigurationError):
+        store.create_tag(bad)
+    with pytest.raises(ConfigurationError):
+        store.upsert_tag(bad)
+
+    assert store.revision() == revision
+    assert store.load_active()[0].tags == ()
+
+    good = replace(
+        bad,
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "int16"},
+    )
+    store.create_tag(good)
+    assert [t.id for t in store.load_active()[0].tags] == ["t1"]
+
+
+def test_store_writes_normalised_modbus_tag_options(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    tag = TagConfig(
+        id="t1",
+        tag_group_id="g1",
+        name="t1",
+        address="hr:1",
+        value_type=ValueType.NUMERIC,
+        protocol_options={"data_type": "int16", "scale": 2, "byte_order": None},
+    )
+
+    store.upsert_tag(tag)
+
+    stored = store.get_tag("t1")
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16", "scale": 2.0}
+    assert isinstance(stored.protocol_options["scale"], float)
+
+
+def test_import_normalises_and_refuses_coerced_modbus_options(
+    store: ConfigStore,
+) -> None:
+    def payload(options: dict[str, object]) -> dict[str, object]:
+        return {
+            "connections": [
+                {"id": "m1", "protocol": "modbus", "endpoint": "tcp://plc:502"}
+            ],
+            "tag_groups": [{"id": "g1", "connection_id": "m1", "interval_ms": 1000}],
+            "tags": [
+                {
+                    "id": "t1",
+                    "tag_group_id": "g1",
+                    "name": "t1",
+                    "address": "hr:1",
+                    "value_type": "integer",
+                    "protocol_options": options,
+                }
+            ],
+        }
+
+    with pytest.raises(ConfigurationError) as info:
+        parse_collector_config(payload({"data_type": "int16", "unit_id": True}))
+    assert "unit_id" in info.value.message
+
+    store.replace_all(
+        parse_collector_config(
+            payload({"data_type": "int16", "unit_id": 2, "word_order": None})
+        )
+    )
+
+    stored = store.get_tag("t1")
+    assert stored is not None
+    assert dict(stored.protocol_options) == {"data_type": "int16", "unit_id": 2}
+
+
+def test_store_refuses_bad_modbus_connection(store: ConfigStore) -> None:
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError):
+        store.upsert_connection(_modbus_connection(endpoint="plc:502"))
+    with pytest.raises(ConfigurationError):
+        store.create_connection(_modbus_connection(unit_id=999))
+
+    assert store.revision() == revision
+    assert store.load_active()[0].connections == ()
+
+
+def test_store_replace_all_refuses_bad_modbus_tag(store: ConfigStore) -> None:
+    config = CollectorConfig(
+        connections=(_modbus_connection(),),
+        tag_groups=(_group("g1", "m1"),),
+        tags=(
+            TagConfig(
+                id="t1",
+                tag_group_id="g1",
+                name="t1",
+                address="hr:1",
+                value_type=ValueType.BOOLEAN,
+                protocol_options={"data_type": "bool"},
+            ),
+        ),
+    )
+
+    with pytest.raises(ConfigurationError):
+        store.replace_all(config)
+
+    assert store.revision() == 0
+
+
+def test_store_refuses_opcua_tag_protocol_options(store: ConfigStore) -> None:
+    _seed(store)
+    revision = store.revision()
+    bad = replace(_tag("t2"), protocol_options={"data_type": "int16"})
+
+    for write in (store.create_tag, store.upsert_tag):
+        with pytest.raises(ConfigurationError) as info:
+            write(bad)
+        assert info.value.code == "opcua_tag_options_not_supported"
+    with pytest.raises(ConfigurationError):
+        store.create_tags([bad])
+    with pytest.raises(ConfigurationError):
+        store.replace_all(
+            CollectorConfig(
+                connections=(_connection(),),
+                tag_groups=(_group(),),
+                tags=(bad,),
+            )
+        )
+
+    assert store.revision() == revision
+
+
+def test_store_refuses_switch_to_opcua_with_modbus_tags(store: ConfigStore) -> None:
+    store.upsert_connection(_modbus_connection())
+    store.upsert_tag_group(_group("g1", "m1"))
+    store.upsert_tag(
+        TagConfig(
+            id="t1",
+            tag_group_id="g1",
+            name="t1",
+            address="hr:1",
+            value_type=ValueType.INTEGER,
+            protocol_options={"data_type": "int16"},
+        )
+    )
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(
+            ConnectionConfig(id="m1", protocol="opcua", endpoint="opc.tcp://h:4840")
+        )
+
+    assert info.value.message.startswith("Connection 'm1': Tag 't1': ")
+
+
+def test_store_refuses_connection_switch_with_incompatible_tags(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(
+            ConnectionConfig(id="c1", protocol="modbus", endpoint="tcp://plc:502")
+        )
+
+    assert info.value.message.startswith("Connection 'c1': Tag 't1': ")
+    assert info.value.details["tag_id"] == "t1"
+    assert store.revision() == revision
+    assert store.load_active()[0].connections[0].protocol == "opcua"
+
+
+def test_store_refuses_group_move_to_incompatible_connection(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    store.upsert_connection(_modbus_connection())
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_tag_group(_group("g1", "m1"))
+
+    assert info.value.message.startswith("Tag group 'g1': Tag 't1': ")
+    assert info.value.details["tag_id"] == "t1"
+    assert store.revision() == revision
+    assert store.load_active()[0].tag_groups[0].connection_id == "c1"
+
+
+def test_store_connection_error_is_prefixed(store: ConfigStore) -> None:
+    with pytest.raises(ConfigurationError) as info:
+        store.upsert_connection(_modbus_connection(endpoint="plc:502"))
+
+    assert info.value.message.startswith("Connection 'm1': ")
+    assert info.value.details["connection_id"] == "m1"
+
+
+def test_store_replace_all_switches_protocol_with_new_tags(
+    store: ConfigStore,
+) -> None:
+    _seed(store)
+    config = CollectorConfig(
+        connections=(_modbus_connection(),),
+        tag_groups=(_group("g1", "m1"),),
+        tags=(
+            TagConfig(
+                id="t1",
+                tag_group_id="g1",
+                name="t1",
+                address="hr:1",
+                value_type=ValueType.INTEGER,
+                protocol_options={"data_type": "int16"},
+            ),
+        ),
+    )
+
+    store.replace_all(config)
+
+    active, _ = store.load_active()
+    assert [c.id for c in active.connections] == ["m1"]
+    assert active.tags[0].address == "hr:1"
+
+
+def test_create_tags_is_atomic(store: ConfigStore) -> None:
+    _seed(store)
+    store.upsert_tag_group(_group("g2"))
+    store.archive_tag_group("g2")
+    revision = store.revision()
+
+    with pytest.raises(ConfigurationError):
+        store.create_tags([_tag("t2"), _tag("t3", "g2")])
+
+    assert store.revision() == revision
+    assert store.all_tag_ids() == {"t1"}
+
+
+def test_create_tags_one_revision_and_refuses_active_ids(store: ConfigStore) -> None:
+    _seed(store)
+    revision = store.revision()
+
+    store.create_tags([_tag("t2"), _tag("t3")])
+
+    assert store.revision() == revision + 1
+    assert store.all_tag_ids() == {"t1", "t2", "t3"}
+    with pytest.raises(ConfigurationError) as caught:
+        store.create_tags([_tag("t4"), _tag("t2")])
+    assert caught.value.code == "duplicate_id"
+    assert store.all_tag_ids() == {"t1", "t2", "t3"}

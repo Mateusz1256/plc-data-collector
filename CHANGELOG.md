@@ -7,6 +7,59 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-20
+
+### Added
+
+- Modbus TCP driver (`pymodbus` 3.16.2), read-only: Coils, Discrete inputs,
+  Holding registers and Input registers (function codes 01 to 04); data types
+  `bool`, `bit`, `int16`, `uint16`, `int32`, `uint32`, `int64`, `uint64`,
+  `float32`, `float64` and `string`; byte order, word order and unit ID per
+  Connection with per-Tag overrides; scale and offset; address numbering
+  (zero-based, one-based, Modicon) that changes only what the Panel accepts
+  and shows. See `docs/protocols/modbus.md`.
+- Block reads: neighbouring Tags are read in one request, bounded by
+  `max_registers_per_read`, `max_bits_per_read` and `max_gap`. A block the
+  device refuses for a register is re-read Tag by Tag, so one bad register
+  never makes the other Tags bad; a busy answer (05, 06) is retried whole on
+  the next poll. Errors are stored as `modbus_exception_NN` and other
+  `modbus_*` codes.
+- Tag `protocol_options` (ADR 0003): structured per-Tag protocol settings,
+  validated per protocol on Panel save, JSON import and in the driver.
+  Migration 0004 adds `tags.protocol_options`.
+- Panel: Modbus Connection form (host, port, unit ID, orders, numbering,
+  advanced limits), Modbus Tag form with fast entry (the form reopens with
+  the next address), and "Paste tags", which creates Tags from CSV rows with
+  a preview and an all-or-nothing save. Tags tables show Read from, Address
+  and Type for Modbus.
+- Modbus simulator (`python -m plc_data_collector.simulators.modbus`, port
+  5020: unit 1 press, unit 2 meter), a `modbus-sim` service in Docker Compose
+  and a `press2_modbus` Connection in the demo configuration.
+
+### Changed
+
+- Tag objects in the REST API and in the JSON export gain `protocol_options`.
+  0.3.0 exports import unchanged.
+- Editing a Connection or moving a Tag Group is refused when it would make
+  existing Tags invalid, for example switching an OPC UA Connection to Modbus.
+- New direct runtime dependency: `pymodbus` 3.16.2 (BSD-3-Clause), listed in
+  `THIRD_PARTY_NOTICES.md`.
+
+### Fixed
+
+- The Database Writer now writes a pending batch at most
+  `writer_flush_interval_s` after its first reading, also when readings keep
+  arriving; before, it waited for a full batch when every Tag Group polled
+  faster than the interval allowed it to go idle.
+- An integer reading outside the signed 64-bit range (for example an OPC UA
+  `UInt64` above 9223372036854775807) is stored as a bad reading with the
+  error code `value_out_of_range`; before, it failed the whole write batch,
+  and its Spool replays, for every Connection.
+
+### Known limitations
+
+- Saving a large CSV paste writes one audit entry per Tag.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

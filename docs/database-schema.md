@@ -4,7 +4,7 @@ This page describes the tables PLC Data Collector creates in PostgreSQL (or
 SQLite, the fallback when no database URL is set). The definition lives in
 `src/plc_data_collector/persistence/schema.py`, and Alembic migrations in
 `src/plc_data_collector/persistence/migrations/versions/` apply it at startup.
-The schema matches release 0.3.0 (migration `0003`).
+The schema matches release 0.4.0 (migration `0004`).
 
 ## What is stable
 
@@ -90,9 +90,10 @@ failed (`quality = 'bad'`).
 | `tag_group_id` | `VARCHAR(128)` | no | Foreign key to `tag_groups.id`. |
 | `name` | `VARCHAR(256)` | no | Display name, for example `Line 1 temperature`. |
 | `address` | `VARCHAR(1024)` | no | Protocol address, for example `ns=2;s=Line1.Temperature` for OPC UA. |
-| `value_type` | `VARCHAR(32)` | yes | `numeric`, `integer`, `boolean`, `text` or `binary`. Always set by 0.3.0. |
+| `value_type` | `VARCHAR(32)` | yes | `numeric`, `integer`, `boolean`, `text` or `binary`. Always set since 0.3.0. |
 | `enabled` | `BOOLEAN` | no | Disabled Tags are not read. |
 | `metadata_json` | `JSON` | no | Extra attributes. `unit` holds the unit shown in the Panel and the API, for example `{"unit": "C"}`. |
+| `protocol_options` | `JSON` | no | Protocol settings of the Tag, for example the Modbus data type; `{}` for OPC UA. |
 | `archived_at` | `VARCHAR(32)` | yes | When the Tag was archived; empty while it is active. |
 
 ## `tag_groups`
@@ -126,7 +127,7 @@ failed (`quality = 'bad'`).
 | Table | Holds |
 | --- | --- |
 | `poll_executions` | One row per Tag Group read: status, start and finish time, Tag counts and the error message. Primary key `execution_id`. |
-| `runtime_components` | Component status rows (state, update time, error). Not written by the 0.3.0 runtime; the current state is served by `/api/runtime/components`. |
+| `runtime_components` | Component status rows (state, update time, error). Not written by the runtime; the current state is served by `/api/runtime/components`. |
 | `app_settings` | Key-value settings as JSON: `config_revision` (bumped on every configuration change, drives the pending-changes banner) and `retention` (`{"enabled": ..., "days": ...}`). |
 | `api_keys` | API keys for `/api/v1`: name, the first characters of the key, the SHA-256 hash of the key, and when it was created, last used and revoked. The key itself is never stored. |
 | `alembic_version` | The applied migration. |

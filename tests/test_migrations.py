@@ -85,6 +85,36 @@ def test_migrations_match_metadata(tmp_path: Path) -> None:
     assert diff == []
 
 
+def test_metadata_tags_protocol_options_defaults_like_migration_0004() -> None:
+    engine = create_database_engine("sqlite:///:memory:")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO connections (id, name, protocol, endpoint, enabled,"
+                " timeout_ms, protocol_options)"
+                " VALUES ('c', 'c', 'mock', 'mock://x', 1, 1000, '{}')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tag_groups (id, connection_id, interval_ms, timeout_ms,"
+                " overlap_policy, enabled) VALUES ('g', 'c', 1000, 1000, 'skip', 1)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO tags (id, tag_group_id, name, address, enabled,"
+                " metadata_json) VALUES ('t', 'g', 't', 'a', 1, '{}')"
+            )
+        )
+        stored = connection.scalar(text("SELECT protocol_options FROM tags"))
+    assert stored == "{}"
+    server_default = metadata.tables["tags"].c.protocol_options.server_default
+    assert server_default is not None
+    assert str(getattr(server_default, "arg", "")) == "'{}'"
+
+
 def test_run_migrations_works_from_other_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -349,6 +379,28 @@ def test_0003_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
         _assert_0003_round_trip(url)
 
 
+def test_0004_upgrade_adds_tag_protocol_options(tmp_path: Path) -> None:
+    _assert_0004_upgrade(f"sqlite:///{tmp_path}/t.db")
+
+
+def test_0004_downgrade_round_trip(tmp_path: Path) -> None:
+    _assert_0004_round_trip(f"sqlite:///{tmp_path}/t.db")
+
+
+@pytest.mark.postgres
+def test_0004_upgrade_adds_tag_protocol_options_on_postgres(
+    postgres_url: str,
+) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0004_upgrade(url)
+
+
+@pytest.mark.postgres
+def test_0004_downgrade_round_trip_on_postgres(postgres_url: str) -> None:
+    with _scratch_postgres_database(postgres_url) as url:
+        _assert_0004_round_trip(url)
+
+
 @contextmanager
 def _scratch_postgres_database(postgres_url: str) -> Iterator[str]:
     admin_engine = create_engine(
@@ -450,6 +502,68 @@ def _assert_0003_upgrade(url: str) -> None:
         engine.dispose()
 
 
+def _assert_0004_upgrade(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "0003")
+    engine = create_database_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO connections (id, name, protocol, endpoint, enabled, "
+                    "timeout_ms, protocol_options) VALUES "
+                    "('c1', 'C', 'mock', 'mock://local', true, 1000, '{}')"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tag_groups (id, connection_id, interval_ms, "
+                    "timeout_ms, overlap_policy, enabled) VALUES "
+                    "('g1', 'c1', 1000, 1000, 'skip', true)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO tags (id, tag_group_id, name, address, enabled, "
+                    "metadata_json) VALUES ('t1', 'g1', 'T', 'a', true, '{}')"
+                )
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT protocol_options FROM tags")) in (
+                {},
+                "{}",
+            )
+        column = next(
+            c
+            for c in inspect(engine).get_columns("tags")
+            if c["name"] == "protocol_options"
+        )
+        assert column["nullable"] is False
+        with engine.connect() as connection:
+            diff = compare_metadata(MigrationContext.configure(connection), metadata)
+        if engine.dialect.name == "postgresql":
+            diff = [change for change in diff if not _is_event_id_unique(change)]
+        assert diff == []
+    finally:
+        engine.dispose()
+
+
+def _assert_0004_round_trip(url: str) -> None:
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    command.downgrade(config, "0003")
+    engine = create_database_engine(url)
+    try:
+        columns = {c["name"] for c in inspect(engine).get_columns("tags")}
+        assert "protocol_options" not in columns
+    finally:
+        engine.dispose()
+    command.upgrade(config, "head")
+
+
 def _is_event_id_unique(change: object) -> bool:
     if not (isinstance(change, tuple) and change[0] == "add_constraint"):
         return False
@@ -490,6 +604,57 @@ def _column_type(engine: Engine, table: str, column: str) -> object:
         if reflected["name"] == column:
             return reflected["type"]
     raise AssertionError(f"{table}.{column} not found")
+
+
+@pytest.mark.postgres
+def test_out_of_range_integer_does_not_fail_batch_on_postgres(
+    postgres_url: str,
+) -> None:
+    run_migrations(postgres_url)
+    engine = create_database_engine(postgres_url)
+    wait_for_database(engine, timeout_s=10)
+    _seed_mock_configuration(engine)
+    now = datetime(2026, 7, 13, 12, 0, tzinfo=UTC)
+    run_id = uuid.uuid4().hex
+    poll_results = [
+        _single_result_poll(
+            f"pg-range-{run_id}-big",
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.integer(2**64 - 1),
+                source_timestamp=now,
+                received_at=now,
+            ),
+            now,
+        ),
+        _single_result_poll(
+            f"pg-range-{run_id}-ok",
+            TagResult.success(
+                tag_id="temperature",
+                value=TagValue.integer(7),
+                source_timestamp=now,
+                received_at=now,
+            ),
+            now,
+        ),
+    ]
+
+    inserted = ReadingRepository(engine).save_poll_results(poll_results)
+
+    assert inserted == 2
+    with engine.connect() as connection:
+        rows = {
+            row.event_id: row.error_code
+            for row in connection.execute(
+                select(tag_readings.c.event_id, tag_readings.c.error_code).where(
+                    tag_readings.c.event_id.like(f"pg-range-{run_id}-%")
+                )
+            )
+        }
+    assert rows == {
+        f"pg-range-{run_id}-big:0": "value_out_of_range",
+        f"pg-range-{run_id}-ok:0": None,
+    }
 
 
 def _seed_mock_configuration(engine: Engine) -> None:
