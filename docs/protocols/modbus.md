@@ -164,8 +164,8 @@ nothing is remembered and the next poll tries the whole block again.
 | `modbus_connect_failed` | The connection could not be opened |
 | `modbus_not_connected` | A read was attempted without a connection |
 
-The last four are not stored per Tag: a timeout or a lost connection fails the
-whole poll, and the worker reconnects as it does for OPC UA.
+The last four fail the whole poll: every Tag in that poll gets a bad reading
+with the same code, and the worker reconnects as it does for OPC UA.
 
 A timeout counts for the whole Connection, not for one unit. Behind a gateway
 that stays silent for a unit that does not answer, instead of returning
