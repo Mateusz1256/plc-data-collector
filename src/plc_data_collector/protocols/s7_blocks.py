@@ -13,6 +13,10 @@ from plc_data_collector.protocols.s7_codec import (
 )
 from plc_data_collector.protocols.s7_tags import Area, S7TagPlan
 
+# Items one Read Var request may carry. S7 CPUs refuse more, whatever the PDU
+# size allows; python-snap7 uses the same limit (MaxVars = 20).
+MAX_ITEMS = 20
+
 
 @dataclass(frozen=True)
 class S7Block:
@@ -70,9 +74,10 @@ def block_items(block: S7Block, max_item: int) -> list[ReadItem]:
 
 
 def pack_requests(
-    blocks: Sequence[S7Block], *, pdu_length: int
+    blocks: Sequence[S7Block], *, pdu_length: int, max_items: int = MAX_ITEMS
 ) -> list[list[tuple[S7Block, list[ReadItem]]]]:
-    """Pack block items greedily into requests that fit ``pdu_length``.
+    """Pack block items greedily into requests of at most ``max_items`` items
+    that fit ``pdu_length``.
 
     A block whose items do not fit one request appears in several requests,
     each time with a subset of its items.
@@ -85,7 +90,8 @@ def pack_requests(
         for item in block_items(block, max_item):
             candidate = [*lengths, item.length]
             if current and (
-                request_size(len(candidate)) > pdu_length
+                len(candidate) > max_items
+                or request_size(len(candidate)) > pdu_length
                 or response_size(candidate) > pdu_length
             ):
                 requests.append(current)

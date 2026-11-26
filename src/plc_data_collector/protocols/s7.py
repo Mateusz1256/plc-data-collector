@@ -23,7 +23,12 @@ from plc_data_collector.domain import (
 )
 from plc_data_collector.protocols.driver import DriverCapabilities
 from plc_data_collector.protocols.endpoints import parse_endpoint
-from plc_data_collector.protocols.s7_blocks import S7Block, pack_requests, plan_blocks
+from plc_data_collector.protocols.s7_blocks import (
+    MAX_ITEMS,
+    S7Block,
+    pack_requests,
+    plan_blocks,
+)
 from plc_data_collector.protocols.s7_codec import (
     MAX_ITEM_PAYLOAD,
     RETURN_OK,
@@ -57,6 +62,8 @@ _MAX_PDU_REF = 0xFFFF
 _MAX_CPU_TEXT = 64
 # Marks the items of a request the PLC rejected as a whole (S7 header error).
 _REJECTED = -1
+# The header error an S7-1200/1500 sends while PUT/GET access is off.
+_PUT_GET_OFF = (0x81, 0x04)
 
 PUT_GET_MESSAGE = (
     "The PLC refused the read. On S7-1200/1500: enable 'Permit access with "
@@ -180,6 +187,8 @@ class _Piece:
     length: int
     return_code: int
     data: bytes
+    # Why the PLC rejected the whole request (return code ``_REJECTED``).
+    refusal: str = ""
 
 
 def _utc_now() -> datetime:
@@ -191,6 +200,16 @@ def _singles(block: S7Block) -> list[S7Block]:
         S7Block(block.area, block.db, plan.byte, plan.span, ((tag_id, plan),))
         for tag_id, plan in block.members
     ]
+
+
+def _refusal_message(error: S7HeaderError) -> str:
+    """Explain a whole-request rejection: PUT/GET for class 0x81 code 0x04."""
+    if (error.error_class, error.error_code) == _PUT_GET_OFF:
+        return PUT_GET_MESSAGE
+    return (
+        f"The PLC refused the read (error class 0x{error.error_class:02X}, "
+        f"code 0x{error.error_code:02X})."
+    )
 
 
 def _refused_code(pieces: Sequence[_Piece]) -> int | None:
@@ -470,7 +489,9 @@ class S7Driver:
         """Read the blocks in as few requests as the PDU allows."""
         # Equal blocks (the same Tag requested twice) are read once.
         outcomes: dict[S7Block, list[_Piece]] = {block: [] for block in blocks}
-        for request in pack_requests(list(outcomes), pdu_length=self._pdu_length):
+        for request in pack_requests(
+            list(outcomes), pdu_length=self._pdu_length, max_items=MAX_ITEMS
+        ):
             items = [item for _, block_items in request for item in block_items]
             timeout_s = min(
                 timeouts[tag_id] for block, _ in request for tag_id, _ in block.members
@@ -486,9 +507,10 @@ class S7Driver:
             except S7HeaderError as error:
                 # The link is fine; the CPU's configuration refuses the read.
                 self._log_refused(error)
+                refusal = _refusal_message(error)
                 for block, block_items in request:
                     outcomes[block].extend(
-                        _Piece(item.start, item.length, _REJECTED, b"")
+                        _Piece(item.start, item.length, _REJECTED, b"", refusal)
                         for item in block_items
                     )
                 continue
@@ -549,8 +571,9 @@ class S7Driver:
     def _piece_failure(
         self, plan: S7TagPlan, touching: list[_Piece]
     ) -> tuple[str, str] | None:
-        if any(piece.return_code == _REJECTED for piece in touching):
-            return "s7_access_denied", PUT_GET_MESSAGE
+        for piece in touching:
+            if piece.return_code == _REJECTED:
+                return "s7_access_denied", piece.refusal
         code = _refused_code(touching)
         if code is not None:
             return self._item_error(code, plan)

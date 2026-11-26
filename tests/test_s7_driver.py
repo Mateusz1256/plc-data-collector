@@ -501,6 +501,35 @@ async def test_header_error_refuses_every_tag_without_reconnect(
         assert len(refused) == 2
 
 
+async def test_other_header_errors_name_class_and_code() -> None:
+    transport = FakeTransport(memory={(AREA_DB, 1): bytes(DB1)}, header_error=0x8500)
+    driver = fake_driver(transport)
+    tags = [request("a", "DB1.20", "int"), request("b", "DB1.22", "int")]
+    await driver.connect()
+
+    results = await driver.read(tags)
+
+    assert [r.error_code for r in results] == ["s7_access_denied"] * 2
+    assert {r.error_message for r in results} == {
+        "The PLC refused the read (error class 0x85, code 0x00)."
+    }
+    assert len(transport.requests) == 1
+    assert transport.connects == 1
+    assert transport.closes == 0
+
+
+async def test_requests_carry_at_most_20_items() -> None:
+    transport = FakeTransport(memory={(AREA_DB, 1): bytes(1000)}, pdu_length=480)
+    driver = fake_driver(transport, options={"max_gap": 0})
+    tags = [request(f"t{n}", f"DB1.{n * 4}", "byte") for n in range(45)]
+    await driver.connect()
+
+    results = await driver.read(tags)
+
+    assert [len(items) for items in transport.requests] == [20, 20, 5]
+    assert all(r.quality is Quality.GOOD for r in results)
+
+
 class OneRefusedRequest(FakeTransport):
     """Rejects (header error) only the requests that read DB2."""
 

@@ -97,7 +97,28 @@ def test_pack_requests_fit_the_pdu() -> None:
             assert request_size(len(items)) <= pdu
             assert response_size([i.length for i in items]) <= pdu
         assert sum(len(r) for r in requests) == 30
-        assert len(requests) > 1 if pdu == 240 else len(requests) == 1
+        # 19 items fill a 240-byte request; at 480 the 20-item cap splits.
+        sizes = [len(r) for r in requests]
+        assert sizes == ([19, 11] if pdu == 240 else [20, 10])
+
+
+def test_pack_requests_caps_items_per_request() -> None:
+    # At PDU 480, 45 one-byte items would fit 39 to a request by size alone;
+    # S7 CPUs take at most 20 items per Read Var request.
+    blocks = [
+        S7Block(plan.area, 1, plan.byte, 1, ((n, plan),))
+        for n, plan in (tag(f"DB1.{i * 3}", "byte") for i in range(45))
+    ]
+
+    for requests in (
+        pack_requests(blocks, pdu_length=480),
+        pack_requests(blocks, pdu_length=480, max_items=20),
+    ):
+        counts = [sum(len(group) for _, group in r) for r in requests]
+        assert counts == [20, 20, 5]
+
+    smaller = pack_requests(blocks, pdu_length=480, max_items=7)
+    assert max(sum(len(group) for _, group in r) for r in smaller) == 7
 
 
 def test_pack_requests_spreads_one_big_block_over_requests() -> None:

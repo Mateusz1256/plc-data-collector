@@ -137,9 +137,12 @@ async def _probe(
     address = probe_tag.address
     if result.value is None:
         code = result.error_code or "read_failed"
+        # The driver's message explains the failure (for S7 for example the
+        # PUT/GET setting), so it is shown before the generic hint.
+        explanation = f"{result.error_message} " if result.error_message else ""
         return (
             False,
-            f", but reading {address} failed ({code}). "
+            f", but reading {address} failed ({code}). {explanation}"
             "Check the Tag address and that the Tag exists on the server.",
             code,
         )

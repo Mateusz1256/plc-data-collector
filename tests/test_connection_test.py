@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import ClassVar
 
 import pytest
+from s7_support import AREA_DB, FakeTransport
 
 from plc_data_collector.app.connection_test import (
     ConnectionTestResult,
@@ -28,6 +29,7 @@ from plc_data_collector.protocols import (
     build_driver_registry,
     default_driver_registry,
 )
+from plc_data_collector.protocols.s7 import PUT_GET_MESSAGE, S7Driver
 
 AWAIT_LIMIT_S = 10
 
@@ -138,10 +140,36 @@ async def test_failed_probe_read_names_code_and_address() -> None:
     )
 
     assert result.ok is False
-    assert "bad_node" in result.message
-    assert "ns=2;s=Line1.Temperature" in result.message
-    assert "Check" in result.message
+    assert result.message == (
+        f"Connected in {result.elapsed_ms} ms, but reading "
+        "ns=2;s=Line1.Temperature failed (bad_node). No such node. "
+        "Check the Tag address and that the Tag exists on the server."
+    )
     assert SpyMockDriver.instances[0].disconnect_calls == 1
+
+
+async def test_s7_put_get_refusal_is_explained() -> None:
+    transport = FakeTransport(memory={(AREA_DB, 1): bytes(10)}, header_error=0x8104)
+    connection = ConnectionConfig(
+        id="press", protocol="s7", endpoint="tcp://press-plc:102", timeout_ms=200
+    )
+    registry = build_driver_registry(
+        [("s7", lambda c: S7Driver(c, transport_factory=lambda: transport))]
+    )
+    tag = TagConfig(
+        id="press_speed",
+        tag_group_id="fast",
+        name="Speed",
+        address="DB1.0",
+        value_type=ValueType.NUMERIC,
+        protocol_options={"data_type": "int"},
+    )
+
+    result = await _probe(connection, registry, tag)
+
+    assert result.ok is False
+    assert "failed (s7_access_denied)" in result.message
+    assert PUT_GET_MESSAGE in result.message
 
 
 async def test_connect_failure_reports_code_and_hint() -> None:
