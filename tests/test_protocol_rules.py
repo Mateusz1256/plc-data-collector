@@ -144,3 +144,54 @@ def test_modbus_validate_tag_returns_normalised_options() -> None:
 
     assert options == {"data_type": "int16", "unit_id": 2, "scale": 2.0}
     assert isinstance(options["scale"], float)
+
+
+class _FakeRules:
+    def validate_connection(self, connection: ConnectionConfig) -> None:
+        return None
+
+    def validate_tag(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> dict[str, object]:
+        return {}
+
+
+def test_rules_for_returns_registered_rules() -> None:
+    from plc_data_collector.protocols.rules import register_rules
+
+    fake = _FakeRules()
+    register_rules("fake", fake)
+    assert rules_for("fake") is fake
+
+
+def test_unknown_protocol_is_permissive() -> None:
+    tag = TagConfig(
+        id="t",
+        tag_group_id="g",
+        name="t",
+        address="x",
+        value_type=ValueType.INTEGER,
+        protocol_options={"a": 1},
+    )
+    connection = ConnectionConfig(id="c", protocol="nope", endpoint="x")
+    rules = rules_for("nope")
+    rules.validate_connection(connection)
+    assert rules.validate_tag(tag, connection) == {"a": 1}
+
+
+def test_builtin_rules_registered() -> None:
+    from plc_data_collector.protocols.modbus_tags import ModbusRules
+
+    assert isinstance(rules_for("modbus"), ModbusRules)
+    tag = TagConfig(
+        id="t",
+        tag_group_id="g",
+        name="t",
+        address="x",
+        value_type=ValueType.INTEGER,
+        protocol_options={"a": 1},
+    )
+    connection = ConnectionConfig(id="c", protocol="opcua", endpoint="x")
+    with pytest.raises(ConfigurationError) as info:
+        rules_for("opcua").validate_tag(tag, connection)
+    assert info.value.code == "opcua_tag_options_not_supported"
