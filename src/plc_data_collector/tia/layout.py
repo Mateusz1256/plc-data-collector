@@ -66,6 +66,10 @@ _TOO_LARGE = (
 )
 
 
+class CandidateLimitError(TiaSourceError):
+    """The DB has more candidates than the caller's ``max_candidates``."""
+
+
 @dataclass(frozen=True, slots=True)
 class Candidate:
     """One leaf member of a DB, ready to become a Tag.
@@ -101,13 +105,19 @@ class DbLayout:
 
 
 def layout_db(
-    db: DbSource, types: Mapping[str, TypeSource], *, classic_confirmed: bool
+    db: DbSource,
+    types: Mapping[str, TypeSource],
+    *,
+    classic_confirmed: bool,
+    max_candidates: int | None = None,
 ) -> DbLayout:
     """Lay out ``db`` with standard access; raise ``TiaSourceError`` when it
     cannot be imported.
 
     ``classic_confirmed`` is the user's confirmation that a source without the
-    ``S7_Optimized_Access`` attribute comes from an S7-300/400.
+    ``S7_Optimized_Access`` attribute comes from an S7-300/400. With
+    ``max_candidates`` the layout stops with ``CandidateLimitError`` as soon as
+    it would make more candidates than that.
     """
     base: TypeSource | None = None
     if db.base_type is not None:
@@ -125,7 +135,7 @@ def layout_db(
         raise TiaSourceError(db.file, db.line, OPTIMIZED_MESSAGE)
     if db.access == "unknown" and not classic_confirmed:
         raise TiaSourceError(db.file, db.line, UNKNOWN_ACCESS_MESSAGE)
-    layout = _Layout(db.number, types)
+    layout = _Layout(db.number, types, max_candidates)
     if base is not None:
         layout.place_udt(base, "", db.file, db.line)
     else:
@@ -141,12 +151,18 @@ def _join(prefix: str, name: str) -> str:
 class _Layout:
     """A cursor (byte, bit) walking the members in declaration order."""
 
-    def __init__(self, number: int | None, types: Mapping[str, TypeSource]) -> None:
+    def __init__(
+        self,
+        number: int | None,
+        types: Mapping[str, TypeSource],
+        max_candidates: int | None = None,
+    ) -> None:
         self.byte = 0
         self.bit = 0
         self.candidates: list[Candidate] = []
         self._number = number
         self._types = types
+        self._max_candidates = max_candidates
         self._open_types: list[str] = []
         self._depth = 0
 
@@ -310,6 +326,13 @@ class _Layout:
         end = self.byte + (1 if bit is not None else span)
         if end > _ADDRESS_SPACE:
             raise TiaSourceError(file, line, _TOO_LARGE)
+        if (
+            self._max_candidates is not None
+            and len(self.candidates) >= self._max_candidates
+        ):
+            raise CandidateLimitError(
+                file, line, f"The DB has more than {self._max_candidates} members."
+            )
         address = S7Address(Area.DB, self._number, self.byte, bit)
         self.candidates.append(
             Candidate(path, address, data_type, length, comment, problem)

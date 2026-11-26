@@ -44,7 +44,7 @@ from plc_data_collector.protocols.s7_tags import (
     display_address,
     resolve_tag,
 )
-from plc_data_collector.tia.layout import Candidate, layout_db
+from plc_data_collector.tia.layout import Candidate, CandidateLimitError, layout_db
 from plc_data_collector.tia.source import (
     DbSource,
     TiaSourceError,
@@ -61,8 +61,11 @@ ARRAY_COLLAPSE = 50
 # Rows a preview renders at most; the filter finds the others.
 MAX_PREVIEW_ROWS = 1000
 MAX_IMPORT_ROWS = MAX_PASTE_ROWS
-# Candidates kept for one upload: bounds memory when many big DBs come at once.
+# Candidates laid out for one upload: bounds the memory and CPU of a preview
+# when many big DBs come at once; later DBs are not laid out at all.
 MAX_CANDIDATES = 600_000
+# Data blocks in one upload (one 5 MB file could declare tens of thousands).
+MAX_DBS = 100
 SOURCE_SUFFIXES = (".db", ".udt")
 TABLE_SUFFIX = ".xlsx"
 
@@ -89,11 +92,15 @@ UNKNOWN_SELECTION_MESSAGE = "Some selected rows are not in this upload. Preview 
 GROUP_MESSAGE = "Choose a tag group."
 NUMBER_MISSING = "Enter the DB number above."
 NUMBER_ERROR = "Enter a DB number from 1 to 65535."
+TOO_MANY_DBS = (
+    f"The upload has more than {MAX_DBS} data blocks; upload fewer at a time."
+)
 TOO_MANY_MEMBERS = (
     f"The upload has more than {MAX_CANDIDATES} members; upload fewer DBs at a time."
 )
 
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{22}")
+_DATA_BLOCK = re.compile(r"^[ \t]*DATA_BLOCK\b", re.IGNORECASE | re.MULTILINE)
 _META = "upload.json"
 _MAX_DB = 65535
 _MAX_FIELDS = 20
@@ -596,11 +603,15 @@ class _Upload:
             self._add(0, f"{upload.name}##{candidate.path}", candidate, None)
 
     def _read_sources(self, files: Sequence[UploadedFile], form: ImportForm) -> None:
-        sources = parse_sources(
-            [(f.name, decode_source(f.data, f.name)) for f in files]
-        )
+        texts = [(f.name, decode_source(f.data, f.name)) for f in files]
+        # A quick count first, so a flood of blocks is refused before parsing.
+        if sum(len(_DATA_BLOCK.findall(text)) for _, text in texts) > MAX_DBS:
+            raise ImportRefused(TOO_MANY_DBS)
+        sources = parse_sources(texts)
         if not sources.blocks:
             raise ImportRefused(NO_BLOCKS_MESSAGE)
+        if len(sources.blocks) > MAX_DBS:
+            raise ImportRefused(TOO_MANY_DBS)
         names: set[str] = set()
         for db in sources.blocks:
             if db.name in names:
@@ -614,12 +625,22 @@ class _Upload:
             missing = None
             if number is None:
                 missing = section.number_error or NUMBER_MISSING
+            budget = MAX_CANDIDATES - total
+            if budget <= 0:
+                section.error = TOO_MANY_MEMBERS
+                continue
             try:
                 layout = layout_db(
                     db if number is None else replace(db, number=number),
                     sources.types,
                     classic_confirmed=section.classic,
+                    max_candidates=budget,
                 )
+            except CandidateLimitError:
+                # Nothing more fits: later DBs are not laid out either.
+                section.error = TOO_MANY_MEMBERS
+                total = MAX_CANDIDATES
+                continue
             except TiaSourceError as error:
                 section.error = (
                     f"Line {error.line}: {error.message}"
@@ -628,9 +649,6 @@ class _Upload:
                 )
                 continue
             total += len(layout.candidates)
-            if total > MAX_CANDIDATES:
-                section.error = TOO_MANY_MEMBERS
-                continue
             section.size = layout.size
             start = len(self.entries)
             for candidate in layout.candidates:

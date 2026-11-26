@@ -23,7 +23,12 @@ from s7_layout_support import documented_rows
 
 from plc_data_collector.protocols.s7_tags import Area, DataType, S7Address
 from plc_data_collector.simulators import s7 as simulator
-from plc_data_collector.tia.layout import Candidate, DbLayout, layout_db
+from plc_data_collector.tia.layout import (
+    Candidate,
+    CandidateLimitError,
+    DbLayout,
+    layout_db,
+)
 from plc_data_collector.tia.source import (
     ELEMENTARY_TYPES,
     TiaSourceError,
@@ -537,3 +542,30 @@ def test_nesting_up_to_the_limit_is_laid_out() -> None:
     )
     layout = lay_out('      a : "T0";\n', chain)
     assert [c.path for c in layout.candidates] == ["a" + ".n" * 30 + ".x"]
+
+
+def test_candidate_limit_stops_the_layout_early() -> None:
+    sources = parse_sources(
+        [
+            (
+                "big.db",
+                "DATA_BLOCK \"Big\"\n{ S7_Optimized_Access := 'FALSE' }\n"
+                "VERSION : 0.1\n   STRUCT\n      Bits : Array[0..299999] of Bool;\n"
+                "   END_STRUCT;\nBEGIN\nEND_DATA_BLOCK\n",
+            )
+        ]
+    )
+    start = time.monotonic()
+    with pytest.raises(CandidateLimitError) as caught:
+        layout_db(
+            sources.blocks[0], sources.types, classic_confirmed=False, max_candidates=10
+        )
+    assert time.monotonic() - start < 0.5
+    assert caught.value.file == "big.db"
+    exact = layout_db(
+        sources.blocks[0],
+        sources.types,
+        classic_confirmed=False,
+        max_candidates=300_000,
+    )
+    assert len(exact.candidates) == 300_000

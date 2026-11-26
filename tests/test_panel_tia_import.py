@@ -8,6 +8,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,10 +23,12 @@ from plc_data_collector.domain import (
     TagGroupConfig,
     ValueType,
 )
+from plc_data_collector.panel import tia_import
 from plc_data_collector.panel.tia_import import (
     UploadedFile,
     UploadStore,
 )
+from plc_data_collector.tia import layout
 from plc_data_collector.tia.layout import OPTIMIZED_MESSAGE, UNKNOWN_ACCESS_MESSAGE
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -699,6 +702,55 @@ def test_filter_limits_the_rows(
     ]
     # A selected row the filter hides stays selected.
     assert f'type="hidden" name="select" value="{KEY}Pressure"' in page
+
+
+def test_layouts_stop_at_the_upload_candidate_budget(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(fake_host)
+    monkeypatch.setattr(tia_import, "MAX_CANDIDATES", 100)
+    calls: list[int | None] = []
+    real = layout.layout_db
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs.get("max_candidates"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tia_import, "layout_db", counting)
+    blocks = b"".join(
+        db_source("      Values : Array[0..59] of Int;\n", number=n)
+        for n in range(1, 7)
+    )
+
+    status, page, _ = upload(signed_in_client, one_file("Many.db", blocks))
+
+    assert status == 200
+    # DB1 uses 60 of 100; DB2 stops at the remaining 40; DB3-DB6 are skipped.
+    assert calls == [100, 40]
+    assert text(page).count("upload fewer DBs at a time") == 5
+    assert "Many.db#DB1#Values" in page
+
+
+def test_too_many_data_blocks_refuse_the_upload(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed(fake_host)
+    calls: list[object] = []
+    monkeypatch.setattr(tia_import, "layout_db", lambda *a, **k: calls.append(a))
+    blocks = b"".join(db_source("      A : Int;\n", number=n) for n in range(1, 102))
+
+    status, page, token = upload(signed_in_client, one_file("Many.db", blocks))
+
+    assert status == 400
+    assert token is None
+    assert "The upload has more than 100 data blocks" in text(page)
+    assert calls == []
+    assert upload_dirs(tmp_path) == []
 
 
 # Tag tables
