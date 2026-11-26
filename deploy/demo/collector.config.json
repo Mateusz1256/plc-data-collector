@@ -21,6 +21,17 @@
         "address_numbering": "modicon",
         "max_gap": 4
       }
+    },
+    {
+      "id": "press3_s7",
+      "protocol": "s7",
+      "endpoint": "tcp://s7-sim:1102",
+      "enabled": true,
+      "timeout_ms": 2000,
+      "protocol_options": {
+        "rack": 0,
+        "slot": 1
+      }
     }
   ],
   "tag_groups": [
@@ -35,6 +46,14 @@
     {
       "id": "press2_fast",
       "connection_id": "press2_modbus",
+      "interval_ms": 1000,
+      "timeout_ms": 2000,
+      "overlap_policy": "skip",
+      "enabled": true
+    },
+    {
+      "id": "press3_fast",
+      "connection_id": "press3_s7",
       "interval_ms": 1000,
       "timeout_ms": 2000,
       "overlap_policy": "skip",
@@ -293,6 +312,147 @@
         "data_type": "uint64",
         "unit_id": 2,
         "word_order": "lo"
+      }
+    },
+    {
+      "id": "press3_pressure",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 pressure",
+      "address": "DB1.0",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "bar"
+      },
+      "protocol_options": {
+        "data_type": "real"
+      }
+    },
+    {
+      "id": "press3_running",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 running",
+      "address": "DB1.4.0",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press3_fault",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 fault",
+      "address": "DB1.4.1",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press3_oil_temperature",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 oil temperature 1",
+      "address": "DB1.6",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "C"
+      },
+      "protocol_options": {
+        "data_type": "real"
+      }
+    },
+    {
+      "id": "press3_cycle_counter",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 cycle counter",
+      "address": "DB1.22",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "dint"
+      }
+    },
+    {
+      "id": "press3_ram_position",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 ram position",
+      "address": "DB1.26",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "int"
+      }
+    },
+    {
+      "id": "press3_energy",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 energy",
+      "address": "DB1.28",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "Wh"
+      },
+      "protocol_options": {
+        "data_type": "lreal"
+      }
+    },
+    {
+      "id": "press3_recipe",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 recipe",
+      "address": "DB1.36",
+      "value_type": "text",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "string",
+        "length": 20
+      }
+    },
+    {
+      "id": "press3_motor_speed",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 motor speed",
+      "address": "DB1.62",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {
+        "unit": "rpm"
+      },
+      "protocol_options": {
+        "data_type": "int"
+      }
+    },
+    {
+      "id": "press3_lamp",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 lamp (M0.0)",
+      "address": "M0.0",
+      "value_type": "boolean",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "bool"
+      }
+    },
+    {
+      "id": "press3_signal",
+      "tag_group_id": "press3_fast",
+      "name": "Press 3 signal (MW2)",
+      "address": "M2",
+      "value_type": "integer",
+      "enabled": true,
+      "metadata": {},
+      "protocol_options": {
+        "data_type": "int"
       }
     }
   ]

@@ -1,0 +1,10 @@
+TYPE "typeMotor"
+VERSION : 0.1
+   STRUCT
+      Current : Real;   // Motorstrom in A
+      Speed : Int;   // Drehzahl in 1/min
+      Running : Bool;   // Motor läuft
+      Overheat : Bool;   // Übertemperatur
+   END_STRUCT;
+
+END_TYPE
