@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import time
 import zipfile
 from xml.sax.saxutils import escape
 
@@ -93,6 +94,14 @@ def refusal(data: bytes) -> TiaSourceError:
     return caught.value
 
 
+def refusal_or_none(data: bytes) -> TiaSourceError | None:
+    try:
+        parse_tag_table(data, "tags.xlsx")
+    except TiaSourceError as error:
+        return error
+    return None
+
+
 def test_three_rows_become_candidates() -> None:
     data = table(
         [
@@ -102,9 +111,9 @@ def test_three_rows_become_candidates() -> None:
         ]
     )
     assert parse_tag_table(data, "tags.xlsx") == (
-        _candidate("Level", Area.M, 20, None, DataType.INT, "Tank level"),
-        _candidate("Start", Area.I, 0, 3, DataType.BOOL, ""),
-        _candidate("Setpoint", Area.Q, 4, None, DataType.REAL, "Speed"),
+        _candidate("Level", Area.M, 20, None, DataType.INT, "Tank level", "%MW20"),
+        _candidate("Start", Area.I, 0, 3, DataType.BOOL, "", "%I0.3"),
+        _candidate("Setpoint", Area.Q, 4, None, DataType.REAL, "Speed", "%QD4"),
     )
 
 
@@ -115,9 +124,10 @@ def _candidate(
     bit: int | None,
     data_type: DataType,
     comment: str,
+    source: str,
 ) -> Candidate:
     return Candidate(
-        name, S7Address(area, None, byte, bit), data_type, None, comment, None
+        name, S7Address(area, None, byte, bit), data_type, None, comment, None, source
     )
 
 
@@ -129,7 +139,9 @@ def test_shuffled_header_with_extra_columns_and_shared_strings() -> None:
     ]
     data = workbook({"PLC Tags": sheet_xml(rows, shared)}, shared)
     (candidate,) = parse_tag_table(data, "tags.xlsx")
-    assert candidate == _candidate("Counter", Area.M, 8, None, DataType.DINT, "c1")
+    assert candidate == _candidate(
+        "Counter", Area.M, 8, None, DataType.DINT, "c1", "%MD8"
+    )
 
 
 def test_plc_tags_sheet_is_preferred_to_the_first() -> None:
@@ -157,7 +169,7 @@ def test_first_sheet_when_there_is_no_plc_tags_sheet() -> None:
         ("Int", "%X", "Invalid S7 address"),
         ("Int", "", "no Logical Address"),
         ("", "%MW4", "no Data Type"),
-        ("String", "%MB4", "String length"),
+        ("String", "%MB65400", "address space"),
     ],
 )
 def test_unusable_rows_become_candidates_with_a_problem(
@@ -167,6 +179,63 @@ def test_unusable_rows_become_candidates_with_a_problem(
     assert candidate.path == "Tag"
     assert candidate.problem is not None
     assert problem in candidate.problem
+
+
+def test_plain_string_is_string_254() -> None:
+    (candidate,) = parse_tag_table(table([["S", "", "String", "%MB10", ""]]), "t")
+    assert (candidate.data_type, candidate.length, candidate.problem) == (
+        DataType.STRING,
+        254,
+        None,
+    )
+
+
+def test_unusable_address_is_none_and_the_text_is_kept() -> None:
+    rows = [["T", "", "Timer", "%T5", ""], ["B", "", "Int", "%X", ""]]
+    timer, bad = parse_tag_table(table(rows), "t")
+    assert (timer.address, timer.source_address) == (None, "%T5")
+    assert (bad.address, bad.source_address) == (None, "%X")
+    (good,) = parse_tag_table(table([["G", "", "Int", "%mw2", ""]]), "t")
+    assert good.source_address == "%mw2"
+
+
+@pytest.mark.parametrize("method", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_non_deflate_compression_refused_without_inflating(method: int) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", method) as archive:
+        archive.writestr("xl/workbook.xml", " " * 1_000_000)
+    assert "compression" in refusal(buffer.getvalue()).message
+
+
+def test_flat_element_flood_refused_or_harmless() -> None:
+    flood = f'<worksheet xmlns="{MAIN}"><sheetData>' + "<a/>" * 3_000_000
+    flood += "</sheetData></worksheet>"
+    start = time.monotonic()
+    result = refusal_or_none(workbook({"PLC Tags": flood}))
+    assert result is None or result.file == "tags.xlsx"
+    assert time.monotonic() - start < 20
+
+
+def test_deep_nesting_refused() -> None:
+    deep = f'<worksheet xmlns="{MAIN}">' + "<a>" * 5000 + "</a>" * 5000 + "</worksheet>"
+    start = time.monotonic()
+    error = refusal(workbook({"PLC Tags": deep}))
+    assert "nested" in error.message
+    assert time.monotonic() - start < 5
+
+
+def test_many_children_in_one_row_refused() -> None:
+    row = "<row>" + "<c/>" * 200_000 + "</row>"
+    sheet = f'<worksheet xmlns="{MAIN}"><sheetData>{row}</sheetData></worksheet>'
+    assert "large" in refusal(workbook({"PLC Tags": sheet})).message
+
+
+def test_many_flat_siblings_in_workbook_refused() -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("xl/workbook.xml", "<w>" + "<a/>" * 300_000 + "</w>")
+        archive.writestr("xl/_rels/workbook.xml.rels", "<r/>")
+    refusal(buffer.getvalue())
 
 
 def test_string_with_length_and_type_names_ignore_case() -> None:

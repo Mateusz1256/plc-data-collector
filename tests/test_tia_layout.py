@@ -60,7 +60,8 @@ def offsets(layout: DbLayout) -> dict[str, str]:
     return {c.path: offset(c.address) for c in layout.candidates}
 
 
-def offset(address: S7Address) -> str:
+def offset(address: S7Address | None) -> str:
+    assert address is not None
     return f"{address.byte}" if address.bit is None else f"{address.byte}.{address.bit}"
 
 

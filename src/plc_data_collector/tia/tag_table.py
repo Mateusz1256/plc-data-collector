@@ -10,8 +10,8 @@ Standard library only (``zipfile`` + ``xml.etree``). The file is untrusted, so:
 * every failure is a ``TiaSourceError``.
 
 A row that cannot become a Tag still yields a ``Candidate``, with ``problem``
-set. When the row has no usable address its ``address`` is the placeholder
-``M0`` and nothing may read it while ``problem`` is set.
+set. When its address is unusable, ``address`` is None; the Logical Address
+text as TIA wrote it is always in ``source_address``.
 """
 
 from __future__ import annotations
@@ -26,9 +26,7 @@ from xml.etree import ElementTree
 
 from plc_data_collector.domain import ConfigurationError
 from plc_data_collector.protocols.s7_tags import (
-    Area,
     DataType,
-    S7Address,
     parse_step7,
     size_letter_error,
 )
@@ -47,7 +45,10 @@ _NAME, _TYPE, _ADDRESS, _COMMENT = "name", "data type", "logical address", "comm
 _ALLOWED_ENCODINGS = {"utf-8", "us-ascii", "ascii", "iso-8859-1", "latin-1"}
 _ENCODING = re.compile(rb"""^\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']+)["']""")
 _STRING_LENGTH = re.compile(r"string\[([0-9]{1,3})\]")
-_PLACEHOLDER = S7Address(Area.M, None, 0, None)
+_MAX_DEPTH = 16
+_MAX_LIVE = 100_000
+_ADDRESS_SPACE = 65536
+_STORED_OR_DEFLATED = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
 _ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 _TYPES = {data_type.value: data_type for data_type in DataType}
 _MAX_STRING = 254
@@ -75,6 +76,10 @@ class _Reader:
             if required:
                 raise self.fail(f"The workbook has no {name}.") from None
             return None
+        if info.compress_type not in _STORED_OR_DEFLATED:
+            # Other methods inflate without a per-read bound; Excel/TIA only
+            # write deflate.
+            raise self.fail(f"{name} uses an unsupported compression method.")
         chunks: list[bytes] = []
         try:
             with self.archive.open(info) as stream:
@@ -117,11 +122,34 @@ class _Reader:
         return data
 
     def events(
-        self, name: str, data: bytes
+        self, name: str, data: bytes, drop_depth: int = 2
     ) -> Iterator[tuple[str, ElementTree.Element]]:
-        """End events of the XML in ``data``; malformed XML is a refusal."""
+        """End events of the XML in ``data``, with bounded memory.
+
+        Nesting deeper than ``_MAX_DEPTH`` and too many elements held at once
+        are refused. Elements down to ``drop_depth`` (root = 1) are dropped once
+        the caller has seen them, so a huge document never builds a full tree.
+        """
+        stack: list[ElementTree.Element] = []
+        live = 0
         try:
-            yield from ElementTree.iterparse(io.BytesIO(data), events=("end",))
+            for event, element in ElementTree.iterparse(
+                io.BytesIO(data), events=("start", "end")
+            ):
+                if event == "start":
+                    stack.append(element)
+                    live += 1
+                    if len(stack) > _MAX_DEPTH or live > _MAX_LIVE:
+                        raise self.fail(f"{name} is nested or large beyond limits.")
+                    continue
+                depth = len(stack)
+                stack.pop()
+                yield event, element
+                if depth <= drop_depth:
+                    element.clear()
+                    live = 0 if depth == drop_depth else live
+                    if stack:
+                        stack[-1].remove(element)
         except ElementTree.ParseError as error:
             raise self.fail(f"{name} is not valid XML ({error}).") from error
 
@@ -148,7 +176,7 @@ def _sheet_path(reader: _Reader) -> str:
     assert book is not None and rels is not None
     sheets = [
         (element.get("name", ""), element.get(_ID, ""))
-        for _, element in reader.events("xl/workbook.xml", book)
+        for _, element in reader.events("xl/workbook.xml", book, 3)
         if _local(element.tag) == "sheet"
     ]
     if not sheets:
@@ -210,7 +238,7 @@ def _rows(
     reader: _Reader, name: str, data: bytes, shared: list[str]
 ) -> Iterator[tuple[int, dict[int, str]]]:
     count = 0
-    for _, element in reader.events(name, data):
+    for _, element in reader.events(name, data, 3):
         if _local(element.tag) != "row":
             continue
         count += 1
@@ -232,7 +260,7 @@ def _rows(
 
 def _candidate(name: str, kind: str, address: str, comment: str) -> Candidate:
     def bad(problem: str, data_type: DataType | None = None) -> Candidate:
-        return Candidate(name, _PLACEHOLDER, data_type, None, comment, problem)
+        return Candidate(name, None, data_type, None, comment, problem, address)
 
     lowered = kind.lower()
     if not address:
@@ -261,10 +289,16 @@ def _candidate(name: str, kind: str, address: str, comment: str) -> Candidate:
         if not 1 <= length <= _MAX_STRING:
             problem = f"String length {length} is outside 1-{_MAX_STRING}."
     elif data_type is DataType.STRING:
-        problem = "The tag table does not state the String length; use String[n]."
+        length = _MAX_STRING  # TIA's plain String is String[254]
     if problem is None and data_type is not None:
         problem = size_letter_error(address, size, data_type)
-    return Candidate(name, parsed, data_type, length, comment, problem)
+    if (
+        problem is None
+        and length is not None
+        and parsed.byte + length + 2 > _ADDRESS_SPACE
+    ):
+        problem = "The String does not fit in the address space."
+    return Candidate(name, parsed, data_type, length, comment, problem, address)
 
 
 def parse_tag_table(data: bytes, file_name: str) -> tuple[Candidate, ...]:

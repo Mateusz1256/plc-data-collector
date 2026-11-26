@@ -76,11 +76,12 @@ class Candidate:
     """
 
     path: str
-    address: S7Address
+    address: S7Address | None
     data_type: DataType | None
     length: int | None
     comment: str
     problem: str | None
+    source_address: str = ""
 
 
 @dataclass(frozen=True, slots=True)
