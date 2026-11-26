@@ -7,6 +7,50 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+### Added
+
+- Siemens S7 driver (`python-snap7` 3.6.0 for the connection), read-only:
+  S7-300, S7-400, S7-1200 and S7-1500 by rack and slot; data blocks, merkers,
+  inputs and outputs; data types `bool`, `byte`, `word`, `dword`, `lword`,
+  `char`, `sint`, `usint`, `int`, `uint`, `dint`, `udint`, `lint`, `ulint`,
+  `real`, `lreal`, `string` and `time`; scale and offset. Addresses are stored
+  as `DB10.4`, `M20`, `I0.3` and `Q8`, shown in STEP7 form, and accepted in
+  STEP7 forms (`%DB10.DBD4`, `MW20`, `IW8`, German `E` and `A`). See
+  `docs/protocols/s7.md`.
+- Block reads: neighbouring Tags are read as one block and several blocks are
+  packed into one request, within the PDU size the CPU agreed to. A refused
+  item never makes the other Tags bad; a merged block is re-read Tag by Tag
+  and remembered. A PLC that refuses all reads (PUT/GET off) gives
+  `s7_access_denied` with the fix, without reconnecting, and recovers without
+  a restart. Errors are stored as `s7_*` codes.
+- Panel: S7 Connection form (host, port, rack, slot, max gap), "Test
+  connection" with the PDU size and the CPU, S7 Tag form with "Paste address"
+  and fast entry, CSV paste with STEP7 addresses, and "Import from TIA
+  Portal", which creates Tags from a PLC tag table (`.xlsx`) or from DB and UDT
+  sources with calculated offsets, a preview, and an all-or-nothing save
+  ([ADR 0004](docs/adr/0004-tia-import-calculates-db-offsets.md)). The TIA
+  comment is kept in the Tag's `metadata` as `description`.
+- S7 simulator (`python -m plc_data_collector.simulators.s7`, port 1102), an
+  `s7-sim` service in Docker Compose, a `press3_s7` Connection in the demo
+  configuration, and the TIA-style source `deploy/demo/s7/PressData.db` of the
+  simulated DB.
+
+### Changed
+
+- Protocol rules are found through a registry keyed by protocol, so a new
+  protocol does not edit the dispatch code.
+- New direct runtime dependency: `python-snap7` 3.6.0 (MIT), listed in
+  `THIRD_PARTY_NOTICES.md`.
+
+### Known limitations
+
+- S7 support is not tested on real hardware, and the tag-table column names
+  are taken from TIA documentation without a real export. Compare imported
+  offsets with the Offset column in TIA.
+- S7 DBs with optimized block access cannot be read.
+
 ## [0.4.0] - 2026-11-25
 
 ### Added
