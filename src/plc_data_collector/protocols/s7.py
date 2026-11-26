@@ -50,6 +50,9 @@ _CACHE_LIMIT = 20_000
 _MIN_PDU_LENGTH = 64
 # Closing sends a disconnect request; a dead peer must not hold it up.
 _CLOSE_TIMEOUT_S = 1.0
+# The CPU query is skipped when less of the connect timeout is left: a query
+# cut short leaves its answer in the socket and costs a reconnect.
+_MIN_CPU_QUERY_S = 0.2
 _MAX_PDU_REF = 0xFFFF
 _MAX_CPU_TEXT = 64
 # Marks the items of a request the PLC rejected as a whole (S7 header error).
@@ -69,8 +72,9 @@ class S7Transport(Protocol):
 
     ``connect`` raises on any failure; ``exchange`` raises ``TimeoutError``
     when no answer comes within ``timeout_s`` and ``OSError`` (usually
-    ``ConnectionError``) when the link is broken; ``cpu_description`` never
-    raises and returns ``None`` when the CPU does not say.
+    ``ConnectionError``) when the link is broken; ``cpu_description`` raises
+    when the CPU did not answer cleanly, after which the link may still hold
+    a late answer and must be reopened before the next ``exchange``.
     """
 
     async def connect(
@@ -88,7 +92,7 @@ class S7Transport(Protocol):
         ...
 
     async def cpu_description(self, timeout_s: float) -> str | None:
-        """Return the CPU's order number (or module name), if it answers."""
+        """Return the CPU's order number (or module name); raise on failure."""
         ...
 
 
@@ -145,18 +149,20 @@ class Snap7Transport:
                 await client.disconnect()
 
     async def cpu_description(self, timeout_s: float) -> str | None:
-        """Read the order number (SZL 0x0011), else the module type name."""
+        """Read the order number (SZL 0x0011), else the module type name.
+
+        Raises on a timeout or error: a cut-short SZL request leaves its answer
+        in the socket, which python-snap7 does not drain.
+        """
         client = self._client
-        if client is None or client.connection is None:
-            return None
-        client.connection.timeout = timeout_s
-        try:
-            async with asyncio.timeout(timeout_s):
-                text = _printable((await client.get_order_code()).OrderCode)
-                if not text:
-                    text = _printable((await client.get_cpu_info()).ModuleTypeName)
-        except Exception:
-            return None
+        connection = None if client is None else client.connection
+        if client is None or connection is None:
+            raise ConnectionError("Not connected.")
+        connection.timeout = timeout_s
+        async with asyncio.timeout(timeout_s):
+            text = _printable((await client.get_order_code()).OrderCode)
+            if not text:
+                text = _printable((await client.get_cpu_info()).ModuleTypeName)
         return text or None
 
 
@@ -247,6 +253,32 @@ class S7Driver:
         loop = asyncio.get_running_loop()
         started = loop.time()
         transport = self._transport_factory()
+        pdu_length = await self._open(transport, timeout_s)
+        if not self._cpu_asked:
+            self._cpu_asked = True
+            remaining = timeout_s - (loop.time() - started)
+            if remaining >= _MIN_CPU_QUERY_S:
+                try:
+                    self._cpu = await transport.cpu_description(remaining)
+                except Exception:
+                    # A late answer may still arrive on this link, so reads
+                    # start on a new one; the CPU is not asked again.
+                    LOGGER.debug(
+                        "s7_cpu_description_failed",
+                        extra={"connection_id": self._connection.id},
+                    )
+                    await self._close_quietly(transport)
+                    transport = self._transport_factory()
+                    pdu_length = await self._open(transport, timeout_s)
+                except BaseException:
+                    await self._close_quietly(transport)
+                    raise
+        self._transport = transport
+        self._pdu_length = pdu_length
+        self._closed_by = None
+
+    async def _open(self, transport: S7Transport, timeout_s: float) -> int:
+        """Connect the transport; return the negotiated PDU length."""
         try:
             async with asyncio.timeout(timeout_s):
                 pdu_length = await transport.connect(
@@ -265,14 +297,7 @@ class S7Driver:
         if pdu_length < _MIN_PDU_LENGTH:
             await self._close_quietly(transport)
             raise self._connect_failed()
-        self._transport = transport
-        self._pdu_length = pdu_length
-        self._closed_by = None
-        if not self._cpu_asked:
-            self._cpu_asked = True
-            remaining = timeout_s - (loop.time() - started)
-            if remaining > 0:
-                self._cpu = await transport.cpu_description(remaining)
+        return pdu_length
 
     async def disconnect(self) -> None:
         """Close the connection."""

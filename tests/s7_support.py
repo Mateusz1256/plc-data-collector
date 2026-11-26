@@ -160,7 +160,8 @@ class FakeTransport:
     ``refuse(item)`` may return a return code for an item; an area that is not
     in ``memory`` answers 0x0A and a range outside it 0x05. ``header_error``
     (class << 8 | code) rejects every request; ``fail`` is raised by every
-    exchange.
+    exchange; ``cpu_error`` is raised by ``cpu_description`` and leaves a late
+    answer for the next exchange.
     """
 
     memory: dict[tuple[int, int], bytes] = field(default_factory=dict)
@@ -170,6 +171,11 @@ class FakeTransport:
     header_error: int = 0
     fail: BaseException | None = None
     connect_error: BaseException | None = None
+    cpu_error: BaseException | None = None
+    connect_delay_s: float = 0.0
+    # After a failed CPU query a late answer sits in the socket: the next
+    # exchange returns it, until connect() opens a clean link.
+    stale: bool = False
     connects: int = 0
     closes: int = 0
     cpu_requests: int = 0
@@ -180,8 +186,11 @@ class FakeTransport:
         self, host: str, port: int, rack: int, slot: int, timeout_s: float
     ) -> int:
         self.connects += 1
+        if self.connect_delay_s:
+            await asyncio.sleep(self.connect_delay_s)
         if self.connect_error is not None:
             raise self.connect_error
+        self.stale = False
         return self.pdu_length
 
     async def exchange(self, pdu: bytes, timeout_s: float) -> bytes:
@@ -191,6 +200,9 @@ class FakeTransport:
         self.timeouts.append(timeout_s)
         if self.fail is not None:
             raise self.fail
+        if self.stale:
+            self.stale = False
+            return bytes.fromhex("3207000000010000000c")  # an SZL (user data) answer
         if self.header_error:
             return build_response(pdu_ref, [], header_error=self.header_error)
         response = build_response(pdu_ref, [self._answer(item) for item in items])
@@ -214,4 +226,7 @@ class FakeTransport:
 
     async def cpu_description(self, timeout_s: float) -> str | None:
         self.cpu_requests += 1
+        if self.cpu_error is not None:
+            self.stale = True
+            raise self.cpu_error
         return self.cpu

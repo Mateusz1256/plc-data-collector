@@ -818,3 +818,52 @@ async def test_worker_keeps_polling_refused_reads_without_reconnecting() -> None
         await worker.disconnect()
     assert poll.results[0].value is not None and poll.results[0].value.raw == -1234
     assert transport.connects == 1
+
+
+# -- CPU description failures --------------------------------------------------
+
+
+async def test_failed_cpu_query_reopens_link_so_first_read_is_good() -> None:
+    transport = FakeTransport(
+        memory={(AREA_DB, 1): bytes(DB1)}, cpu_error=TimeoutError()
+    )
+    driver = fake_driver(transport)
+    await driver.connect()
+    assert transport.connects == 2
+    assert transport.closes == 1
+    assert driver.connection_details() == "PDU 480 bytes"
+    [result] = await driver.read([request("a", "DB1.20", "int")])
+    assert result.value is not None and result.value.raw == -1234
+    await driver.connect()
+    assert transport.cpu_requests == 1
+
+
+async def test_failed_cpu_query_keeps_test_connection_ok() -> None:
+    transport = FakeTransport(
+        memory={(AREA_DB, 1): bytes(DB1)}, cpu_error=TimeoutError()
+    )
+    registry = build_driver_registry(
+        [("s7", lambda conn: S7Driver(conn, transport_factory=lambda: transport))]
+    )
+    probe = TagConfig(
+        id="speed",
+        tag_group_id="g",
+        name="Speed",
+        address="DB1.20",
+        value_type=ValueType.INTEGER,
+        protocol_options={"data_type": "int"},
+    )
+    result = await probe_connection(connection(), registry, probe_tag=probe)
+    assert result.ok, result.message
+    assert result.message == (
+        f"Connected in {result.elapsed_ms} ms (PDU 480 bytes). "
+        "Read DB1.20 without errors."
+    )
+
+
+async def test_cpu_query_skipped_when_connect_used_the_timeout() -> None:
+    transport = FakeTransport(connect_delay_s=0.25)
+    driver = fake_driver(transport, timeout_ms=300)
+    await driver.connect()
+    assert transport.cpu_requests == 0
+    assert driver.connection_details() == "PDU 480 bytes"
