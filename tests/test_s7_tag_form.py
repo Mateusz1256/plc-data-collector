@@ -161,6 +161,42 @@ def test_build_field_errors(overrides: dict[str, str], errors: dict[str, str]) -
     assert _errors(_data(**overrides)) == errors
 
 
+PENDING_PASTE_ERROR = "Choose Fill in to use this address, or clear the box."
+
+
+def test_build_refuses_a_pending_paste_address() -> None:
+    # The fields say DB1.4; the box holds an address never filled in. Saving
+    # at DB1.4 would read the wrong bytes without a word.
+    data = _data(db="1", byte="4", data_type="int", paste_address="%DB10.DBW8")
+
+    assert _errors(data) == {"paste_address": PENDING_PASTE_ERROR}
+
+
+def test_build_ignores_a_blank_paste_address() -> None:
+    tag = _build(_data(db="1", byte="4", data_type="int", paste_address="  "))
+
+    assert tag.address == "DB1.4"
+
+
+def test_build_from_csv_row_has_no_paste_box() -> None:
+    row = {
+        "name": "Speed",
+        "address": "DB10.4",
+        "data_type": "real",
+        "tag_group": "press_fast",
+        "paste_address": "%DB1.DBD0",
+    }
+    tag = S7TagForm().build(
+        row,
+        connection=S7,
+        tag_id="t1",
+        allowed_group_ids={"press_fast"},
+        existing=None,
+    )
+
+    assert tag.address == "DB10.4"
+
+
 def test_build_keeps_other_metadata() -> None:
     existing = _build(_data())
     existing = TagConfig(
@@ -427,6 +463,40 @@ def test_fast_entry_proposes_next_address(
     html = page[page.index('action="/panel/connections/press3/tags"') :]
     assert _input_value(html, "byte") == expected["byte"][0]
     assert _selected(html, "data_type") == expected["data_type"][0]
+    assert _input_value(html, "paste_address") == ""
+
+
+def test_tag_form_refuses_a_pending_paste_address(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/press3/tags",
+        data=_data(db="1", data_type="int", paste_address="%DB10.DBW8"),
+    )
+
+    assert response.status_code == 400
+    assert PENDING_PASTE_ERROR in response.text
+    assert _input_value(response.text, "paste_address") == "%DB10.DBW8"
+    assert stores.config.all_tag_ids() == set()
+
+
+def test_enter_in_the_paste_box_fills_in(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+
+    html = signed_in_client.get(
+        "/panel/connections/press3/tags/new", headers={"HX-Request": "true"}
+    ).text
+
+    box = re.search(r'<input[^>]*name="paste_address"[^>]*>', html)
+    assert box is not None
+    tag = box.group(0)
+    assert 'hx-post="/panel/connections/press3/tags/s7-address"' in tag
+    assert "hx-trigger=\"keydown[key=='Enter']\"" in tag
+    assert "event.preventDefault()" in tag
 
 
 def test_tags_list_shows_step7_address_and_description(
@@ -645,3 +715,21 @@ def test_s7_paste_route_preview_and_save(
     saved = signed_in_client.post(url, data={**data, "action": "save"})
     assert saved.status_code == 303
     assert stores.config.all_tag_ids() == {"press3_speed", "press3_run"}
+
+
+def test_s7_paste_route_flags_an_existing_tag(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed(fake_host)
+    signed_in_client.post("/panel/connections/press3/tags", data=_data())
+    assert stores.config.all_tag_ids() == {"press3_line_speed"}
+    url = "/panel/connections/press3/tags/paste"
+    text = "name;address;data_type\nRate;%DB10.DBD4;real\n"
+    data = {"text": text, "tag_group_id": "press_fast"}
+
+    preview = signed_in_client.post(url, data={**data, "action": "preview"})
+    saved = signed_in_client.post(url, data={**data, "action": "save"})
+
+    assert "Same address as Tag press3_line_speed." in preview.text
+    assert saved.status_code != 303
+    assert stores.config.all_tag_ids() == {"press3_line_speed"}

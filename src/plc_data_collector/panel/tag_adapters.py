@@ -30,6 +30,9 @@ class TagFormAdapter(Protocol):
     required_columns: tuple[str, ...]
     # Whether the Tags table shows a Read from column.
     read_from_column: bool
+    # What two Tags with the same ``register_key`` share, in duplicate errors:
+    # "Same register as line 3." for Modbus, "Same address as ..." otherwise.
+    duplicate_noun: str
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]
@@ -80,7 +83,8 @@ class TagFormAdapter(Protocol):
         ...
 
     def register_key(self, tag: TagConfig, connection: ConnectionConfig) -> Hashable:
-        """Return what makes two Tags read the same place (pasted duplicates)."""
+        """Return what makes two Tags read the same place (pasted duplicates,
+        also against the Connection's existing Tags)."""
         ...
 
     def template_context(

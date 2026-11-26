@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Collection, Hashable
+from collections.abc import Collection, Hashable, Sequence
 from dataclasses import dataclass, field
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
@@ -87,11 +87,14 @@ def parse_paste(
     default_group_id: str,
     allowed_group_ids: Collection[str],
     taken_ids: Collection[str],
+    existing_tags: Sequence[TagConfig] = (),
 ) -> PasteResult:
     """Parse pasted ``text`` into Tags of ``connection``.
 
     Rows that fail keep their errors, keyed by column; nothing is raised for a
-    bad row. Problems with the paste as a whole come back as ``error``.
+    bad row. A row that reads the same place as an earlier row, or as one of
+    ``existing_tags`` (the Connection's Tags), is an error. Problems with the
+    paste as a whole come back as ``error``.
     """
     if len(text) > MAX_PASTE_CHARS:
         return PasteResult([], TEXT_LIMIT_ERROR)
@@ -147,6 +150,10 @@ def parse_paste(
         return PasteResult([], ROW_LIMIT_ERROR)
 
     taken = set(taken_ids)
+    noun = adapter.duplicate_noun
+    holders: dict[Hashable, str] = {}
+    for existing in existing_tags:
+        holders.setdefault(adapter.register_key(existing, connection), existing.id)
     seen: dict[Hashable, int] = {}
     rows: list[PasteRow] = []
     for line, cells in raw_rows:
@@ -180,9 +187,13 @@ def parse_paste(
                 errors = dict(error.errors)
             else:
                 key = adapter.register_key(tag, connection)
+                holder = holders.get(key)
                 earlier = seen.get(key)
-                if earlier is not None:
-                    errors["address"] = f"Same register as line {earlier}."
+                if holder is not None:
+                    errors["address"] = f"Same {noun} as Tag {holder}."
+                    tag = None
+                elif earlier is not None:
+                    errors["address"] = f"Same {noun} as line {earlier}."
                     tag = None
                 else:
                     seen[key] = line

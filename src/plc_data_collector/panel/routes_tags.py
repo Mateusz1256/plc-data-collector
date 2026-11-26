@@ -671,6 +671,8 @@ async def _parse_paste(
         group_id if group_id in allowed else (choices[0][0] if choices else "")
     )
     taken = await asyncio.to_thread(stores.config.all_tag_ids)
+    config = await _load_config(stores)
+    group_ids = {g.id for g in config.tag_groups if g.connection_id == connection.id}
     return parse_paste(
         text,
         adapter=tag_adapter_for(connection.protocol),
@@ -678,6 +680,7 @@ async def _parse_paste(
         default_group_id=default_group,
         allowed_group_ids=allowed,
         taken_ids=taken,
+        existing_tags=[t for t in config.tags if t.tag_group_id in group_ids],
     )
 
 

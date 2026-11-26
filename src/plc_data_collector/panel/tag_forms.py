@@ -303,6 +303,7 @@ class GenericTagForm:
     columns: tuple[str, ...] = ("name", "tag_group", "address", "value_type", "unit")
     required_columns: tuple[str, ...] = ("name", "address", "value_type")
     read_from_column = False
+    duplicate_noun = "address"
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]

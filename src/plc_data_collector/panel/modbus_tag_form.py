@@ -171,6 +171,7 @@ class ModbusTagForm:
     )
     required_columns: tuple[str, ...] = ("name", "read_from", "address", "data_type")
     read_from_column = True
+    duplicate_noun = "register"
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
-from plc_data_collector.domain import ConnectionConfig, ValueType
+from plc_data_collector.domain import ConnectionConfig, TagConfig, ValueType
 from plc_data_collector.panel.tag_adapters import tag_adapter_for
 from plc_data_collector.panel.tag_paste import (
     MAX_PASTE_ROWS,
@@ -36,6 +38,7 @@ def _parse(
     text: str,
     connection: ConnectionConfig = MODBUS,
     taken: frozenset[str] = frozenset(),
+    existing: Sequence[TagConfig] = (),
 ) -> PasteResult:
     return parse_paste(
         text,
@@ -44,7 +47,15 @@ def _parse(
         default_group_id="fast",
         allowed_group_ids={"fast", "slow"},
         taken_ids=taken,
+        existing_tags=existing,
     )
+
+
+def _saved(connection: ConnectionConfig, text: str) -> TagConfig:
+    """A Tag the Connection already has, built from a one-row paste."""
+    (row,) = _parse(text, connection).rows
+    assert row.tag is not None
+    return row.tag
 
 
 def test_detect_delimiter() -> None:
@@ -342,7 +353,40 @@ def test_paste_s7_duplicate_compares_canonical_addresses() -> None:
     assert not result.ok
     assert result.rows[0].errors == {}
     assert result.rows[1].errors == {}
-    assert result.rows[2].errors == {"address": "Same register as line 2."}
+    assert result.rows[2].errors == {"address": "Same address as line 2."}
+
+
+def test_paste_s7_flags_an_existing_tag_at_the_same_address() -> None:
+    existing = _saved(S7, "name;address;data_type\nSpeed;DB10.4;real\n")
+    text = "name;address;data_type\nRate;%DB10.DBD4;real\nOther;DB10.8;int\n"
+
+    result = _parse(text, S7, existing=[existing])
+
+    assert not result.ok
+    assert result.rows[0].tag is None
+    assert result.rows[0].errors == {"address": f"Same address as Tag {existing.id}."}
+    assert result.rows[1].errors == {}
+
+
+def test_paste_modbus_flags_an_existing_tag_at_the_same_register() -> None:
+    existing = _saved(MODBUS, "name,read_from,address,data_type\nA,hr,40121,int16\n")
+    text = "name,read_from,address,data_type\nB,hr,40121,uint16\nC,hr,40122,int16\n"
+
+    result = _parse(text, MODBUS, existing=[existing])
+
+    assert not result.ok
+    assert result.rows[0].errors == {"address": f"Same register as Tag {existing.id}."}
+    assert result.rows[1].errors == {}
+
+
+def test_paste_opcua_flags_an_existing_tag_at_the_same_address() -> None:
+    existing = _saved(OPCUA, "name,address,value_type\nT,ns=2;s=T,numeric\n")
+
+    result = _parse(
+        "name,address,value_type\nU,ns=2;s=T,numeric\n", OPCUA, existing=[existing]
+    )
+
+    assert result.rows[0].errors == {"address": f"Same address as Tag {existing.id}."}
 
 
 def test_example_paste_for_s7_parses() -> None:

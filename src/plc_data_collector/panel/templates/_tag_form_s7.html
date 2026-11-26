@@ -3,7 +3,9 @@
     Bit only for bool and Length only for string (each also when it carries
     an error). "Fill in" posts the form to the server, which reads the pasted
     STEP7 address into Area, DB number, Byte and Bit (and the data type when
-    none is chosen) and sends the form back. -#}
+    none is chosen) and sends the form back. Enter in the Paste address box
+    does the same instead of submitting the form; Save refuses an address
+    left in the box. -#}
 {% from "_protocol_fields.html" import field_error %}
 {% set rerender_url = '/panel/tags/' ~ ui.target_id ~ '/edit' if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags/new' %}
 {% macro described(name, errors, help_id=None) -%}
@@ -20,8 +22,8 @@ hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" h
 <div class="inline-form-grid">
 <div class="field">
 <label for="tag-paste-address">Paste address</label>
-<input class="input mono" type="text" name="paste_address" id="tag-paste-address" value="{{ values.get('paste_address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("paste_address", errors, "tag-paste-address-help") }}>
-<small class="field-help" id="tag-paste-address-help">Optional. A STEP7 address from TIA Portal, for example %DB10.DBD4 or %MW20, then Fill in.</small>
+<input class="input mono" type="text" name="paste_address" id="tag-paste-address" value="{{ values.get('paste_address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off" hx-post="/panel/connections/{{ connection_id }}/tags/s7-address" hx-trigger="keydown[key=='Enter']" hx-on:keydown="if (event.key === 'Enter') { event.preventDefault() }" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("paste_address", errors, "tag-paste-address-help") }}>
+<small class="field-help" id="tag-paste-address-help">Optional. A STEP7 address from TIA Portal, for example %DB10.DBD4 or %MW20, then Fill in (or press Enter).</small>
 {{ field_error("paste_address", errors) }}
 </div>
 <div class="field">

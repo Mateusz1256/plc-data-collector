@@ -72,6 +72,7 @@ LENGTH_REQUIRED_ERROR = (
 LENGTH_UNUSED_ERROR = "Length is used only with data type string."
 ENABLED_ERROR = "Enter yes or no."
 PASTE_REQUIRED_ERROR = "Enter an address, for example %DB10.DBD4 or %MW20."
+PASTE_PENDING_ERROR = "Choose Fill in to use this address, or clear the box."
 
 _ENABLED_WORDS = {
     "": True,
@@ -121,6 +122,7 @@ class S7TagForm:
     )
     required_columns: tuple[str, ...] = ("name", "address", "data_type")
     read_from_column = True
+    duplicate_noun = "address"
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]
@@ -176,8 +178,11 @@ class S7TagForm:
 
         With an ``address`` key (a pasted row) the address is read in STEP7 or
         canonical form and ``enabled`` may come from the data; otherwise from
-        the Area, DB number, Byte and Bit fields. Metadata other than the unit
-        is kept from ``existing``. Raises ``FormErrors`` keyed by field name.
+        the Area, DB number, Byte and Bit fields, and an address left in the
+        "Paste address" box without Fill in is an error: saving would use the
+        fields while the user meant the pasted address. Metadata other than
+        the unit is kept from ``existing``. Raises ``FormErrors`` keyed by
+        field name.
         """
         errors: dict[str, str] = {}
         name, group_id = check_name_and_group(data, allowed_group_ids, errors)
@@ -189,6 +194,8 @@ class S7TagForm:
             address = _address_from_text(data, data_type, errors)
         else:
             address = _address_from_fields(data, data_type, errors)
+            if data.get("paste_address", "").strip():
+                errors["paste_address"] = PASTE_PENDING_ERROR
 
         length = optional_whole(
             data, "length", 1, MAX_STRING_LENGTH, LENGTH_RANGE_ERROR, errors
