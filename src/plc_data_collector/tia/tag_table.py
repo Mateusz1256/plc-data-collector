@@ -36,6 +36,8 @@ from plc_data_collector.tia.source import TiaSourceError
 MAX_COMPRESSED_BYTES = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
 MAX_ROWS = 100_000
+# Elements in one XML part; bounds the parse time of a flood of empty elements.
+MAX_ELEMENTS = 2_000_000
 SHEET_NAME = "PLC Tags"
 
 _MAX_COLUMN_LETTERS = 3
@@ -126,12 +128,14 @@ class _Reader:
     ) -> Iterator[tuple[str, ElementTree.Element]]:
         """End events of the XML in ``data``, with bounded memory.
 
-        Nesting deeper than ``_MAX_DEPTH`` and too many elements held at once
-        are refused. Elements down to ``drop_depth`` (root = 1) are dropped once
-        the caller has seen them, so a huge document never builds a full tree.
+        Nesting deeper than ``_MAX_DEPTH``, too many elements held at once and
+        more than ``MAX_ELEMENTS`` elements in the part are refused. Elements
+        down to ``drop_depth`` (root = 1) are dropped once the caller has seen
+        them, so a huge document never builds a full tree.
         """
         stack: list[ElementTree.Element] = []
         live = 0
+        total = 0
         try:
             for event, element in ElementTree.iterparse(
                 io.BytesIO(data), events=("start", "end")
@@ -139,6 +143,9 @@ class _Reader:
                 if event == "start":
                     stack.append(element)
                     live += 1
+                    total += 1
+                    if total > MAX_ELEMENTS:
+                        raise self.fail(f"{name} has too many elements.")
                     if len(stack) > _MAX_DEPTH or live > _MAX_LIVE:
                         raise self.fail(f"{name} is nested or large beyond limits.")
                     continue

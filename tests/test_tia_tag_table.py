@@ -94,14 +94,6 @@ def refusal(data: bytes) -> TiaSourceError:
     return caught.value
 
 
-def refusal_or_none(data: bytes) -> TiaSourceError | None:
-    try:
-        parse_tag_table(data, "tags.xlsx")
-    except TiaSourceError as error:
-        return error
-    return None
-
-
 def test_three_rows_become_candidates() -> None:
     data = table(
         [
@@ -207,13 +199,15 @@ def test_non_deflate_compression_refused_without_inflating(method: int) -> None:
     assert "compression" in refusal(buffer.getvalue()).message
 
 
-def test_flat_element_flood_refused_or_harmless() -> None:
-    flood = f'<worksheet xmlns="{MAIN}"><sheetData>' + "<a/>" * 3_000_000
+def test_flat_element_flood_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real cap (2 million elements per part) stops a 48 MB flood of empty
+    # elements in seconds; a small cap shows the same refusal quickly.
+    assert tag_table.MAX_ELEMENTS == 2_000_000
+    monkeypatch.setattr(tag_table, "MAX_ELEMENTS", 1000)
+    flood = f'<worksheet xmlns="{MAIN}"><sheetData>' + "<a/>" * 1001
     flood += "</sheetData></worksheet>"
-    start = time.monotonic()
-    result = refusal_or_none(workbook({"PLC Tags": flood}))
-    assert result is None or result.file == "tags.xlsx"
-    assert time.monotonic() - start < 20
+    error = refusal(workbook({"PLC Tags": flood}))
+    assert error.message == "xl/worksheets/sheet1.xml has too many elements."
 
 
 def test_deep_nesting_refused() -> None:

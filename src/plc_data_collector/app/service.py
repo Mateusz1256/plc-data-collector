@@ -205,6 +205,7 @@ async def _run_runtime_and_api(
         host=supervisor,
         admin_password=settings.admin_password,
         session_secret=secret_box.derive(b"panel-session"),
+        data_dir=settings.data_dir,
     )
     server = _ServiceApiServer(
         uvicorn.Config(

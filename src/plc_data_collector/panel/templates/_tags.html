@@ -6,6 +6,7 @@
 {% if tag_section.group_choices %}
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-target="#tag-form-slot" hx-swap="innerHTML">Add tag</a>
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-target="#tag-form-slot" hx-swap="innerHTML">Paste tags</a>
+{% if tag_section.tia_import %}<a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/import-tia">Import from TIA Portal</a>{% endif %}
 {% endif %}
 </div>
 <div id="tag-form-slot">

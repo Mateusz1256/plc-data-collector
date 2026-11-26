@@ -121,6 +121,7 @@ def panel_client(
     fake_host: FakeHost,
     panel_admin_password: str | None,
     login_sleeps: list[float],
+    tmp_path: Path,
 ) -> Iterator[TestClient]:
     """Return a client for an app with the Panel mounted; not signed in."""
     app = create_api_app(
@@ -129,6 +130,7 @@ def panel_client(
             host=fake_host,
             admin_password=panel_admin_password,
             session_secret=PANEL_SESSION_SECRET,
+            data_dir=tmp_path / "data",
         ),
     )
     with TestClient(app, follow_redirects=False) as client:

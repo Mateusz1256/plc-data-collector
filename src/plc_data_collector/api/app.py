@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, FastAPI, Response, status
@@ -29,11 +30,14 @@ class WebOptions:
 
     An unset or empty ``admin_password`` turns the Panel off;
     ``session_secret`` signs the session cookie. Neither appears in ``repr``.
+    ``data_dir`` holds the files of a TIA Portal import between preview and
+    save (``tia-uploads/``); None uses a private temporary directory.
     """
 
     host: CollectorHost
     admin_password: str | None = field(repr=False)
     session_secret: bytes = field(repr=False)
+    data_dir: Path | None = None
 
 
 def create_api_app(
@@ -147,8 +151,13 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
     )
     from plc_data_collector.panel.routes_settings import create_settings_router
     from plc_data_collector.panel.routes_tags import create_tags_router
+    from plc_data_collector.panel.tia_import import UploadStore
 
     app.state.panel_web = web
+    # Created here, so uploads left by an earlier run are cleaned at startup.
+    app.state.tia_uploads = UploadStore(
+        None if web.data_dir is None else web.data_dir / "tia-uploads"
+    )
     # SameSite=Strict is the CSRF defence for the Panel's forms.
     app.add_middleware(
         SessionMiddleware,

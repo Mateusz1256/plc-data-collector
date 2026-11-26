@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from dataclasses import replace
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request, status
@@ -47,6 +48,21 @@ from plc_data_collector.panel.tag_paste import (
     example_paste,
     parse_paste,
 )
+from plc_data_collector.panel.tia_import import (
+    EXPIRED_MESSAGE,
+    MAX_FILE_BYTES,
+    MAX_FILES,
+    MAX_PREVIEW_ROWS,
+    ImportForm,
+    ImportPreview,
+    ImportRefused,
+    UploadedFile,
+    UploadRefused,
+    UploadStore,
+    check_files,
+    prepare_import,
+    read_upload,
+)
 from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 
 GROUP_DELETED_MESSAGE = (
@@ -59,6 +75,13 @@ CONNECTION_NOT_FOUND = "This connection doesn't exist or was deleted."
 GROUP_NOT_FOUND = "This tag group doesn't exist or was deleted."
 TAG_NOT_FOUND = "This tag doesn't exist or was deleted."
 PASTE_IDS_TAKEN = "Some IDs were taken meanwhile. Preview again."
+STORE_FAILED = (
+    "The files could not be stored on the server. Check the free disk space "
+    "of the data directory."
+)
+# Form fields a preview may post: a name and a checkbox per shown row, plus
+# the selection carried for rows the filter hides.
+TIA_MAX_FIELDS = 10 * MAX_PREVIEW_ROWS
 # Attempts at a free generated Tag ID when concurrent creates take the same one.
 ID_ATTEMPTS = 5
 
@@ -294,6 +317,155 @@ def create_tags_router() -> APIRouter:
             status_code=(
                 status.HTTP_400_BAD_REQUEST
                 if refused_save or result.error
+                else status.HTTP_200_OK
+            ),
+        )
+
+    @router.get(
+        "/connections/{connection_id}/tags/import-tia",
+        include_in_schema=False,
+        dependencies=[AdminRequired],
+    )
+    async def tia_import_form(
+        request: Request, connection_id: str, stores: PanelStores
+    ) -> HTMLResponse:
+        connection = await _connection(stores, connection_id)
+        if connection is None or connection.protocol != S7_PROTOCOL:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        return await _tia_page(request, stores, connection)
+
+    @router.post(
+        "/connections/{connection_id}/tags/import-tia",
+        include_in_schema=False,
+        dependencies=[AdminRequired, SameSiteRequired],
+    )
+    async def tia_upload(
+        request: Request, connection_id: str, stores: PanelStores
+    ) -> HTMLResponse:
+        connection = await _connection(stores, connection_id)
+        if connection is None or connection.protocol != S7_PROTOCOL:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        group_id = ""
+        try:
+            # Limits are kept while the body arrives, not after it is read.
+            fields, files = await read_upload(request)
+            group_id = fields.get("tag_group_id", "")
+            check_files(files)
+        except UploadRefused as error:
+            return await _tia_page(
+                request,
+                stores,
+                connection,
+                group_id=group_id,
+                error=error.message,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        uploads = _uploads(request)
+        try:
+            token = await asyncio.to_thread(uploads.save, files)
+        except OSError:
+            return await _tia_page(
+                request,
+                stores,
+                connection,
+                group_id=group_id,
+                error=STORE_FAILED,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        form = ImportForm(group_id=group_id)
+        try:
+            preview = await _tia_prepare(stores, connection, files, form)
+        except ImportRefused as error:
+            await asyncio.to_thread(uploads.delete, token)
+            return await _tia_page(
+                request,
+                stores,
+                connection,
+                group_id=group_id,
+                error=error.message,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        return await _tia_page(
+            request, stores, connection, token=token, files=files, preview=preview
+        )
+
+    @router.post(
+        "/connections/{connection_id}/tags/import-tia/{token}",
+        include_in_schema=False,
+        dependencies=[AdminRequired, SameSiteRequired],
+    )
+    async def tia_preview_or_save(
+        request: Request, connection_id: str, token: str, stores: PanelStores
+    ) -> Response:
+        connection = await _connection(stores, connection_id)
+        if connection is None or connection.protocol != S7_PROTOCOL:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        uploads = _uploads(request)
+        # The store checks the token's form before it touches a path.
+        files = await asyncio.to_thread(uploads.load, token)
+        posted = await request.form(max_fields=TIA_MAX_FIELDS)
+        form = ImportForm.from_pairs(posted.multi_items())
+        if files is None:
+            return await _tia_page(
+                request,
+                stores,
+                connection,
+                group_id=form.group_id,
+                error=EXPIRED_MESSAGE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            preview = await _tia_prepare(stores, connection, files, form)
+        except ImportRefused as error:
+            # The files did not change, so this only happens if parsing rules
+            # did; the upload is of no further use.
+            await asyncio.to_thread(uploads.delete, token)
+            return await _tia_page(
+                request,
+                stores,
+                connection,
+                group_id=form.group_id,
+                error=error.message,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+        if form.action == "save" and preview.tags is not None:
+            tags = preview.tags
+            try:
+                await asyncio.to_thread(stores.config.create_tags, tags)
+            except ConfigurationError as error:
+                message = (
+                    PASTE_IDS_TAKEN if error.code == "duplicate_id" else error.message
+                )
+                fresh = await _tia_prepare(
+                    stores, connection, files, replace(form, action="preview")
+                )
+                fresh.error = message
+                return await _tia_page(
+                    request,
+                    stores,
+                    connection,
+                    token=token,
+                    files=files,
+                    preview=fresh,
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            for tag in tags:
+                await asyncio.to_thread(
+                    audit.configuration_changed, stores, "tag", tag.id, "created"
+                )
+            await asyncio.to_thread(uploads.delete, token)
+            flash(request, f"Added {len(tags)} {'tag' if len(tags) == 1 else 'tags'}.")
+            return _back_to(connection_id)
+        return await _tia_page(
+            request,
+            stores,
+            connection,
+            token=token,
+            files=files,
+            preview=preview,
+            status_code=(
+                status.HTTP_400_BAD_REQUEST
+                if form.action == "save"
                 else status.HTTP_200_OK
             ),
         )
@@ -580,6 +752,66 @@ async def _paste_page(
     }
     template = "_tag_paste.html" if _is_htmx(request) else "tag_paste.html"
     return render(request, template, context, status_code=status_code)
+
+
+def _uploads(request: Request) -> UploadStore:
+    store: UploadStore = request.app.state.tia_uploads
+    return store
+
+
+async def _tia_prepare(
+    stores: Stores,
+    connection: ConnectionConfig,
+    files: list[UploadedFile],
+    form: ImportForm,
+) -> ImportPreview:
+    """Parse, lay out and check the upload in a thread (it can take seconds)."""
+    config = await _load_config(stores)
+    group_ids = [gid for gid, _ in group_choices(config, connection.id)]
+    existing = [tag for tag in config.tags if tag.tag_group_id in set(group_ids)]
+    taken = await asyncio.to_thread(stores.config.all_tag_ids)
+    return await asyncio.to_thread(
+        prepare_import,
+        files,
+        form,
+        connection=connection,
+        existing=existing,
+        taken_ids=taken,
+        group_ids=group_ids,
+    )
+
+
+async def _tia_page(
+    request: Request,
+    stores: Stores,
+    connection: ConnectionConfig,
+    *,
+    token: str | None = None,
+    files: list[UploadedFile] | None = None,
+    preview: ImportPreview | None = None,
+    group_id: str = "",
+    error: str | None = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    config = await _load_config(stores)
+    choices = group_choices(config, connection.id)
+    context: dict[str, object] = {
+        "connection_id": connection.id,
+        "connection_name": connection.name,
+        "title": "Import from TIA Portal",
+        "nav": "connections",
+        "form_url": f"/panel/connections/{connection.id}/tags/import-tia",
+        "group_choices": choices,
+        "selected_group": preview.group_id if preview else group_id,
+        "max_files": MAX_FILES,
+        "max_megabytes": MAX_FILE_BYTES // (1024 * 1024),
+        "max_rows": MAX_PREVIEW_ROWS,
+        "token": token,
+        "file_names": [upload.name for upload in files or []],
+        "preview": preview,
+        "error": error or (preview.error if preview else None),
+    }
+    return render(request, "tia_import.html", context, status_code=status_code)
 
 
 def _group_store_errors(error: ConfigurationError) -> dict[str, str]:
