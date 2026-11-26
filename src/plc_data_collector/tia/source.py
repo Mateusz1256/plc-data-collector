@@ -71,6 +71,12 @@ _NUMBERED = re.compile(r"(DB|FB|SFB|UDT)(\d+)", re.IGNORECASE)
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TITLE = re.compile(r"TITLE[ \t]*=[^\n]*", re.IGNORECASE)
 _MAX_BLOCK_NUMBER = 65535
+# Array bounds are DInt in TIA; more digits than that are never a valid number.
+_DINT_MIN = -(2**31)
+_DINT_MAX = 2**31 - 1
+_MAX_DIGITS = 10
+# Struct/Array nesting deeper than this is refused (no real DB comes close).
+MAX_NESTING = 64
 
 
 class TiaSourceError(Exception):
@@ -296,6 +302,7 @@ class _Parser:
         self._file = file
         self._tokens, self._comments = _tokenize(file, source)
         self._position = 0
+        self._depth = 0
 
     # token helpers
 
@@ -334,6 +341,12 @@ class _Parser:
                 token, f"Expected {word} {context} but found {_describe(token)}."
             )
         return token
+
+    def _integer(self, token: _Token, digits: str) -> int:
+        """The value of a run of digits; refuse more digits than a DInt has."""
+        if len(digits.lstrip("0")) > _MAX_DIGITS:
+            raise self._error(token, f"The number {digits[:12]}... is too large.")
+        return int(digits)
 
     def _optional_semicolon(self) -> None:
         if self._is_symbol(self._peek(), ";"):
@@ -378,7 +391,7 @@ class _Parser:
             kind, digits = token.text.upper(), self._next().text
         else:
             return None
-        number = int(digits)
+        number = self._integer(token, digits)
         if not 1 <= number <= _MAX_BLOCK_NUMBER:
             raise self._error(token, f"Block number {number} is outside 1-65535.")
         return f"{kind}{number}", number
@@ -528,20 +541,17 @@ class _Parser:
         """Parse a type; for a Struct (or array of Struct) also return the line
         of the ``Struct`` keyword, which carries the member's comment."""
         token = self._next()
-        if self._is(token, "struct"):
-            self._optional_semicolon()
-            return Struct(self._members()), token.line
-        if self._is(token, "array"):
-            dims = self._dims()
-            self._expect_word("of", "after the array bounds")
-            if self._is(self._peek(), "array"):
+        if self._is(token, "struct", "array"):
+            if self._depth >= MAX_NESTING:
                 raise self._error(
-                    self._peek(),
-                    "Array of Array is not supported; TIA declares a "
-                    "multi-dimensional array as Array[a..b, c..d].",
+                    token,
+                    f"Structs and arrays nest deeper than {MAX_NESTING} levels.",
                 )
-            element, struct_line = self._type()
-            return Array(dims, element), struct_line
+            self._depth += 1
+            try:
+                return self._nested_type(token)
+            finally:
+                self._depth -= 1
         if token.kind == "quoted":
             return Named(token.text, quoted=True), None
         if token.kind == "word":
@@ -554,6 +564,22 @@ class _Parser:
             return Named(token.text, quoted=False), None
         raise self._error(token, f"Expected a type but found {_describe(token)}.")
 
+    def _nested_type(self, token: _Token) -> tuple[TypeRef, int | None]:
+        """The rest of a ``Struct`` or ``Array`` type after its keyword."""
+        if self._is(token, "struct"):
+            self._optional_semicolon()
+            return Struct(self._members()), token.line
+        dims = self._dims()
+        self._expect_word("of", "after the array bounds")
+        if self._is(self._peek(), "array"):
+            raise self._error(
+                self._peek(),
+                "Array of Array is not supported; TIA declares a "
+                "multi-dimensional array as Array[a..b, c..d].",
+            )
+        element, struct_line = self._type()
+        return Array(dims, element), struct_line
+
     def _string_length(self, name: str) -> int:
         limit = _STRING_LIMITS[name]
         if not self._is_symbol(self._peek(), "["):
@@ -564,7 +590,7 @@ class _Parser:
             raise self._error(
                 token, f"Expected a {name} length but found {_describe(token)}."
             )
-        length = int(token.text)
+        length = self._integer(token, token.text)
         if not 1 <= length <= limit:
             label = "String" if name == "string" else "WString"
             raise self._error(token, f"{label} length must be 1-{limit}, not {length}.")
@@ -602,7 +628,12 @@ class _Parser:
                 f"Expected a number as array bound but found {_describe(token)}; "
                 "only literal bounds can be laid out.",
             )
-        return sign * int(token.text)
+        bound = sign * self._integer(token, token.text)
+        if not _DINT_MIN <= bound <= _DINT_MAX:
+            raise self._error(
+                token, f"Array bound {bound} is outside the DInt range of TIA."
+            )
+        return bound
 
     def _skip_initial_value(self) -> None:
         """Skip ``:= value`` up to (not including) the ``;`` that ends it."""

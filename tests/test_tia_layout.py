@@ -15,6 +15,7 @@ layout. None of them is the output of the layout code.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -479,3 +480,59 @@ def test_every_elementary_type_the_parser_knows_has_a_size() -> None:
     for name in sorted(ELEMENTARY_TYPES):
         layout = lay_out(f"      a : {name};\n      b : Byte;\n")
         assert [c.path for c in layout.candidates] == ["a", "b"], name
+
+
+# --- hostile input ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "Array[0..2000000000] of Bool",
+        "Array[0..100000000, 0..100000000] of Bool",
+        "Array[0..1000000] of Bool",
+        "Array[0..70000] of Byte",
+        "Array[0..2147483647, -2147483648..2147483647] of Struct\n"
+        " x : Int;\n END_STRUCT",
+    ],
+    ids=[
+        "2e9-bools",
+        "1e8-squared-bools",
+        "1e6-bools",
+        "70001-bytes",
+        "dint-squared-structs",
+    ],
+)
+def test_arrays_too_large_for_a_db_refused_quickly(declaration: str) -> None:
+    start = time.monotonic()
+    error = refused(db_text(f"      a : Int;\n      b : {declaration};\n"))
+    assert time.monotonic() - start < 1
+    assert (error.file, error.line) == ("R.db", 6)
+    assert "65536" in error.message
+
+
+def test_largest_bool_array_that_fits_is_laid_out() -> None:
+    # 65534 bytes after the Int: 524272 bits, the last at byte 65535 bit 7.
+    layout = lay_out("      a : Int;\n      b : Array[0..524271] of Bool;\n")
+    assert layout.size == 65536
+    assert offset(layout.candidates[-1].address) == "65535.7"
+
+
+def test_long_udt_chain_refused_quickly() -> None:
+    count = 3000
+    chain = "".join(
+        udt(f"T{i}", f'      n : "T{i + 1}";\n') for i in range(count)
+    ) + udt(f"T{count}", "      x : Int;\n")
+    start = time.monotonic()
+    error = refused(db_text('      a : "T0";\n'), ("Chain.udt", chain))
+    assert time.monotonic() - start < 1
+    assert error.file == "Chain.udt"
+    assert "nest" in error.message
+
+
+def test_nesting_up_to_the_limit_is_laid_out() -> None:
+    chain = "".join(udt(f"T{i}", f'      n : "T{i + 1}";\n') for i in range(30)) + udt(
+        "T30", "      x : Int;\n"
+    )
+    layout = lay_out('      a : "T0";\n', chain)
+    assert [c.path for c in layout.candidates] == ["a" + ".n" * 30 + ".x"]

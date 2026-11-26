@@ -17,12 +17,12 @@ instead of guessed: a wrong offset would silently read the wrong bytes.
 
 from __future__ import annotations
 
-import itertools
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
 from plc_data_collector.protocols.s7_tags import Area, DataType, S7Address, byte_span
 from plc_data_collector.tia.source import (
+    MAX_NESTING,
     Array,
     DbSource,
     Elementary,
@@ -61,6 +61,9 @@ _UNSUPPORTED_SIZES = {
 _BYTE_TYPES = frozenset({"byte", "char", "sint", "usint"})
 _NO_FIXED_LAYOUT = frozenset({"variant", "pointer", "any", "db_any"})
 _ADDRESS_SPACE = 65536
+_TOO_LARGE = (
+    f"The DB is larger than {_ADDRESS_SPACE} bytes; S7 addresses end at byte 65535."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +147,7 @@ class _Layout:
         self._number = number
         self._types = types
         self._open_types: list[str] = []
+        self._depth = 0
 
     def next_free_byte(self) -> None:
         if self.bit:
@@ -171,7 +175,29 @@ class _Layout:
     ) -> None:
         if isinstance(type_ref, Elementary):
             self._place_elementary(type_ref, path, comment, file, line)
-        elif isinstance(type_ref, Struct):
+            return
+        if self._depth >= MAX_NESTING:
+            raise TiaSourceError(
+                file,
+                line,
+                f"Structs, arrays and PLC data types nest deeper than {MAX_NESTING} "
+                "levels.",
+            )
+        self._depth += 1
+        try:
+            self._place_nested(type_ref, path, comment, file, line)
+        finally:
+            self._depth -= 1
+
+    def _place_nested(
+        self,
+        type_ref: Struct | Array | Named,
+        path: str,
+        comment: str,
+        file: str,
+        line: int,
+    ) -> None:
+        if isinstance(type_ref, Struct):
             if not type_ref.members:
                 raise TiaSourceError(
                     file, line, "A Struct without members cannot be laid out."
@@ -245,8 +271,16 @@ class _Layout:
                 "not certain, so the import refuses rather than guess.",
             )
         self.align_even()
-        ranges = [range(low, high + 1) for low, high in array.dims]
-        for index in itertools.product(*ranges):
+        # Refuse before expanding: every element takes at least one bit (Bool)
+        # or one byte (anything else, as empty Structs/UDTs are refused).
+        count = 1
+        for low, high in array.dims:
+            count *= high - low + 1
+        element_bits = 1 if element == Elementary("bool") else 8
+        free_bits = (_ADDRESS_SPACE - self.byte) * 8
+        if count * element_bits > free_bits:
+            raise TiaSourceError(file, line, _TOO_LARGE)
+        for index in _indices(array.dims):
             suffix = ",".join(str(i) for i in index)
             self.place(element, f"{path}[{suffix}]", comment, file, line)
         self.align_even()
@@ -274,12 +308,7 @@ class _Layout:
             problem = UNSUPPORTED_PROBLEM
         end = self.byte + (1 if bit is not None else span)
         if end > _ADDRESS_SPACE:
-            raise TiaSourceError(
-                file,
-                line,
-                f"The DB is larger than {_ADDRESS_SPACE} bytes; S7 addresses end at "
-                "byte 65535.",
-            )
+            raise TiaSourceError(file, line, _TOO_LARGE)
         address = S7Address(Area.DB, self._number, self.byte, bit)
         self.candidates.append(
             Candidate(path, address, data_type, length, comment, problem)
@@ -298,3 +327,17 @@ def _unsupported_size(elementary: Elementary) -> int:
         assert elementary.string_length is not None  # the parser always sets it
         return 2 * elementary.string_length + 4
     return _UNSUPPORTED_SIZES[elementary.name]
+
+
+def _indices(dims: tuple[tuple[int, int], ...]) -> Iterator[tuple[int, ...]]:
+    """Array indices in storage order (last index fastest), one at a time."""
+    index = [low for low, _ in dims]
+    while True:
+        yield tuple(index)
+        position = len(dims) - 1
+        while position >= 0 and index[position] == dims[position][1]:
+            index[position] = dims[position][0]
+            position -= 1
+        if position < 0:
+            return
+        index[position] += 1

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -294,3 +295,34 @@ def test_duplicate_type_refused() -> None:
 def test_unterminated_string_refused() -> None:
     error = refusal([("s.db", db_text("      a : String[4] := 'abc;\n"))])
     assert (error.file, error.line) == ("s.db", 6)
+
+
+# --- hostile input ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "      a : Array[0..2147483648] of Bool;\n",
+        "      a : Array[-2147483649..0] of Bool;\n",
+        "      a : Array[0..99999999999999999999999] of Bool;\n",
+        f"      a : Array[0..{'9' * 5000}] of Bool;\n",
+        f"      a : String[{'9' * 5000}];\n",
+    ],
+    ids=["above-dint", "below-dint", "23-digits", "5000-digits", "string-5000-digits"],
+)
+def test_bounds_beyond_dint_or_huge_literals_refused(body: str) -> None:
+    error = refusal([("H.db", db_text(body))])
+    assert (error.file, error.line) == ("H.db", 6)
+
+
+def test_deep_struct_nesting_refused_quickly() -> None:
+    depth = 400
+    body = "".join(f"      s{i} : Struct\n" for i in range(depth))
+    body += "      x : Int;\n" + "      END_STRUCT;\n" * depth
+    start = time.monotonic()
+    error = refusal([("N.db", db_text(body))])
+    assert time.monotonic() - start < 1
+    assert error.file == "N.db"
+    assert 6 <= error.line < 6 + depth
+    assert "nest" in error.message
