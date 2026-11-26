@@ -38,6 +38,7 @@ agents/
 .env.*
 !.env.example
 *.db
+!deploy/demo/s7/*.db
 
 # Editors and OS files
 .idea/

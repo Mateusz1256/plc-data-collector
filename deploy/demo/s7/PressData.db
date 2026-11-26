@@ -1,0 +1,26 @@
+DATA_BLOCK "PressData"
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   NON_RETAIN
+   STRUCT 
+      Pressure : Real;   // Hydraulikdruck in bar
+      Status : Struct   // Pressenstatus
+         Running : Bool;   // Presse läuft
+         Fault : Bool;   // Störung
+         DoorClosed : Bool;   // Schutztür geschlossen
+         Mode : Byte;   // Betriebsart 1..3
+      END_STRUCT;
+      Temps : Array[0..3] of Real;   // Öltemperatur an vier Messpunkten in °C
+      Cycles : DInt;   // Zykluszähler
+      RamPosition : Int;   // Stößelposition in 0.1 mm
+      Energy : LReal;   // Energie in Wh
+      Recipe : String[20];   // Rezeptname
+      Motor : "typeMotor";   // Hauptmotor
+      Batch : UInt;   // Chargennummer
+   END_STRUCT;
+
+
+BEGIN
+
+END_DATA_BLOCK
+
