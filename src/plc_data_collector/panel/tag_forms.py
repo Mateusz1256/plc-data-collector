@@ -383,6 +383,12 @@ class GenericTagForm:
         """Return the Read from, Address and Type cells of a Tags table row."""
         return ("", tag.address, tag.value_type.value)
 
+    def register_key(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> tuple[str, ...]:
+        """Return the address: Tags with the same address read the same place."""
+        return (tag.address,)
+
     def template_context(
         self, values: Mapping[str, object], connection: ConnectionConfig
     ) -> dict[str, object]:

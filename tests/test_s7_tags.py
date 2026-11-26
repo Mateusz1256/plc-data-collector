@@ -85,6 +85,26 @@ def test_parse_step7_refuses(text: str) -> None:
     assert info.value.code == "s7_invalid_address"
 
 
+def test_parse_step7_takes_canonical_with_percent() -> None:
+    assert parse_step7("%DB10.4") == (DB10_4, None)
+    assert parse_step7("%db10.4.0") == (S7Address(Area.DB, 10, 4, 0), 0)
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ("DB0.1", "DB number 0 in 'DB0.1' is outside 1-65535."),
+        ("%DB70000.1", "DB number 70000 in '%DB70000.1' is outside 1-65535."),
+        ("DB10.4.8", "Bit 8 in 'DB10.4.8' is outside 0-7."),
+        ("M65536", "Byte 65536 in 'M65536' is outside 0-65535."),
+    ],
+)
+def test_parse_step7_keeps_precise_range_messages(text: str, message: str) -> None:
+    with pytest.raises(ConfigurationError) as info:
+        parse_step7(text)
+    assert info.value.message == message
+
+
 def test_display_address() -> None:
     assert display_address(DB10_4, DataType.REAL) == "DB10.DBD4"
     assert display_address(S7Address(Area.DB, 10, 4, 0), DataType.BOOL) == "DB10.DBX4.0"

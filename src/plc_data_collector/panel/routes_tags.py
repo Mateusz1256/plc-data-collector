@@ -29,6 +29,7 @@ from plc_data_collector.panel.routes_connections import (
     SAVED_MESSAGE,
     render_connection_page,
 )
+from plc_data_collector.panel.s7_tag_form import S7TagForm
 from plc_data_collector.panel.tag_adapters import TagFormAdapter, tag_adapter_for
 from plc_data_collector.panel.tag_forms import (
     GROUP_DUPLICATE_ERROR,
@@ -46,6 +47,7 @@ from plc_data_collector.panel.tag_paste import (
     example_paste,
     parse_paste,
 )
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 
 GROUP_DELETED_MESSAGE = (
     "Tag group deleted. Saved changes take effect after you apply them from the banner."
@@ -198,6 +200,33 @@ def create_tags_router() -> APIRouter:
             values = adapter.defaults(connection, group_choices(config, connection_id))
         ui = FormUi("new", None, values, {})
         return await _tag_form(request, stores, connection, adapter, ui, config)
+
+    @router.post(
+        "/connections/{connection_id}/tags/s7-address",
+        include_in_schema=False,
+        dependencies=[AdminRequired, SameSiteRequired],
+    )
+    async def fill_s7_address(
+        request: Request, connection_id: str, stores: PanelStores
+    ) -> HTMLResponse:
+        # The S7 form's "Paste address" box: read the STEP7 address on the
+        # server and send the form back with Area, DB number, Byte and Bit set.
+        connection = await _connection(stores, connection_id)
+        if connection is None or connection.protocol != S7_PROTOCOL:
+            return _not_found(request, CONNECTION_NOT_FOUND)
+        data = await _form_data(request)
+        form = S7TagForm()
+        values, errors = form.fill_from_address(form.values_from_data(data))
+        ui = FormUi("new", None, values, errors)
+        tag_id = data.get("tag_id", "")
+        if tag_id:
+            found = await _tag_and_connection(stores, tag_id)
+            if found is None or found[1].id != connection.id:
+                return _not_found(request, TAG_NOT_FOUND)
+            ui = FormUi("edit", tag_id, values, errors)
+        return await _tag_form(
+            request, stores, connection, form, ui, await _load_config(stores)
+        )
 
     @router.get(
         "/connections/{connection_id}/tags/paste",

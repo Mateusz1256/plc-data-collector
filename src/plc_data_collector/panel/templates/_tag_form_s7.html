@@ -1,0 +1,105 @@
+{#- S7 fields of the Tag form. Changing Area or Data type fetches the form
+    again with the current values, so DB number shows only for data blocks,
+    Bit only for bool and Length only for string (each also when it carries
+    an error). "Fill in" posts the form to the server, which reads the pasted
+    STEP7 address into Area, DB number, Byte and Bit (and the data type when
+    none is chosen) and sends the form back. -#}
+{% from "_protocol_fields.html" import field_error %}
+{% set rerender_url = '/panel/tags/' ~ ui.target_id ~ '/edit' if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags/new' %}
+{% macro described(name, errors, help_id=None) -%}
+{%- set ids = [] -%}
+{%- if help_id %}{% set _ = ids.append(help_id) %}{% endif -%}
+{%- if errors.get(name) %}{% set _ = ids.append("field-" ~ name ~ "-error") %}{% endif -%}
+{%- if ids %} aria-describedby="{{ ids | join(' ') }}"{% endif -%}
+{%- if errors.get(name) %} aria-invalid="true"{% endif -%}
+{%- endmacro %}
+{% macro redraw() -%}
+hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"
+{%- endmacro %}
+{% if ui.mode == "edit" %}<input type="hidden" name="tag_id" value="{{ ui.target_id }}">{% endif %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-paste-address">Paste address</label>
+<input class="input mono" type="text" name="paste_address" id="tag-paste-address" value="{{ values.get('paste_address', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("paste_address", errors, "tag-paste-address-help") }}>
+<small class="field-help" id="tag-paste-address-help">Optional. A STEP7 address from TIA Portal, for example %DB10.DBD4 or %MW20, then Fill in.</small>
+{{ field_error("paste_address", errors) }}
+</div>
+<div class="field">
+<span aria-hidden="true">&nbsp;</span>
+<button type="button" class="btn" hx-post="/panel/connections/{{ connection_id }}/tags/s7-address" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML">Fill in</button>
+</div>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-area">Area</label>
+<select class="input" name="area" id="tag-area" {{ redraw() }}{{ described("area", errors) }}>
+{% for key, label in extra.areas %}
+<option value="{{ key }}"{% if key == values.get('area') %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{{ field_error("area", errors) }}
+</div>
+{% if values.get('area') == 'db' or errors.get('db') %}
+<div class="field">
+<label for="tag-db">DB number</label>
+<input class="input mono" type="text" inputmode="numeric" name="db" id="tag-db" value="{{ values.get('db', '') }}" autocomplete="off"{{ described("db", errors, "tag-db-help") }}>
+<small class="field-help" id="tag-db-help">1-65535.</small>
+{{ field_error("db", errors) }}
+</div>
+{% endif %}
+<div class="field">
+<label for="tag-byte">Byte</label>
+<input class="input mono" type="text" inputmode="numeric" name="byte" id="tag-byte" value="{{ values.get('byte', '') }}" autocomplete="off"{{ described("byte", errors, "tag-byte-help") }}>
+<small class="field-help" id="tag-byte-help">Byte offset, 0-65535.</small>
+{{ field_error("byte", errors) }}
+</div>
+{% if values.get('data_type') == 'bool' or errors.get('bit') %}
+<div class="field">
+<label for="tag-bit">Bit</label>
+<input class="input mono" type="text" inputmode="numeric" name="bit" id="tag-bit" value="{{ values.get('bit', '') }}" autocomplete="off"{{ described("bit", errors, "tag-bit-help") }}>
+<small class="field-help" id="tag-bit-help">0-7.</small>
+{{ field_error("bit", errors) }}
+</div>
+{% endif %}
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-data-type">Data type</label>
+<select class="input" name="data_type" id="tag-data-type" {{ redraw() }}{{ described("data_type", errors) }}>
+{% if values.get('data_type') not in extra.data_types %}<option value="" selected>Choose a data type</option>{% endif %}
+{% for data_type in extra.data_types %}
+<option value="{{ data_type }}"{% if data_type == values.get('data_type') %} selected{% endif %}>{{ data_type }}</option>
+{% endfor %}
+</select>
+{{ field_error("data_type", errors) }}
+</div>
+{% if values.get('data_type') == 'string' or errors.get('length') %}
+<div class="field">
+<label for="tag-length">Length</label>
+<input class="input mono" type="text" inputmode="numeric" name="length" id="tag-length" value="{{ values.get('length', '') }}" autocomplete="off"{{ described("length", errors, "tag-length-help") }}>
+<small class="field-help" id="tag-length-help">Maximum characters, 1-254, as declared in the PLC.</small>
+{{ field_error("length", errors) }}
+</div>
+{% endif %}
+<div class="field">
+<label for="tag-unit">Unit</label>
+<input class="input" type="text" name="unit" id="tag-unit" value="{{ values.get('unit', '') }}">
+</div>
+</div>
+{% set advanced_errors = ["scale", "offset"] | select("in", errors) | list %}
+<details class="advanced"{% if extra.advanced_open or advanced_errors %} open{% endif %}>
+<summary>Scaling</summary>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-scale">Scale</label>
+<input class="input mono" type="text" inputmode="decimal" name="scale" id="tag-scale" value="{{ values.get('scale', '') }}" autocomplete="off"{{ described("scale", errors, "tag-scale-help") }}>
+<small class="field-help" id="tag-scale-help">Value = raw × scale + offset. For example 0.1.</small>
+{{ field_error("scale", errors) }}
+</div>
+<div class="field">
+<label for="tag-offset">Offset</label>
+<input class="input mono" type="text" inputmode="decimal" name="offset" id="tag-offset" value="{{ values.get('offset', '') }}" autocomplete="off"{{ described("offset", errors) }}>
+{{ field_error("offset", errors) }}
+</div>
+</div>
+</details>

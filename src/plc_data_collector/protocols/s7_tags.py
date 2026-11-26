@@ -259,13 +259,16 @@ def parse_step7(text: str) -> tuple[S7Address, int | None]:
         area_letter, letter, byte, bit = match.groups()
         address = _build(_AREA_LETTERS[area_letter], None, byte, bit, text)
         return _with_size(address, letter, text)
-    try:
-        address = parse_address(stripped)
-    except ConfigurationError as error:
+    match = _CANONICAL_RE.fullmatch(stripped.removeprefix("%"))
+    if match is None:
         raise _address_error(
             f"Invalid S7 address {text!r}; use for example {_FORMS}, "
             "or STEP7 forms like %DB10.DBD4 or %MW20."
-        ) from error
+        )
+    db, letter, byte, bit = match.groups()
+    area = Area.DB if letter is None else Area(letter.lower())
+    # _build keeps the precise range message (DB number, byte or bit).
+    address = _build(area, db, byte, bit, text)
     return address, (0 if address.bit is not None else None)
 
 

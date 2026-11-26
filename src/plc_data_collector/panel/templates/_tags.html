@@ -20,7 +20,8 @@
 <tbody>
 {% for row in tag_section.tag_rows %}
 <tr data-tag="{{ row.tag.id }}" class="{{ row.row_class }}">
-<td><strong>{{ row.tag.name }}</strong>{% if row.tag.metadata.get("unit") %} <span class="secondary">({{ row.tag.metadata["unit"] }})</span>{% endif %}<div class="secondary addr">{{ row.tag.id }}</div></td>
+{% set description = row.tag.metadata.get("description") %}
+<td{% if description is string and description %} title="{{ description }}"{% endif %}><strong>{{ row.tag.name }}</strong>{% if row.tag.metadata.get("unit") %} <span class="secondary">({{ row.tag.metadata["unit"] }})</span>{% endif %}<div class="secondary addr">{{ row.tag.id }}</div></td>
 {% set read_from, address, value_type = row.cells %}
 {% if tag_section.read_from_column %}<td>{{ read_from }}</td>{% endif %}
 <td class="addr{% if tag_section.read_from_column %} num{% endif %}">{{ address }}</td>

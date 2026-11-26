@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Collection
+from collections.abc import Collection, Hashable
 from dataclasses import dataclass, field
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
@@ -21,6 +21,7 @@ from plc_data_collector.protocols.modbus_tags import (
     MODBUS_PROTOCOL,
     ModbusConnectionOptions,
 )
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 
 MAX_PASTE_ROWS = 1000
 GROUP_COLUMN = "tag_group"
@@ -146,7 +147,7 @@ def parse_paste(
         return PasteResult([], ROW_LIMIT_ERROR)
 
     taken = set(taken_ids)
-    seen: dict[tuple[str, int], int] = {}
+    seen: dict[Hashable, int] = {}
     rows: list[PasteRow] = []
     for line, cells in raw_rows:
         values = {column: "" for column in named}
@@ -178,7 +179,7 @@ def parse_paste(
             except FormErrors as error:
                 errors = dict(error.errors)
             else:
-                key = _register_key(tag, connection)
+                key = adapter.register_key(tag, connection)
                 earlier = seen.get(key)
                 if earlier is not None:
                     errors["address"] = f"Same register as line {earlier}."
@@ -190,19 +191,14 @@ def parse_paste(
     return PasteResult(rows, headers=typed)
 
 
-def _register_key(tag: TagConfig, connection: ConnectionConfig) -> tuple[str, int]:
-    """Return what makes two Tags the same register: address and Modbus unit."""
-    if connection.protocol != MODBUS_PROTOCOL:
-        return (tag.address, 0)
-    unit = tag.protocol_options.get("unit_id")
-    if isinstance(unit, int):
-        return (tag.address, unit)
-    options = ModbusConnectionOptions.from_options(connection.protocol_options)
-    return (tag.address, options.unit_id)
-
-
 def example_paste(connection: ConnectionConfig) -> str:
     """Return a sample paste for the Connection's protocol, in its numbering."""
+    if connection.protocol == S7_PROTOCOL:
+        return (
+            "name;address;data_type;unit\n"
+            "Line speed;%DB10.DBD4;real;m/min\n"
+            "Motor running;%DB10.DBX8.0;bool;"
+        )
     if connection.protocol != MODBUS_PROTOCOL:
         return "name,address,value_type\nTemperature,ns=2;s=Line1.Temperature,numeric"
     try:
