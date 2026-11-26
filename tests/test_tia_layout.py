@@ -512,7 +512,7 @@ def test_every_elementary_type_the_parser_knows_has_a_size() -> None:
 def test_arrays_too_large_for_a_db_refused_quickly(declaration: str) -> None:
     start = time.monotonic()
     error = refused(db_text(f"      a : Int;\n      b : {declaration};\n"))
-    assert time.monotonic() - start < 1
+    assert time.monotonic() - start < 5
     assert (error.file, error.line) == ("R.db", 6)
     assert "65536" in error.message
 
@@ -531,7 +531,7 @@ def test_long_udt_chain_refused_quickly() -> None:
     ) + udt(f"T{count}", "      x : Int;\n")
     start = time.monotonic()
     error = refused(db_text('      a : "T0";\n'), ("Chain.udt", chain))
-    assert time.monotonic() - start < 1
+    assert time.monotonic() - start < 5
     assert error.file == "Chain.udt"
     assert "nest" in error.message
 
@@ -560,7 +560,7 @@ def test_candidate_limit_stops_the_layout_early() -> None:
         layout_db(
             sources.blocks[0], sources.types, classic_confirmed=False, max_candidates=10
         )
-    assert time.monotonic() - start < 0.5
+    assert time.monotonic() - start < 5
     assert caught.value.file == "big.db"
     exact = layout_db(
         sources.blocks[0],

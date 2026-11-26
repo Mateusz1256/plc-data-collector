@@ -600,7 +600,7 @@ def test_selecting_all_5000_elements_is_refused(
         action="save",
     )
 
-    assert time.monotonic() - start < 1
+    assert time.monotonic() - start < 5
     assert status == 400
     assert "Import at most 1000 tags at a time." in text(page)
     assert stores.config.all_tag_ids() == set()

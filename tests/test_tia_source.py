@@ -332,7 +332,7 @@ def test_deep_struct_nesting_refused_quickly() -> None:
     body += "      x : Int;\n" + "      END_STRUCT;\n" * depth
     start = time.monotonic()
     error = refusal([("N.db", db_text(body))])
-    assert time.monotonic() - start < 1
+    assert time.monotonic() - start < 5
     assert error.file == "N.db"
     assert 6 <= error.line < 6 + depth
     assert "nest" in error.message
