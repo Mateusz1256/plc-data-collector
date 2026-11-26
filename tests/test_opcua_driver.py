@@ -7,7 +7,7 @@ import pytest
 from asyncua import ua
 from asyncua.server.server import Server
 from asyncua.ua import status_codes
-from modbus_support import free_port
+from net_support import free_port
 
 from plc_data_collector.domain import (
     ConfigurationError,

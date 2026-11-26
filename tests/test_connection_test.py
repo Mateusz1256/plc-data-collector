@@ -267,3 +267,64 @@ async def test_probe_passes_protocol_options() -> None:
     assert [dict(request.protocol_options) for request in seen] == [
         {"data_type": "int16"}
     ]
+
+
+class DescribingDriver(SpyMockDriver):
+    """The mock driver, describing its connection like the S7 driver."""
+
+    def __init__(self, connection: ConnectionConfig, details: str | None) -> None:
+        super().__init__(connection)
+        self.details = details
+
+    def connection_details(self) -> str | None:
+        return self.details
+
+
+def _describing_registry(details: str | None) -> DriverRegistry:
+    return build_driver_registry(
+        [(MOCK_PROTOCOL, lambda connection: DescribingDriver(connection, details))]
+    )
+
+
+async def test_success_message_includes_connection_details() -> None:
+    registry = _describing_registry("PDU 480 bytes, CPU 6ES7 211-1AE40-0XB0")
+
+    result = await _probe(
+        _connection(tags={"line1_temperature": {"value": 21.5}}),
+        registry,
+        _probe_tag(),
+    )
+
+    assert result.ok is True
+    assert result.message == (
+        f"Connected in {result.elapsed_ms} ms (PDU 480 bytes, CPU "
+        "6ES7 211-1AE40-0XB0). Read ns=2;s=Line1.Temperature without errors."
+    )
+
+
+async def test_connection_details_also_shown_when_probe_fails() -> None:
+    registry = _describing_registry("PDU 240 bytes")
+
+    result = await _probe(
+        _connection(
+            tags={
+                "line1_temperature": {
+                    "error_code": "bad_node",
+                    "error_message": "No such node.",
+                }
+            }
+        ),
+        registry,
+        _probe_tag(),
+    )
+
+    assert result.ok is False
+    assert result.message.startswith(
+        f"Connected in {result.elapsed_ms} ms (PDU 240 bytes), but reading "
+    )
+
+
+async def test_no_connection_details_keeps_plain_message() -> None:
+    result = await _probe(_connection(), _describing_registry(None), None)
+
+    assert result.message == f"Connected in {result.elapsed_ms} ms."

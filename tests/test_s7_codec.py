@@ -8,7 +8,7 @@ frame numbers of the capture file.
 from __future__ import annotations
 
 import pytest
-from modbus_support import free_port
+from net_support import free_port
 from snap7.async_client import AsyncClient
 from snap7.server import Server
 from snap7.type import SrvArea
@@ -330,9 +330,11 @@ async def test_codec_reads_from_snap7_server() -> None:
         assert len(pdu) == response_size([5, 16, 0, 10])
         results = parse_read_response(pdu, pdu_ref=0x1234, item_count=len(items))
     finally:
-        await client.disconnect()
-        server.stop()
-        server.destroy()
+        try:
+            await client.disconnect()
+        finally:
+            server.stop()
+            server.destroy()
     assert results == [
         ItemResult(RETURN_OK, bytes(db1[3:8])),
         ItemResult(RETURN_OK, bytes(merkers)),

@@ -8,11 +8,11 @@ Addresses that were never set answer Modbus exception 02.
 
 from __future__ import annotations
 
-import socket
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
 import pytest_asyncio
+from net_support import free_port
 from pymodbus.pdu import ModbusPDU
 from pymodbus.server import ModbusTcpServer
 from pymodbus.simulator import DataType, SimData, SimDevice
@@ -21,6 +21,8 @@ UNITS = (1, 2)
 _AREAS = ("co", "di", "hr", "ir")
 _BIT_AREAS = ("co", "di")
 _LAST_ADDRESS = 65535
+
+__all__ = ["ModbusTestServer", "ServerRequest", "free_port", "modbus_server"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,12 +33,6 @@ class ServerRequest:
     function_code: int
     address: int
     count: int
-
-
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return int(probe.getsockname()[1])
 
 
 class ModbusTestServer:

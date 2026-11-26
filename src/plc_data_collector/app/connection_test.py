@@ -15,7 +15,11 @@ from plc_data_collector.domain import (
     TagConfig,
     TagRequest,
 )
-from plc_data_collector.protocols import CommunicationDriver, DriverRegistry
+from plc_data_collector.protocols import (
+    CommunicationDriver,
+    DescribesConnection,
+    DriverRegistry,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +107,20 @@ async def _connect_and_probe(
 ) -> _Outcome:
     """Return ``(ok, text after "Connected in N ms", error code)``."""
     await driver.connect()
+    ok, suffix, code = await _probe(driver, connection, probe_tag)
+    details = (
+        driver.connection_details() if isinstance(driver, DescribesConnection) else None
+    )
+    if details:
+        suffix = f" ({details}){suffix}"
+    return ok, suffix, code
+
+
+async def _probe(
+    driver: CommunicationDriver,
+    connection: ConnectionConfig,
+    probe_tag: TagConfig | None,
+) -> _Outcome:
     if probe_tag is None:
         return True, ".", None
     (result,) = await driver.read(

@@ -7,8 +7,9 @@ import os
 import pytest
 
 # Panel fixtures (fake_host, panel_client, signed_in_client) live in panel_support.
-# modbus_server (an in-process Modbus TCP server) lives in modbus_support.
-pytest_plugins = ["panel_support", "modbus_support"]
+# modbus_server (an in-process Modbus TCP server) lives in modbus_support,
+# s7_server (a python-snap7 server) in s7_support.
+pytest_plugins = ["panel_support", "modbus_support", "s7_support"]
 
 TEST_DATABASE_URL_ENV = "PLC_DATA_COLLECTOR_TEST_DATABASE_URL"
 
