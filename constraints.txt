@@ -45,6 +45,7 @@ pytest==9.1.1
 pytest-asyncio==1.4.0
 python-dateutil==4.0.0
 python-multipart==0.0.33
+python-snap7==3.6.0
 pytz==2026.6
 ruff==0.15.21
 scramp==1.5.0

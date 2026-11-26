@@ -24,7 +24,8 @@ dependencies = [
   "jinja2==3.1.6",
   "python-multipart==0.0.33",
   "itsdangerous==2.2.0",
-  "pymodbus==3.16.2"
+  "pymodbus==3.16.2",
+  "python-snap7==3.6.0"
 ]
 
 [project.optional-dependencies]
