@@ -68,6 +68,7 @@ _HEADER_FLAGS = frozenset(
     {"non_retain", "know_how_protect", "read_only", "unlinked", "code_version1"}
 )
 _NUMBERED = re.compile(r"(DB|FB|SFB|UDT)(\d+)", re.IGNORECASE)
+_DIGITS = frozenset("0123456789")
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TITLE = re.compile(r"TITLE[ \t]*=[^\n]*", re.IGNORECASE)
 _MAX_BLOCK_NUMBER = 65535
@@ -251,9 +252,9 @@ def _tokenize(file: str, source: str) -> tuple[list[_Token], dict[int, str]]:
         elif match := _IDENTIFIER.match(source, index):
             tokens.append(_Token("word", match.group(), line))
             index = match.end()
-        elif char.isdigit():
+        elif char in _DIGITS:
             end = index
-            while end < size and source[end].isdigit():
+            while end < size and source[end] in _DIGITS:
                 end += 1
             tokens.append(_Token("number", source[index:end], line))
             index = end

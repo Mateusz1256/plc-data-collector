@@ -308,8 +308,18 @@ def test_unterminated_string_refused() -> None:
         "      a : Array[0..99999999999999999999999] of Bool;\n",
         f"      a : Array[0..{'9' * 5000}] of Bool;\n",
         f"      a : String[{'9' * 5000}];\n",
+        "      a : Array[0..\u00b2] of Bool;\n",
+        "      a : Array[0..\u0663] of Bool;\n",
     ],
-    ids=["above-dint", "below-dint", "23-digits", "5000-digits", "string-5000-digits"],
+    ids=[
+        "above-dint",
+        "below-dint",
+        "23-digits",
+        "5000-digits",
+        "string-5000-digits",
+        "superscript-two",
+        "arabic-indic-digit",
+    ],
 )
 def test_bounds_beyond_dint_or_huge_literals_refused(body: str) -> None:
     error = refusal([("H.db", db_text(body))])

@@ -32,11 +32,11 @@ from plc_data_collector.protocols.s7_tags import (
     DataType,
     S7Address,
     S7TagOptions,
-    byte_span,
     display_address,
     parse_address,
     parse_step7,
     resolve_tag,
+    size_letter_error,
 )
 
 _ADDRESS_SPACE = 65536
@@ -95,36 +95,6 @@ _IMPLIED_TYPES = {
 }
 _UNSCALED_TYPES = (DataType.BOOL, DataType.CHAR, DataType.STRING)
 _ADVANCED_FIELDS = ("scale", "offset")
-
-
-def size_letter_error(text: str, size: int | None, data_type: DataType) -> str | None:
-    """Return why the address ``text`` does not fit ``data_type``, or None.
-
-    ``size`` is what ``parse_step7`` returned: the bytes its size letter names,
-    ``0`` for a bit address, None for a byte address without a letter. For
-    ``string`` the letter is not compared (B is how TIA shows strings).
-    """
-    if data_type is DataType.BOOL:
-        if size == 0:
-            return None
-        if size is None:
-            return f"{text} has no bit; bool needs a bit address (.0-.7)."
-        return f"{text} is a {size}-byte address; bool needs a bit address (.0-.7)."
-    if size == 0:
-        return f"{text} is a bit address; {data_type} needs {_need(data_type)}."
-    if size is None or data_type is DataType.STRING:
-        return None
-    span = byte_span(data_type, None)
-    if size != span:
-        return f"{text} is a {size}-byte address; {data_type} needs {_need(data_type)}."
-    return None
-
-
-def _need(data_type: DataType) -> str:
-    if data_type is DataType.STRING:
-        return "a byte address"
-    span = byte_span(data_type, None)
-    return "1 byte" if span == 1 else f"{span} bytes"
 
 
 def _known_type(raw: object) -> DataType | None:
