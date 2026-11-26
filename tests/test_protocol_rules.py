@@ -156,11 +156,14 @@ class _FakeRules:
         return {}
 
 
-def test_rules_for_returns_registered_rules() -> None:
-    from plc_data_collector.protocols.rules import register_rules
+def test_rules_for_returns_registered_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from plc_data_collector.protocols import rules as rules_module
 
+    monkeypatch.setattr(rules_module, "_REGISTRY", dict(rules_module._REGISTRY))
     fake = _FakeRules()
-    register_rules("fake", fake)
+    rules_module.register_rules("fake", fake)
     assert rules_for("fake") is fake
 
 

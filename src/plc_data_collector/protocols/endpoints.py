@@ -7,14 +7,17 @@ from urllib.parse import urlsplit
 from plc_data_collector.domain import ConfigurationError
 
 
-def parse_endpoint(endpoint: str) -> tuple[str, int]:
-    """Split ``tcp://host:port`` into host and port."""
+def parse_endpoint(endpoint: str, *, protocol_label: str = "Modbus") -> tuple[str, int]:
+    """Split ``tcp://host:port`` into host and port.
+
+    ``protocol_label`` only names the protocol in the error message and code.
+    """
     try:
         parts = urlsplit(endpoint)
         port = parts.port
         host = parts.hostname
     except ValueError as error:
-        raise _endpoint_error(endpoint) from error
+        raise _endpoint_error(endpoint, protocol_label) from error
     if (
         parts.scheme != "tcp"
         or "@" in parts.netloc
@@ -27,15 +30,15 @@ def parse_endpoint(endpoint: str) -> tuple[str, int]:
         or port is None
         or not 1 <= port <= 65535
     ):
-        raise _endpoint_error(endpoint)
+        raise _endpoint_error(endpoint, protocol_label)
     return host, port
 
 
-def _endpoint_error(endpoint: str) -> ConfigurationError:
+def _endpoint_error(endpoint: str, protocol_label: str) -> ConfigurationError:
     return ConfigurationError(
-        f"Invalid Modbus endpoint {endpoint!r}; "
+        f"Invalid {protocol_label} endpoint {endpoint!r}; "
         "use tcp://host:port with a port from 1 to 65535.",
-        code="invalid_modbus_endpoint",
+        code=f"invalid_{protocol_label.lower()}_endpoint",
     )
 
 

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
 from plc_data_collector.protocols.modbus_tags import MODBUS_PROTOCOL, ModbusRules
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL, S7Rules
 
 if TYPE_CHECKING:
     from plc_data_collector.app.config import CollectorConfig
@@ -71,6 +72,7 @@ def rules_for(protocol: str) -> ProtocolRules:
 
 register_rules(MODBUS_PROTOCOL, ModbusRules())
 register_rules("opcua", _OpcUaRules())
+register_rules(S7_PROTOCOL, S7Rules())
 
 
 def prefixed(
