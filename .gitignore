@@ -39,6 +39,7 @@ agents/
 !.env.example
 *.db
 !deploy/demo/s7/*.db
+!tests/fixtures/tia/*.db
 
 # Editors and OS files
 .idea/

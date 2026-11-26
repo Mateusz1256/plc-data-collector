@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
 from net_support import free_port
+from s7_layout_support import Row, documented_rows
 
 from plc_data_collector.app.config import load_collector_config
 from plc_data_collector.domain import (
@@ -27,54 +26,12 @@ ROOT = Path(__file__).parents[1]
 DEMO_CONFIG = ROOT / "deploy" / "demo" / "collector.config.json"
 CONNECTION_ID = "press3_s7"
 
-_STRING_TYPE = re.compile(r"string\[(\d+)\]")
 _VALUE_TYPES = {
     "bool": ValueType.BOOLEAN,
     "real": ValueType.NUMERIC,
     "lreal": ValueType.NUMERIC,
     "string": ValueType.TEXT,
 }
-
-
-@dataclass(frozen=True)
-class Row:
-    name: str
-    data_type: str
-    offset: str
-    length: int | None
-
-    @property
-    def address(self) -> str:
-        return f"DB1.{self.offset}"
-
-
-def documented_rows() -> list[Row]:
-    """Parse the layout table of the simulator docstring (format ruling R1).
-
-    The table is a Markdown table with the header ``| Name | Type | Offset |``
-    followed by ``| --- | --- | --- |``; Type is an S7 data type string
-    (``string[N]`` for strings), Offset is ``byte`` or ``byte.bit``. The Task 8
-    importer test parses the same table.
-    """
-    doc = simulator.__doc__ or ""
-    lines = doc.splitlines()
-    start = lines.index("| Name | Type | Offset |")
-    assert lines[start + 1] == "| --- | --- | --- |"
-    rows = []
-    for line in lines[start + 2 :]:
-        if not line.startswith("|"):
-            break
-        name, kind, offset = (cell.strip() for cell in line.strip("|").split("|"))
-        match = _STRING_TYPE.fullmatch(kind)
-        rows.append(
-            Row(
-                name,
-                "string" if match else kind,
-                offset,
-                int(match.group(1)) if match else None,
-            )
-        )
-    return rows
 
 
 def request_for(row: Row, tag_id: str | None = None) -> TagRequest:

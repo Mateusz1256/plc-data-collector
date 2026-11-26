@@ -1,0 +1,20 @@
+TYPE "typeStep"
+VERSION : 0.1
+   STRUCT
+      Duration : Time;   // Dauer
+      Valve : "typeValve";
+   END_STRUCT;
+
+END_TYPE
+
+TYPE "typeValve"
+TITLE = Ventil
+{ S7_Optimized_Access := 'FALSE' }
+VERSION : 0.1
+   STRUCT
+      Open : Bool;   // offen
+      Closed : Bool;   // geschlossen
+   END_STRUCT;
+
+END_TYPE
+
