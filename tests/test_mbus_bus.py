@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import os
 import sys
 import threading
@@ -36,6 +37,7 @@ from plc_data_collector.protocols.mbus_codec import (
     FrameReader,
     GarbledFrame,
     LongFrame,
+    MeterHeader,
     ShortFrame,
 )
 from plc_data_collector.protocols.mbus_tags import MeterAddress, parse_meter_address
@@ -243,6 +245,61 @@ async def test_multi_telegram_meter_is_joined_up_to_max_telegrams() -> None:
     # Stopped early, so the next read starts the meter over.
     assert _quantities(again) == _documented(1, telegrams=1)
     assert gateway.requests == [("snd_nke", 1), ("req_ud2", 1)] * 2
+
+
+def _values(reading: MeterReading) -> list[object]:
+    return [r.exact_value for r in reading.records if r.key is not None]
+
+
+@pytest.mark.parametrize(("meter", "by_id"), [(1, "12345678"), (2, "12399999")])
+async def test_one_meter_read_by_primary_and_by_id_is_never_a_repeat(
+    meter: int, by_id: str
+) -> None:
+    async with _connected() as (gateway, bus):
+        readings = []
+        for address in (_primary(meter), parse_meter_address(by_id), _primary(meter)):
+            gateway.clock.advance(3600)
+            async with bus.turn() as turn:
+                readings.append(await turn.read_meter(address))
+    access = [r.header.access_no for r in readings]
+    assert access == sorted(set(access))  # every telegram 1 is a fresh one
+    for reading in readings:
+        assert reading.header.id_digits == by_id
+        assert _quantities(reading) == _documented(meter)
+    # Counters (energy, volume, operating time) go up between the reads.
+    counters = [
+        [
+            r.exact_value
+            for r in reading.records
+            if r.key is not None
+            and r.key.storage == 0
+            and str(r.key.quantity) in ("energy", "volume", "operating_time")
+        ]
+        for reading in readings
+    ]
+    assert counters[0]
+    for before, after in itertools.pairwise(counters):
+        assert all(b < a for b, a in zip(before, after, strict=True))  # type: ignore[operator]
+    # The ID read shared the primary read's FCB state: it needed no repeat
+    # guard (one REQ_UD2 per telegram), and the second primary read no SND_NKE.
+    telegrams = next(m.telegrams for m in documented_meters() if m.number == meter)
+    assert gateway.requests.count(("req_ud2", ADDRESS_SECONDARY)) == telegrams
+    assert gateway.requests.count(("snd_nke", meter)) == 1
+
+
+async def test_a_repeated_telegram_is_detected_by_its_access_number() -> None:
+    async with _connected() as (gateway, bus):
+        async with bus.turn() as turn:
+            first = await turn.read_meter(_primary(2))
+        gateway.clock.advance(3600)
+        # A wildcard ID: the bus cannot know the meter's FCB, sends FCB 1
+        # again, and the meter repeats its last telegram.
+        async with bus.turn() as turn:
+            second = await turn.read_meter(parse_meter_address("1239FFFF"))
+    assert second.header.id_digits == first.header.id_digits
+    assert second.header.access_no != first.header.access_no
+    assert _values(second) != _values(first)
+    assert gateway.requests.count(("req_ud2", ADDRESS_SECONDARY)) == 2
 
 
 async def test_fcb_alternates_and_snd_nke_only_before_the_first_read() -> None:
@@ -655,3 +712,18 @@ async def test_serial_device_missing_is_connect_failed() -> None:
     assert caught.value.code == "mbus_connect_failed"
     assert not bus.is_open
     assert threading.active_count() == threads
+
+
+def test_repeat_guard_skips_meters_that_do_not_count_telegrams() -> None:
+    from dataclasses import replace
+
+    from plc_data_collector.protocols.mbus_bus import _repeated
+
+    header = MeterHeader("12345678", "PDC", 0x4083, 1, 4, "heat", 7, 0)
+    assert _repeated(header, (7,))
+    assert _repeated(header, (6, 7))
+    assert not _repeated(header, (6,))
+    assert not _repeated(replace(header, access_no=8), (6, 7))
+    # Two telegrams with one access number: the meter does not count.
+    assert not _repeated(header, (7, 7))
+    assert not _repeated(header, ())

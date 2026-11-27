@@ -441,6 +441,18 @@ def _rsp_ud(
     return accept
 
 
+def _repeated(header: MeterHeader, previous: tuple[int, ...]) -> bool:
+    """Whether ``header`` repeats a telegram of the meter's previous read."""
+    counts = len(previous) == 1 or len(set(previous)) == len(previous)
+    return counts and header.access_no in previous
+
+
+@dataclass(frozen=True, slots=True)
+class _Read:
+    reading: MeterReading
+    complete: bool
+
+
 class MBusBus:
     """The bus of one M-Bus Connection, shared by polling and Panel actions.
 
@@ -461,8 +473,16 @@ class MBusBus:
         self.max_telegrams = max_telegrams
         self._lock = asyncio.Lock()
         self._transport: MBusTransport | None = None
-        # Primary address -> the FCB of its next REQ_UD2. Absent: SND_NKE first.
-        self._next_fcb: dict[int, bool] = {}
+        # Link state per meter identity (ID digits), whatever the address form
+        # a read used: the FCB of the meter's next REQ_UD2 (absent: unknown,
+        # so SND_NKE first, or FCB 1 for a selected meter), the access
+        # numbers of its last read's telegrams (to spot a repeated telegram),
+        # and the ID last read at each primary address.
+        self._fcb: dict[str, bool] = {}
+        self._access: dict[str, tuple[int, ...]] = {}
+        self._ids: dict[int, str] = {}
+        # Primary addresses just reset by a probe's SND_NKE (ID not known).
+        self._reset_primaries: set[int] = set()
         # A meter may still be selected (state unknown, or a turn ended early).
         self._maybe_selected = True
         # Loop time until which a reply to the last request may still arrive.
@@ -485,7 +505,8 @@ class MBusBus:
                 await transport.close()
                 raise
             self._transport = transport
-            self._next_fcb.clear()
+            self._fcb.clear()
+            self._reset_primaries.clear()
             self._maybe_selected = True
             self._quiet_at = 0.0
 
@@ -602,21 +623,25 @@ class BusTurn:
         assert address.secondary is not None
         return await self._read_secondary(address.secondary)
 
+    def _take_fcb(self, meter_id: str | None) -> bool | None:
+        """The meter's next FCB, forgotten until the read succeeds."""
+        return None if meter_id is None else self._bus._fcb.pop(meter_id, None)
+
     async def _read_primary(self, primary: int) -> MeterReading:
         bus = self._bus
         # Popped: a failed read leaves the meter to be initialised again.
-        fcb = bus._next_fcb.pop(primary, None)
+        fcb = self._take_fcb(bus._ids.get(primary))
+        if primary in bus._reset_primaries:
+            bus._reset_primaries.discard(primary)
+            fcb = True
         if fcb is None:
             await self._retried(
                 snd_nke(primary), bus.timeout_s, _ack, f"SND_NKE to {primary}"
             )
             fcb = True
-        reading, fcb, complete = await self._telegrams(primary, fcb)
-        # Stopped at max_telegrams with more to follow: the meter would go on
-        # with its next telegram, so the next read starts it over (SND_NKE).
-        if complete:
-            bus._next_fcb[primary] = fcb
-        return reading
+        result = await self._telegrams(primary, fcb)
+        bus._ids[primary] = result.reading.header.id_digits
+        return result.reading
 
     async def _read_secondary(self, address: SecondaryAddress) -> MeterReading:
         bus = self._bus
@@ -631,36 +656,67 @@ class BusTurn:
                 _ack,
                 f"the selection of {address.id_digits}",
             )
-            reading, _, _ = await self._telegrams(None, True)
+            # A full ID shares the FCB state of the meter's primary reads.
+            known = None if "F" in address.id_digits else address.id_digits
+            fcb = self._take_fcb(known)
+            result = await self._telegrams(None, True if fcb is None else fcb)
         except MeterError:
             await self.deselect()
             raise
         await self.deselect()
-        return reading
+        return result.reading
 
-    async def _telegrams(
-        self, primary: int | None, fcb: bool
-    ) -> tuple[MeterReading, bool, bool]:
-        """REQ_UD2 and follow-ups: the reading, the next FCB, whether complete."""
+    async def _telegrams(self, primary: int | None, fcb: bool) -> _Read:
+        """REQ_UD2 and follow-ups; on success the meter's state is remembered.
+
+        A first telegram whose access number is one of the meter's previous
+        read is a repeat (the meter saw this FCB last time): the FCB is
+        toggled and the telegram requested once more. Not for a
+        multi-telegram meter whose telegrams shared one access number (it
+        does not count them): the extra request would skip its telegram 1.
+        """
         bus = self._bus
         address = ADDRESS_SECONDARY if primary is None else primary
         first: MeterHeader | None = None
         records: list[MBusRecord] = []
+        access: list[int] = []
+        complete = False
         for number in range(bus.max_telegrams):
+            what = f"REQ_UD2 {number + 1} to {address}"
             telegram = await self._retried(
-                req_ud2(address, fcb),
-                bus.timeout_s,
-                _rsp_ud(primary, first),
-                f"REQ_UD2 {number + 1} to {address}",
+                req_ud2(address, fcb), bus.timeout_s, _rsp_ud(primary, first), what
             )
             fcb = not fcb
             if first is None:
+                header = telegram.header
+                if _repeated(header, bus._access.get(header.id_digits, ())):
+                    LOGGER.debug(
+                        "mbus_repeated_telegram",
+                        extra={"address": address, "access_no": header.access_no},
+                    )
+                    telegram = await self._retried(
+                        req_ud2(address, fcb),
+                        bus.timeout_s,
+                        _rsp_ud(primary, header),
+                        what,
+                    )
+                    fcb = not fcb
                 first = telegram.header
+            access.append(telegram.header.access_no)
             records.extend(telegram.records)
             if not telegram.more_follows:
-                return MeterReading(first, tuple(records)), fcb, True
+                complete = True
+                break
         assert first is not None
-        return MeterReading(first, tuple(records)), fcb, False
+        meter_id = first.id_digits
+        bus._access[meter_id] = tuple(access)
+        # Stopped at max_telegrams with more to follow: the meter would go on
+        # with its next telegram, so the next read starts it over.
+        if complete:
+            bus._fcb[meter_id] = fcb
+        else:
+            bus._fcb.pop(meter_id, None)
+        return _Read(MeterReading(first, tuple(records)), complete)
 
     async def deselect(self) -> None:
         """SND_NKE to 253; a garbled reply or none is harmless."""
@@ -681,14 +737,20 @@ class BusTurn:
     async def probe_primary(self, address: int, timeout_s: float) -> ProbeResult:
         """SND_NKE to ``address``: ``"ack"``, ``"none"`` or ``"collision"``."""
         bus = self._bus
-        bus._next_fcb.pop(address, None)
+        meter_id = bus._ids.get(address)
+        self._take_fcb(meter_id)
+        bus._reset_primaries.discard(address)
         try:
             reply = await self._request(snd_nke(address), timeout_s, _ack)
         except GarbledFrame:
             return "collision"
         if reply is None:
             return "none"
-        bus._next_fcb[address] = True
+        # SND_NKE reset the meter: its next REQ_UD2 may use FCB 1.
+        if meter_id is None:
+            bus._reset_primaries.add(address)
+        else:
+            bus._fcb[meter_id] = True
         return "ack"
 
     async def probe_secondary(self, pattern: bytes, timeout_s: float) -> ProbeResult:
