@@ -219,8 +219,8 @@ counter as good. A Tag can therefore carry `meter_id`, the meter's 8-digit
 identification number. When it is set, a reply whose header ID differs makes
 the Tag bad `mbus_wrong_meter`, with both IDs in the message.
 
-Read meter fills `meter_id` for every Tag it creates, whatever addressing is
-used. The Tag form and the CSV paste accept it as an optional field. It is not
+Read meter fills `meter_id` for every Tag it creates when the meter's ID is 8
+decimal digits, whatever addressing is used. The Tag form and the CSV paste accept it as an optional field. It is not
 part of the record key.
 
 For a secondary address the check is built in: a reply whose ID,
@@ -368,15 +368,16 @@ the Tag form) reads one meter once and lists its records:
    meter's own unit.
 5. Names are made from a **Name prefix** (`m<primary>` for a meter read by
    primary address, else `m<ID>`) and the parts of the record key that are not
-   the default:
-   `<prefix>_<quantity>[_s<storage>][_t<tariff>][_u<subunit>][_<function>][_<qualifiers>]`,
-   for example `m12345678_energy_s1`. Change the prefix and choose "Update
+   the default: `<prefix>_<quantity>`, then `_s<storage>`, `_t<tariff>`,
+   `_u<subunit>`, `_<function>` and `_<qualifiers>` where they are set, for
+   example `m12345678_energy_s1`. Change the prefix and choose "Update
    names". Names are made unique with `_2`, `_3` and so on.
-6. Choose a Tag Group, tick the records, and choose "Save selected tags". At most 1000 Tags per save,
-   all or nothing, one audit entry per Tag.
+6. Choose a Tag Group, tick the records, and choose "Save selected tags". At
+   most 1000 Tags per save, all or nothing, one audit entry per Tag.
 
 Every Tag created this way stores the meter address as it was typed (primary
-or secondary) and the meter's ID as `meter_id`. The reading is kept in memory
+or secondary) and, when the meter's ID is 8 decimal digits, the meter's ID as
+`meter_id`. The reading is kept in memory
 on the server for 30 minutes, so ticking, renaming and saving do not touch
 the bus again; after that the page says "This reading expired. Read the meter
 again."
@@ -463,20 +464,23 @@ the meter's other Tags bad.
 | `mbus_record_not_found` | The meter sent no record with the Tag's record key (or fewer than `occurrence` of them) |
 | `mbus_unit_mismatch` | The record is in another unit family than the Tag's unit (for example GJ for a Tag in kWh) |
 | `mbus_record_unsupported` | The record has an unknown VIF extension, an additive correction, a data field the driver does not read, or a duration with a fraction |
-| `mbus_value_invalid` | A BCD value has a digit A to E |
+| `mbus_value_invalid` | A BCD value has a digit A to F (except a leading F, the minus sign) |
 | `mbus_value_not_finite` | A real is NaN or infinite, or the value is out of range |
 | `mbus_meter_status` | Not an error: the reading is `uncertain` and the message lists the status bits |
 | `mbus_timeout` | The serial port did not take the request in time |
 | `mbus_connection_lost` | The socket closed or the serial port went away |
 | `mbus_connect_failed` | The gateway or the serial port could not be opened, including a TCP connect that timed out |
 | `mbus_not_connected` | A read was attempted while the bus was closed |
+| `mbus_bus_settings_differ` | A Panel action was refused: "This Connection is running with other settings. Apply your changes first, or disable the Connection.", or, while another action holds the Connection's temporary bus with other settings, "Another action is using this Connection with other settings. Try again when it has finished." |
 
-The last four fail the whole poll: every Tag in that poll gets a bad reading
-with the same code, and the worker reconnects. The other codes belong to one
-meter or one Tag.
+`mbus_timeout`, `mbus_connection_lost`, `mbus_connect_failed` and
+`mbus_not_connected` fail the whole poll: every Tag in that poll gets a bad
+reading with the same code, and the worker reconnects.
+`mbus_bus_settings_differ` refuses a Panel action and never reaches a Tag.
+The other codes belong to one meter or one Tag.
 
 The Panel refuses a bus action with `apply_in_progress`,
-`collector_not_ready`, `bus_in_use` or the "other settings" message described
+`collector_not_ready`, `bus_in_use` or `mbus_bus_settings_differ`, described
 in [Sharing the bus with the Panel](#sharing-the-bus-with-the-panel).
 
 ## Hardware validation checklist
@@ -493,6 +497,9 @@ check:
 - A meter's stored billing-date value (`storage` 1).
 - A disconnected meter: only its Tags go bad (`mbus_no_reply`).
 - A battery-powered meter's behaviour at a 60-second interval.
+- A meter that does not reset its FCB on SND_NKE 253: read it by secondary
+  address several times in a row and check every read is fresh.
+- A gateway or converter that echoes requests.
 
 ## Simulator
 
