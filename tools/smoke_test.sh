@@ -108,6 +108,26 @@ echo "press3_s7 good readings: $s7_good, tags without one: $s7_missing"
 { [ "$s7_good" -gt 0 ] && [ "$s7_missing" -eq 0 ]; } \
   || { echo "S7 tags are missing good readings" >&2; exit 1; }
 
+echo "== Checking that every M-Bus tag has good-quality readings (max 20 s)"
+# Tags of heating_mbus without a single good reading (must reach none), and good rows.
+mbus_missing=1
+mbus_good=0
+for _ in $(seq 1 10); do
+  mbus_missing="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -tAc "select count(*) from tags t join tag_groups g on g.id = t.tag_group_id
+          where g.connection_id = 'heating_mbus' and not exists (
+            select 1 from tag_readings r where r.tag_id = t.id and r.quality = 'good')")"
+  mbus_good="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -tAc "select count(*) from tag_readings where connection_id = 'heating_mbus' and quality = 'good'")"
+  if [ "$mbus_good" -gt 0 ] && [ "$mbus_missing" -eq 0 ]; then
+    break
+  fi
+  sleep 2
+done
+echo "heating_mbus good readings: $mbus_good, tags without one: $mbus_missing"
+{ [ "$mbus_good" -gt 0 ] && [ "$mbus_missing" -eq 0 ]; } \
+  || { echo "M-Bus tags are missing good readings" >&2; exit 1; }
+
 echo "== Checking the Panel sign-in page"
 login_code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$API/panel/login" || true)"
 [ "$login_code" = "200" ] || { echo "GET /panel/login returned $login_code" >&2; exit 1; }
