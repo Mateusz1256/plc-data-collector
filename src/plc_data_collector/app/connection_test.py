@@ -15,7 +15,11 @@ from plc_data_collector.domain import (
     TagConfig,
     TagRequest,
 )
-from plc_data_collector.protocols import CommunicationDriver, DriverRegistry
+from plc_data_collector.protocols import (
+    CommunicationDriver,
+    DescribesConnection,
+    DriverRegistry,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +107,20 @@ async def _connect_and_probe(
 ) -> _Outcome:
     """Return ``(ok, text after "Connected in N ms", error code)``."""
     await driver.connect()
+    ok, suffix, code = await _probe(driver, connection, probe_tag)
+    details = (
+        driver.connection_details() if isinstance(driver, DescribesConnection) else None
+    )
+    if details:
+        suffix = f" ({details}){suffix}"
+    return ok, suffix, code
+
+
+async def _probe(
+    driver: CommunicationDriver,
+    connection: ConnectionConfig,
+    probe_tag: TagConfig | None,
+) -> _Outcome:
     if probe_tag is None:
         return True, ".", None
     (result,) = await driver.read(
@@ -119,9 +137,12 @@ async def _connect_and_probe(
     address = probe_tag.address
     if result.value is None:
         code = result.error_code or "read_failed"
+        # The driver's message explains the failure (for S7 for example the
+        # PUT/GET setting), so it is shown before the generic hint.
+        explanation = f"{result.error_message} " if result.error_message else ""
         return (
             False,
-            f", but reading {address} failed ({code}). "
+            f", but reading {address} failed ({code}). {explanation}"
             "Check the Tag address and that the Tag exists on the server.",
             code,
         )

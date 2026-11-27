@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 
-from plc_data_collector.domain import ConnectionConfig
+from plc_data_collector.domain import ConnectionConfig, TagConfig, ValueType
 from plc_data_collector.panel.tag_adapters import tag_adapter_for
 from plc_data_collector.panel.tag_paste import (
     MAX_PASTE_ROWS,
     PasteResult,
     detect_delimiter,
+    example_paste,
     parse_paste,
 )
 
@@ -20,6 +23,12 @@ MODBUS = ConnectionConfig(
     endpoint="tcp://press2-plc:502",
     protocol_options={"address_numbering": "modicon"},
 )
+S7 = ConnectionConfig(
+    id="press3",
+    name="Press 3",
+    protocol="s7",
+    endpoint="tcp://press3-plc:102",
+)
 OPCUA = ConnectionConfig(
     id="line1", name="Line 1", protocol="opcua", endpoint="opc.tcp://plc:4840"
 )
@@ -29,6 +38,7 @@ def _parse(
     text: str,
     connection: ConnectionConfig = MODBUS,
     taken: frozenset[str] = frozenset(),
+    existing: Sequence[TagConfig] = (),
 ) -> PasteResult:
     return parse_paste(
         text,
@@ -37,7 +47,15 @@ def _parse(
         default_group_id="fast",
         allowed_group_ids={"fast", "slow"},
         taken_ids=taken,
+        existing_tags=existing,
     )
+
+
+def _saved(connection: ConnectionConfig, text: str) -> TagConfig:
+    """A Tag the Connection already has, built from a one-row paste."""
+    (row,) = _parse(text, connection).rows
+    assert row.tag is not None
+    return row.tag
 
 
 def test_detect_delimiter() -> None:
@@ -223,3 +241,156 @@ def test_paste_multiline_record_reports_first_line() -> None:
 
     assert result.rows[0].line == 2
     assert result.rows[1].errors["address"] == "Same register as line 2."
+
+
+def test_paste_s7_step7_address_with_semicolons() -> None:
+    result = _parse("name;address;data_type\nSpeed;%DB10.DBD4;real\n", S7)
+
+    assert result.ok
+    tag = result.rows[0].tag
+    assert tag is not None
+    assert tag.address == "DB10.4"
+    assert dict(tag.protocol_options) == {"data_type": "real"}
+    assert tag.value_type is ValueType.NUMERIC
+    assert tag.tag_group_id == "fast"
+    assert tag.enabled is True
+
+
+def test_paste_s7_all_columns() -> None:
+    text = (
+        "name;address;data_type;length;scale;offset;unit;tag_group;enabled\n"
+        "Recipe;DB5.DBB10;string;20;;;;slow;no\n"
+        "Pressure;MW20;int;;0,1;-5;bar;;yes\n"
+        "Running;E0.3;bool;;;;;;\n"
+    )
+
+    result = _parse(text, S7)
+
+    assert result.ok, [row.errors for row in result.rows]
+    recipe, pressure, running = (row.tag for row in result.rows)
+    assert recipe is not None and pressure is not None and running is not None
+    assert (recipe.address, recipe.tag_group_id, recipe.enabled) == (
+        "DB5.10",
+        "slow",
+        False,
+    )
+    assert dict(recipe.protocol_options) == {"data_type": "string", "length": 20}
+    assert pressure.address == "M20"
+    assert dict(pressure.protocol_options) == {
+        "data_type": "int",
+        "scale": 0.1,
+        "offset": -5.0,
+    }
+    assert pressure.metadata == {"unit": "bar"}
+    assert running.address == "I0.3"
+    assert running.value_type is ValueType.BOOLEAN
+
+
+def test_paste_s7_size_letter_contradicting_type_names_both_sizes() -> None:
+    result = _parse("name;address;data_type\nBad;DB10.DBW4;real\n", S7)
+
+    assert not result.ok
+    assert result.rows[0].errors == {
+        "address": "DB10.DBW4 is a 2-byte address; real needs 4 bytes."
+    }
+
+
+@pytest.mark.parametrize(
+    ("address", "data_type", "message"),
+    [
+        ("DB10.DBX4.0", "real", "DB10.DBX4.0 is a bit address; real needs 4 bytes."),
+        ("DB10.4.0", "byte", "DB10.4.0 is a bit address; byte needs 1 byte."),
+        (
+            "DB10.DBX4.0",
+            "string",
+            "DB10.DBX4.0 is a bit address; string needs a byte address.",
+        ),
+        (
+            "DB10.DBW4",
+            "bool",
+            "DB10.DBW4 is a 2-byte address; bool needs a bit address (.0-.7).",
+        ),
+        ("DB10.4", "bool", "DB10.4 has no bit; bool needs a bit address (.0-.7)."),
+        ("MD20", "int", "MD20 is a 4-byte address; int needs 2 bytes."),
+    ],
+)
+def test_paste_s7_bit_and_size_contradictions(
+    address: str, data_type: str, message: str
+) -> None:
+    text = f"name;address;data_type;length\nBad;{address};{data_type};8\n"
+
+    result = _parse(text, S7)
+
+    assert result.rows[0].errors["address"] == message
+
+
+def test_paste_s7_string_ignores_the_size_letter() -> None:
+    text = "name;address;data_type;length\nRecipe;DB10.DBW4;string;8\n"
+
+    result = _parse(text, S7)
+
+    assert result.ok
+    assert result.rows[0].tag is not None
+    assert result.rows[0].tag.address == "DB10.4"
+
+
+def test_paste_s7_bad_address_and_bad_enabled() -> None:
+    text = "name;address;data_type;enabled\nA;XY12;int;\nB;MW2;int;maybe\n"
+
+    result = _parse(text, S7)
+
+    assert "Invalid S7 address 'XY12'" in result.rows[0].errors["address"]
+    assert result.rows[1].errors == {"enabled": "Enter yes or no."}
+
+
+def test_paste_s7_duplicate_compares_canonical_addresses() -> None:
+    text = (
+        "name;address;data_type\nA;DB10.DBX4.0;bool\nB;DB10.4.1;bool\nC;DB10.4.0;bool\n"
+    )
+
+    result = _parse(text, S7)
+
+    assert not result.ok
+    assert result.rows[0].errors == {}
+    assert result.rows[1].errors == {}
+    assert result.rows[2].errors == {"address": "Same address as line 2."}
+
+
+def test_paste_s7_flags_an_existing_tag_at_the_same_address() -> None:
+    existing = _saved(S7, "name;address;data_type\nSpeed;DB10.4;real\n")
+    text = "name;address;data_type\nRate;%DB10.DBD4;real\nOther;DB10.8;int\n"
+
+    result = _parse(text, S7, existing=[existing])
+
+    assert not result.ok
+    assert result.rows[0].tag is None
+    assert result.rows[0].errors == {"address": f"Same address as Tag {existing.id}."}
+    assert result.rows[1].errors == {}
+
+
+def test_paste_modbus_flags_an_existing_tag_at_the_same_register() -> None:
+    existing = _saved(MODBUS, "name,read_from,address,data_type\nA,hr,40121,int16\n")
+    text = "name,read_from,address,data_type\nB,hr,40121,uint16\nC,hr,40122,int16\n"
+
+    result = _parse(text, MODBUS, existing=[existing])
+
+    assert not result.ok
+    assert result.rows[0].errors == {"address": f"Same register as Tag {existing.id}."}
+    assert result.rows[1].errors == {}
+
+
+def test_paste_opcua_flags_an_existing_tag_at_the_same_address() -> None:
+    existing = _saved(OPCUA, "name,address,value_type\nT,ns=2;s=T,numeric\n")
+
+    result = _parse(
+        "name,address,value_type\nU,ns=2;s=T,numeric\n", OPCUA, existing=[existing]
+    )
+
+    assert result.rows[0].errors == {"address": f"Same address as Tag {existing.id}."}
+
+
+def test_example_paste_for_s7_parses() -> None:
+    example = example_paste(S7)
+
+    assert "%DB10.DBD4" in example
+    assert _parse(example, S7).ok

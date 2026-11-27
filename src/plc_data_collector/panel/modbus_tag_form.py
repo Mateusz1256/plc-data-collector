@@ -138,7 +138,7 @@ def span_hint(
         start = parse_display_address(area, address, numbering)
         tag_options: dict[str, object] = {"data_type": data_type}
         if data_type == DataType.STRING.value:
-            tag_options["length"] = _whole(length, 1, MAX_REGISTERS)
+            tag_options["length"] = whole_number(length, 1, MAX_REGISTERS)
         plan = resolve_tag(str(ModbusAddress(area, start)), tag_options, options)
     except ConfigurationError:
         return None
@@ -171,6 +171,7 @@ class ModbusTagForm:
     )
     required_columns: tuple[str, ...] = ("name", "read_from", "address", "data_type")
     read_from_column = True
+    duplicate_noun = "register"
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]
@@ -205,7 +206,7 @@ class ModbusTagForm:
             value = options.get(name)
             values[name] = "" if value is None else str(value)
         for name in ("scale", "offset"):
-            values[name] = _format_number(options.get(name))
+            values[name] = format_number(options.get(name))
         return values
 
     def values_from_data(self, data: Mapping[str, str]) -> dict[str, object]:
@@ -262,13 +263,13 @@ class ModbusTagForm:
             except ConfigurationError as error:
                 errors["address"] = error.message
 
-        bit = _optional_whole(data, "bit", 0, 15, BIT_RANGE_ERROR, errors)
+        bit = optional_whole(data, "bit", 0, 15, BIT_RANGE_ERROR, errors)
         if "bit" not in errors and data_type is not None:
             if data_type is DataType.BIT and bit is None:
                 errors["bit"] = BIT_REQUIRED_ERROR
             elif data_type is not DataType.BIT and bit is not None:
                 errors["bit"] = BIT_UNUSED_ERROR
-        length = _optional_whole(
+        length = optional_whole(
             data, "length", 1, MAX_REGISTERS, LENGTH_RANGE_ERROR, errors
         )
         if "length" not in errors and data_type is not None:
@@ -276,13 +277,13 @@ class ModbusTagForm:
                 errors["length"] = LENGTH_REQUIRED_ERROR
             elif data_type is not DataType.STRING and length is not None:
                 errors["length"] = LENGTH_UNUSED_ERROR
-        unit_id = _optional_whole(data, "unit_id", 0, 255, UNIT_ID_ERROR, errors)
+        unit_id = optional_whole(data, "unit_id", 0, 255, UNIT_ID_ERROR, errors)
         byte_order = _choice(data, "byte_order", ByteOrder, errors, optional=True)
         word_order = _choice(data, "word_order", WordOrder, errors, optional=True)
-        scale = _optional_number(data, "scale", errors)
+        scale = optional_number(data, "scale", errors)
         if scale == 0:
             errors["scale"] = SCALE_ZERO_ERROR
-        offset = _optional_number(data, "offset", errors)
+        offset = optional_number(data, "offset", errors)
         if data_type in _UNSCALED_TYPES:
             if scale is not None and "scale" not in errors:
                 errors["scale"] = f"Scale isn't used with {data_type}."
@@ -363,6 +364,15 @@ class ModbusTagForm:
             shown = f"{shown}.{parsed.bit}"
         return (parsed.area.label, shown, data_type)
 
+    def register_key(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> tuple[str, int]:
+        """Return the address and the Modbus unit the Tag reads from."""
+        unit = tag.protocol_options.get("unit_id")
+        if isinstance(unit, int):
+            return (tag.address, unit)
+        return (tag.address, connection_options(connection).unit_id)
+
     def template_context(
         self, values: Mapping[str, object], connection: ConnectionConfig
     ) -> dict[str, object]:
@@ -419,7 +429,8 @@ def _choice[E: (DataType, ByteOrder, WordOrder)](
         return None
 
 
-def _whole(raw: str, low: int, high: int) -> int | None:
+def whole_number(raw: str, low: int, high: int) -> int | None:
+    """Return ``raw`` as a whole number in ``low``-``high``, or None."""
     text = raw.strip()
     if not text or len(text) > 6 or not (text.isascii() and text.isdigit()):
         return None
@@ -427,7 +438,7 @@ def _whole(raw: str, low: int, high: int) -> int | None:
     return number if low <= number <= high else None
 
 
-def _optional_whole(
+def optional_whole(
     data: Mapping[str, str],
     name: str,
     low: int,
@@ -435,16 +446,17 @@ def _optional_whole(
     message: str,
     errors: dict[str, str],
 ) -> int | None:
+    """Parse an optional whole number field; record ``message`` when invalid."""
     raw = data.get(name, "").strip()
     if not raw:
         return None
-    number = _whole(raw, low, high)
+    number = whole_number(raw, low, high)
     if number is None:
         errors[name] = message
     return number
 
 
-def _optional_number(
+def optional_number(
     data: Mapping[str, str], name: str, errors: dict[str, str]
 ) -> float | None:
     """Parse a decimal number; ``.`` and ``,`` both work as decimal separator."""
@@ -461,7 +473,8 @@ def _optional_number(
     return number
 
 
-def _format_number(value: object) -> str:
+def format_number(value: object) -> str:
+    """Return a stored number as the form shows it (``0.1``, ``2``)."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return ""
     text = repr(float(value))

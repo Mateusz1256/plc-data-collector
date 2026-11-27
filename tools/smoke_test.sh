@@ -88,6 +88,26 @@ echo "press2_modbus good readings: $modbus_good, tags without one: $modbus_missi
 { [ "$modbus_good" -gt 0 ] && [ "$modbus_missing" -eq 0 ]; } \
   || { echo "Modbus tags are missing good readings" >&2; exit 1; }
 
+echo "== Checking that every S7 tag has good-quality readings (max 20 s)"
+# Tags of press3_s7 without a single good reading (must reach none), and good rows.
+s7_missing=1
+s7_good=0
+for _ in $(seq 1 10); do
+  s7_missing="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -tAc "select count(*) from tags t join tag_groups g on g.id = t.tag_group_id
+          where g.connection_id = 'press3_s7' and not exists (
+            select 1 from tag_readings r where r.tag_id = t.id and r.quality = 'good')")"
+  s7_good="$(docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -tAc "select count(*) from tag_readings where connection_id = 'press3_s7' and quality = 'good'")"
+  if [ "$s7_good" -gt 0 ] && [ "$s7_missing" -eq 0 ]; then
+    break
+  fi
+  sleep 2
+done
+echo "press3_s7 good readings: $s7_good, tags without one: $s7_missing"
+{ [ "$s7_good" -gt 0 ] && [ "$s7_missing" -eq 0 ]; } \
+  || { echo "S7 tags are missing good readings" >&2; exit 1; }
+
 echo "== Checking the Panel sign-in page"
 login_code="$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$API/panel/login" || true)"
 [ "$login_code" = "200" ] || { echo "GET /panel/login returned $login_code" >&2; exit 1; }

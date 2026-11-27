@@ -6,6 +6,7 @@
 {% if tag_section.group_choices %}
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/new" hx-target="#tag-form-slot" hx-swap="innerHTML">Add tag</a>
 <a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-get="/panel/connections/{{ tag_section.connection_id }}/tags/paste" hx-target="#tag-form-slot" hx-swap="innerHTML">Paste tags</a>
+{% if tag_section.tia_import %}<a class="btn" href="/panel/connections/{{ tag_section.connection_id }}/tags/import-tia">Import from TIA Portal</a>{% endif %}
 {% endif %}
 </div>
 <div id="tag-form-slot">
@@ -20,7 +21,8 @@
 <tbody>
 {% for row in tag_section.tag_rows %}
 <tr data-tag="{{ row.tag.id }}" class="{{ row.row_class }}">
-<td><strong>{{ row.tag.name }}</strong>{% if row.tag.metadata.get("unit") %} <span class="secondary">({{ row.tag.metadata["unit"] }})</span>{% endif %}<div class="secondary addr">{{ row.tag.id }}</div></td>
+{% set description = row.tag.metadata.get("description") %}
+<td{% if description is string and description %} title="{{ description }}"{% endif %}><strong>{{ row.tag.name }}</strong>{% if row.tag.metadata.get("unit") %} <span class="secondary">({{ row.tag.metadata["unit"] }})</span>{% endif %}<div class="secondary addr">{{ row.tag.id }}</div></td>
 {% set read_from, address, value_type = row.cells %}
 {% if tag_section.read_from_column %}<td>{{ read_from }}</td>{% endif %}
 <td class="addr{% if tag_section.read_from_column %} num{% endif %}">{{ address }}</td>

@@ -262,6 +262,16 @@
     },
     {
       "bundled_in_distribution": true,
+      "copyright_notice": "Copyright (c) 2013 Gijs Molenaar, Stephan Preeker",
+      "license": "MIT",
+      "name": "python-snap7",
+      "notes": "declared directly as a runtime dependency. License verified from package metadata field `License-Expression: MIT` and the package LICENSE file. Pure Python since 3.0; it does not bundle the native LGPL snap7 library. No runtime dependencies of its own.",
+      "purpose": "pure-Python S7 ISO-on-TCP connection used by the `s7` protocol driver, and the S7 server used by the S7 simulator and tests",
+      "source": "https://pypi.org/project/python-snap7/3.6.0/",
+      "version": "3.6.0"
+    },
+    {
+      "bundled_in_distribution": true,
       "copyright_notice": "See package license file.",
       "license": "MIT",
       "name": "pytz",

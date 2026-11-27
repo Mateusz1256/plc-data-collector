@@ -1,0 +1,104 @@
+{#- Preview of a TIA Portal upload. Every button posts the choices (DB numbers,
+    S7-300/400 ticks, selection, names); the server parses the uploaded files
+    again each time and trusts nothing else from the page. Rows of selected
+    candidates the page does not show travel as hidden fields. -#}
+<form class="inline-form" method="post" action="{{ form_url }}/{{ token }}" aria-label="Preview import">
+<h3>Preview</h3>
+{% if error %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<p class="secondary" style="margin: 0">Files: {{ file_names | join(", ") }}. <a href="{{ form_url }}">Upload other files</a></p>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tia-group">Tag group</label>
+<select class="input" name="tag_group_id" id="tia-group">
+{% for group_id, label in group_choices %}
+<option value="{{ group_id }}"{% if group_id == selected_group %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+</div>
+<div class="field">
+<label for="tia-filter">Filter</label>
+<input class="input" type="search" name="filter" id="tia-filter" value="{{ preview.filter }}" aria-describedby="tia-filter-help">
+<small class="field-help" id="tia-filter-help">Shows rows whose path or comment contains this text.</small>
+</div>
+</div>
+<div class="form-actions">
+{# First submit button of the form: Enter in a field previews. #}
+<button type="submit" class="btn" name="action" value="preview">Preview</button>
+<button type="submit" class="btn" name="action" value="select_all">Select all shown</button>
+<button type="submit" class="btn" name="action" value="select_none">Select none</button>
+</div>
+{% for key in preview.hidden_selected %}<input type="hidden" name="select" value="{{ key }}">
+{% endfor %}
+{% for key in preview.hidden_arrays %}<input type="hidden" name="select_array" value="{{ key }}">
+{% endfor %}
+{% for key, name in preview.hidden_names %}<input type="hidden" name="name:{{ key }}" value="{{ name }}">
+{% endfor %}
+{% for key in preview.expanded %}<input type="hidden" name="expand" value="{{ key }}">
+{% endfor %}
+{% for section in preview.sections %}
+<div class="tia-section">
+<h4>{{ section.title }} <span class="secondary mono">{{ section.file }}</span></h4>
+{% if section.index is not none %}
+<div class="inline-form-grid">
+{% if section.ask_number %}
+<div class="field">
+<label for="tia-db-{{ section.index }}">DB number</label>
+<input class="input mono" type="text" inputmode="numeric" name="db_number_{{ section.index }}" value="{{ section.number }}" id="tia-db-{{ section.index }}" aria-describedby="tia-db-{{ section.index }}-help"{% if section.number_error %} aria-invalid="true"{% endif %}>
+<small class="field-help" id="tia-db-{{ section.index }}-help">The source names the DB but not its number. Enter the number it has in TIA Portal.</small>
+{% if section.number_error %}<span class="field-error">{{ section.number_error }}</span>{% endif %}
+</div>
+{% else %}
+<p class="secondary" style="margin: 0">DB number {{ section.number }} (from the source).</p>
+{% endif %}
+{% if section.ask_classic %}
+<label class="check check-small"><input type="checkbox" name="classic_{{ section.index }}"{% if section.classic %} checked{% endif %}> This DB is from an S7-300/400 (standard access)</label>
+{% endif %}
+</div>
+{% endif %}
+{% if section.error %}
+<p class="alert alert-failed" role="alert">{{ section.error }}</p>
+{% else %}
+{% if section.size is not none %}<p class="secondary" style="margin: 0">Calculated size: {{ section.size }} bytes. Compare a few offsets with the Offset column in TIA before saving.</p>{% endif %}
+{% if section.items %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col"><span class="visually-hidden">Import</span></th><th scope="col">Name</th><th scope="col">TIA path</th><th scope="col">Address</th><th scope="col">Type</th><th scope="col">Offset</th><th scope="col">Comment</th><th scope="col">ID</th><th scope="col">Problem</th></tr></thead>
+<tbody>
+{% for item in section.items %}
+{% if item.kind == "array" %}
+<tr data-array="{{ item.key }}">
+<td><input class="tia-check" type="checkbox" name="select_array" value="{{ item.key }}"{% if item.selected %} checked{% endif %} id="tia-array-{{ loop.index }}-{{ section.index }}"></td>
+<td colspan="2"><label for="tia-array-{{ loop.index }}-{{ section.index }}"><span class="addr">{{ item.label }}</span> <span class="secondary">select all elements ({{ item.count }})</span></label></td>
+<td colspan="3">{% if item.expanded %}<button type="submit" class="link-button" name="collapse" value="{{ item.key }}">Hide elements</button>{% else %}<button type="submit" class="link-button" name="expand" value="{{ item.key }}">Show elements</button>{% endif %}</td>
+<td>{{ item.comment }}</td>
+<td></td>
+<td>{% if item.problems %}{{ plural(item.problems, "element") }} with a problem. Show elements to see them.{% endif %}</td>
+</tr>
+{% else %}
+<tr data-key="{{ item.key }}" class="{{ 'row-failed' if item.problem and item.selected else ('row-muted' if item.unsupported else '') }}">
+<td><input class="tia-check" type="checkbox" name="select" value="{{ item.key }}"{% if item.selected %} checked{% endif %} aria-label="Import {{ item.path }}"></td>
+<td><input class="input tia-name" type="text" name="name:{{ item.key }}" value="{{ item.name }}" aria-label="Name for {{ item.path }}"></td>
+<td class="addr">{{ item.path }}</td>
+<td class="addr">{{ item.address }}</td>
+<td class="addr">{{ item.data_type }}</td>
+<td class="addr num">{{ item.offset }}</td>
+<td>{{ item.comment }}</td>
+<td class="addr">{{ item.tag_id }}</td>
+<td>{{ item.problem }}</td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+</div>
+{% endfor %}
+{% if preview.matching_rows > preview.shown_rows %}<p class="secondary" style="margin: 0">Showing the first {{ preview.shown_rows }} of {{ preview.matching_rows }} rows. Use the filter to find the others.</p>{% endif %}
+<div class="form-actions">
+<button type="submit" class="btn" name="action" value="preview">Preview</button>
+<button type="submit" class="btn btn-primary" name="action" value="save">Import {{ plural(preview.selected_count, "selected tag") }}</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+</form>

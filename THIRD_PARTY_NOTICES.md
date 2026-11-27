@@ -331,6 +331,20 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: declared directly as a runtime dependency. License verified from
   package metadata field `License-Expression: Apache-2.0`.
 
+### python-snap7
+
+- Version: 3.6.0
+- Purpose: pure-Python S7 ISO-on-TCP connection used by the `s7` protocol
+  driver, and the S7 server used by the S7 simulator and tests
+- License: MIT
+- Source: https://pypi.org/project/python-snap7/3.6.0/
+- Copyright notice: Copyright (c) 2013 Gijs Molenaar, Stephan Preeker
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. License verified from
+  package metadata field `License-Expression: MIT` and the package LICENSE file.
+  Pure Python since 3.0; it does not bundle the native LGPL snap7 library. No
+  runtime dependencies of its own.
+
 ### pytz
 
 - Version: 2026.6

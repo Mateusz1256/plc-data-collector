@@ -192,9 +192,11 @@ copied out of a spreadsheet or a manual.
   commas (with semicolon or tab separators) are handled.
 - Addresses are in the Connection's numbering, as in the Tag form.
 - At most 1000 rows and 1 MB of text.
-- "Preview" shows every row as it will be saved, with errors marked per row,
-  including duplicate registers within the paste. Nothing is saved while any
-  row has an error. "Add N tags" saves all rows or none.
+- "Preview" shows every row as it will be saved, with errors marked per row.
+  A row that reads the same register as an earlier row is marked "Same
+  register as line N.", and one that reads the same register as an existing
+  Tag of the Connection "Same register as Tag <id>." Nothing is saved while
+  any row has an error. "Add N tags" saves all rows or none.
 - Tag IDs are generated from the names, unique across the paste.
 
 Example (semicolon separated, Modicon numbering):

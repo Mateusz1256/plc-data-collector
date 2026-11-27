@@ -31,6 +31,7 @@ from plc_data_collector.panel.protocol_forms import (
     validate_new_id,
 )
 from plc_data_collector.panel.rendering import StateBadge, format_interval, state_badge
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 from plc_data_collector.runtime.live_values import freshness
 
 if TYPE_CHECKING:
@@ -99,6 +100,8 @@ class TagSection:
     # The protocol part of the Tag form and what it needs to render.
     tag_form_template: str = ""
     tag_form_context: Mapping[str, object] = field(default_factory=dict)
+    # Whether the Tags section offers "Import from TIA Portal" (S7).
+    tia_import: bool = False
 
     def tag_count(self, group_id: str | None) -> int:
         """Return how many active Tags the Tag Group has."""
@@ -149,6 +152,7 @@ def build_tag_section(
         tag_form_context=(
             adapter.template_context(tag_ui.values, connection) if tag_ui else {}
         ),
+        tia_import=connection.protocol == S7_PROTOCOL,
     )
 
 
@@ -299,6 +303,7 @@ class GenericTagForm:
     columns: tuple[str, ...] = ("name", "tag_group", "address", "value_type", "unit")
     required_columns: tuple[str, ...] = ("name", "address", "value_type")
     read_from_column = False
+    duplicate_noun = "address"
 
     def defaults(
         self, connection: ConnectionConfig, group_choices: list[tuple[str, str]]
@@ -382,6 +387,12 @@ class GenericTagForm:
     ) -> tuple[str, str, str]:
         """Return the Read from, Address and Type cells of a Tags table row."""
         return ("", tag.address, tag.value_type.value)
+
+    def register_key(
+        self, tag: TagConfig, connection: ConnectionConfig
+    ) -> tuple[str, ...]:
+        """Return the address: Tags with the same address read the same place."""
+        return (tag.address,)
 
     def template_context(
         self, values: Mapping[str, object], connection: ConnectionConfig

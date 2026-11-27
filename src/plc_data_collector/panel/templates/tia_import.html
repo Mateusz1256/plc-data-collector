@@ -1,0 +1,37 @@
+{#- Import from TIA Portal: the upload form, or the preview of an upload. -#}
+{% extends "base.html" %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/connections">Connections</a> / <a href="/panel/connections/{{ connection_id }}">{{ connection_name }}</a> / Import from TIA Portal</nav>
+<div class="title-row"><h1 class="page-title">Import from TIA Portal</h1></div>
+</div>
+<section class="panel" aria-label="Import from TIA Portal">
+{% if preview %}
+{% include "_tia_preview.html" %}
+{% else %}
+<form class="inline-form" method="post" action="{{ form_url }}" enctype="multipart/form-data" aria-label="Upload TIA Portal files">
+<h3>Upload files</h3>
+{% if error %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<div class="field">
+<label for="tia-files">Files</label>
+<input class="input" type="file" name="files" id="tia-files" multiple accept=".db,.udt,.xlsx" aria-describedby="tia-files-help">
+<small class="field-help" id="tia-files-help">Either one PLC tag table exported from TIA Portal as .xlsx, or the .db sources of your data blocks together with the .udt sources of the PLC data types they use (in TIA Portal: select the blocks, then "Generate source from blocks"). At most {{ max_files }} files, {{ max_megabytes }} MB each. Data blocks of an S7-1200/1500 need "Optimized block access" switched off.</small>
+</div>
+<div class="inline-form-grid">
+<div class="field">
+<label for="tia-group">Tag group</label>
+<select class="input" name="tag_group_id" id="tia-group">
+{% for group_id, label in group_choices %}
+<option value="{{ group_id }}"{% if group_id == selected_group %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+</div>
+</div>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Upload and preview</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+</form>
+{% endif %}
+</section>
+{% endblock %}

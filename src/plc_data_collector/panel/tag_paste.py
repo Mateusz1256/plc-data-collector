@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
-from collections.abc import Collection
+from collections.abc import Collection, Hashable, Sequence
 from dataclasses import dataclass, field
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
@@ -21,6 +21,7 @@ from plc_data_collector.protocols.modbus_tags import (
     MODBUS_PROTOCOL,
     ModbusConnectionOptions,
 )
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 
 MAX_PASTE_ROWS = 1000
 GROUP_COLUMN = "tag_group"
@@ -86,11 +87,14 @@ def parse_paste(
     default_group_id: str,
     allowed_group_ids: Collection[str],
     taken_ids: Collection[str],
+    existing_tags: Sequence[TagConfig] = (),
 ) -> PasteResult:
     """Parse pasted ``text`` into Tags of ``connection``.
 
     Rows that fail keep their errors, keyed by column; nothing is raised for a
-    bad row. Problems with the paste as a whole come back as ``error``.
+    bad row. A row that reads the same place as an earlier row, or as one of
+    ``existing_tags`` (the Connection's Tags), is an error. Problems with the
+    paste as a whole come back as ``error``.
     """
     if len(text) > MAX_PASTE_CHARS:
         return PasteResult([], TEXT_LIMIT_ERROR)
@@ -146,7 +150,11 @@ def parse_paste(
         return PasteResult([], ROW_LIMIT_ERROR)
 
     taken = set(taken_ids)
-    seen: dict[tuple[str, int], int] = {}
+    noun = adapter.duplicate_noun
+    holders: dict[Hashable, str] = {}
+    for existing in existing_tags:
+        holders.setdefault(adapter.register_key(existing, connection), existing.id)
+    seen: dict[Hashable, int] = {}
     rows: list[PasteRow] = []
     for line, cells in raw_rows:
         values = {column: "" for column in named}
@@ -178,10 +186,14 @@ def parse_paste(
             except FormErrors as error:
                 errors = dict(error.errors)
             else:
-                key = _register_key(tag, connection)
+                key = adapter.register_key(tag, connection)
+                holder = holders.get(key)
                 earlier = seen.get(key)
-                if earlier is not None:
-                    errors["address"] = f"Same register as line {earlier}."
+                if holder is not None:
+                    errors["address"] = f"Same {noun} as Tag {holder}."
+                    tag = None
+                elif earlier is not None:
+                    errors["address"] = f"Same {noun} as line {earlier}."
                     tag = None
                 else:
                     seen[key] = line
@@ -190,19 +202,14 @@ def parse_paste(
     return PasteResult(rows, headers=typed)
 
 
-def _register_key(tag: TagConfig, connection: ConnectionConfig) -> tuple[str, int]:
-    """Return what makes two Tags the same register: address and Modbus unit."""
-    if connection.protocol != MODBUS_PROTOCOL:
-        return (tag.address, 0)
-    unit = tag.protocol_options.get("unit_id")
-    if isinstance(unit, int):
-        return (tag.address, unit)
-    options = ModbusConnectionOptions.from_options(connection.protocol_options)
-    return (tag.address, options.unit_id)
-
-
 def example_paste(connection: ConnectionConfig) -> str:
     """Return a sample paste for the Connection's protocol, in its numbering."""
+    if connection.protocol == S7_PROTOCOL:
+        return (
+            "name;address;data_type;unit\n"
+            "Line speed;%DB10.DBD4;real;m/min\n"
+            "Motor running;%DB10.DBX8.0;bool;"
+        )
     if connection.protocol != MODBUS_PROTOCOL:
         return "name,address,value_type\nTemperature,ns=2;s=Line1.Temperature,numeric"
     try:

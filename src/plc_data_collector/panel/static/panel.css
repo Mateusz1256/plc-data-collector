@@ -378,3 +378,9 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 
 /* Paste tags */
 textarea.input { min-height: 8rem; resize: vertical; }
+
+/* Import from TIA Portal */
+.tia-section { display: flex; flex-direction: column; gap: 8px; }
+.tia-section h4 { margin: 8px 0 0; font-size: var(--text-subsection); }
+.tia-check { width: 20px; height: 20px; accent-color: var(--action); }
+.tbl td .tia-name { min-height: 32px; min-width: 12em; font-size: var(--text-table); }

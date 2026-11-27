@@ -1,0 +1,30 @@
+DATA_BLOCK "Recipe Data"
+TITLE = Press's recipe; edited by hand
+{ ExternalAccessible := 'True'; S7_Optimized_Access := 'FALSE' }
+AUTHOR : Line3
+FAMILY : Press
+NAME : Recipe
+VERSION : 0.1
+NON_RETAIN
+//Recipe parameters of press 3
+   STRUCT 
+      "Set.Point" { ExternalWritable := 'False'} : Real := 1.5;   // Sollwert in °C
+      Name : String[8] := 'a;b''c';   // Rezeptname; mit Semikolon
+      (* a block comment
+         over two lines : Int; *)
+      "Motor 1" : Struct   // Motor eins
+         Speed : Int := 16#10;   // Drehzahl
+         Times : Array[0..1] of Time := [T#1s, T#2S];
+      END_STRUCT;
+      Steps : Array[1..2] of "typeStep";   // Schritte
+      Flags : Array[0..1, 0..1] of Bool := [4(FALSE)];
+   END_STRUCT;
+
+
+BEGIN
+   "Set.Point" := 2.5;
+   Name := 'x;y';
+   Steps[1].Duration := T#5S;
+
+END_DATA_BLOCK
+

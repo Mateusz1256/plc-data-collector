@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
 from plc_data_collector.protocols.modbus_tags import MODBUS_PROTOCOL, ModbusRules
+from plc_data_collector.protocols.s7_tags import S7_PROTOCOL, S7Rules
 
 if TYPE_CHECKING:
     from plc_data_collector.app.config import CollectorConfig
@@ -55,13 +56,23 @@ class _OpcUaRules(_PermissiveRules):
         return {}
 
 
+_REGISTRY: dict[str, ProtocolRules] = {}
+_PERMISSIVE = _PermissiveRules()
+
+
+def register_rules(protocol: str, rules: ProtocolRules) -> None:
+    """Register the rules for a protocol name, replacing any earlier ones."""
+    _REGISTRY[protocol] = rules
+
+
 def rules_for(protocol: str) -> ProtocolRules:
     """Return the rules for a protocol; unknown protocols accept everything."""
-    if protocol == MODBUS_PROTOCOL:
-        return ModbusRules()
-    if protocol == "opcua":
-        return _OpcUaRules()
-    return _PermissiveRules()
+    return _REGISTRY.get(protocol, _PERMISSIVE)
+
+
+register_rules(MODBUS_PROTOCOL, ModbusRules())
+register_rules("opcua", _OpcUaRules())
+register_rules(S7_PROTOCOL, S7Rules())
 
 
 def prefixed(

@@ -70,6 +70,19 @@ class CommunicationDriver(Protocol):
         ...
 
 
+@runtime_checkable
+class DescribesConnection(Protocol):
+    """Optional driver extension: facts about the open connection for people.
+
+    Test connection appends the text to its success message, so it must not
+    contain credentials or the endpoint.
+    """
+
+    def connection_details(self) -> str | None:
+        """Return a short description of the open connection, if any."""
+        ...
+
+
 class DriverFactory(Protocol):
     """Factory that creates a driver for one validated connection config."""
 

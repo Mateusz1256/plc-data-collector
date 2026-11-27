@@ -1097,4 +1097,5 @@ def test_paste_route_ids_taken_meanwhile(
     assert response.status_code == 409
     assert "Some IDs were taken meanwhile. Preview again." in response.text
     assert stores.config.all_tag_ids() == {"press2_ram_position"}
-    assert "press2_ram_position_2" in response.text
+    # The fresh preview sees the Tag saved meanwhile at the same register.
+    assert "Same register as Tag press2_ram_position." in response.text

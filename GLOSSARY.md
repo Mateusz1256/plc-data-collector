@@ -25,6 +25,12 @@ data type or byte order. The Tag's address says where to read; the options say
 how.
 _Avoid_: Address suffix, tag flags
 
+**TIA import**:
+The Panel feature that creates S7 Tags from a TIA Portal PLC tag table or from
+data block sources, calculating each member's offset. Its preview shows the
+offsets so they can be compared with TIA before saving.
+_Avoid_: TIA sync, symbol import
+
 **Address numbering**:
 How a Connection's addresses are typed and shown in the Panel (zero-based,
 one-based or Modicon). The stored address is always zero-based.

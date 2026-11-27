@@ -294,23 +294,21 @@ def test_add_connection_picker_hides_mock_and_marks_future_protocols(
     assert re.search(r'<input[^>]*value="opcua"(?![^>]*disabled)[^>]*>', html)
     assert 'value="mock"' not in html
     assert ">Mock<" not in html
-    for label, protocol, version in (
-        ("S7", "s7", "0.5.0"),
-        ("M-Bus", "mbus", "0.6.0"),
-    ):
+    for label, protocol, version in (("M-Bus", "mbus", "0.6.0"),):
         assert label in html
         assert re.search(rf'<input[^>]*value="{protocol}"[^>]*disabled', html)
         assert f"Coming in {version}" in html
     assert "Endpoint URL, optional user and certificate" in html
     assert "Host, port and unit ID" in html
     assert "Coming in 0.4.0" not in html
+    assert "Coming in 0.5.0" not in html
     assert "Continue to settings" in html
 
 
 def test_new_form_for_unavailable_protocol_shows_picker(
     signed_in_client: TestClient,
 ) -> None:
-    for protocol in ("mock", "s7", "nonsense"):
+    for protocol in ("mock", "mbus", "nonsense"):
         response = signed_in_client.get(f"/panel/connections/new?protocol={protocol}")
         assert response.status_code == 400, protocol
         assert "Choose a protocol" in response.text
@@ -1033,7 +1031,7 @@ def test_picker_offers_modbus(signed_in_client: TestClient) -> None:
     html = signed_in_client.get("/panel/connections/new").text
 
     assert re.search(r'<input[^>]*value="modbus"(?![^>]*disabled)[^>]*>', html)
-    assert "Coming in 0.5.0" in html
+    assert "Coming in 0.5.0" not in html
     assert "Coming in 0.6.0" in html
     assert "Coming in 0.4.0" not in html
 
@@ -1199,3 +1197,77 @@ def test_advanced_field_error_opens_details(signed_in_client: TestClient) -> Non
     assert response.status_code == 400
     assert "<details" in response.text
     assert re.search(r"<details[^>]*\bopen\b", response.text)
+
+
+# S7
+
+
+def _s7_form(**overrides: str) -> dict[str, str]:
+    data = {
+        "protocol": "s7",
+        "id": "press3",
+        "name": "Press 3",
+        "host": "press3-plc",
+        "port": "102",
+        "rack": "0",
+        "slot": "1",
+        "max_gap": "16",
+        "timeout_ms": "3000",
+        "enabled": "on",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_picker_offers_s7(signed_in_client: TestClient) -> None:
+    html = signed_in_client.get("/panel/connections/new").text
+
+    assert re.search(r'<input[^>]*value="s7"(?![^>]*disabled)[^>]*>', html)
+    assert "Host, rack and slot" in html
+
+
+def test_new_s7_form_shows_defaults_and_slot_hint(
+    signed_in_client: TestClient,
+) -> None:
+    html = signed_in_client.get("/panel/connections/new?protocol=s7").text
+
+    for name, value in (("port", "102"), ("rack", "0"), ("slot", "1")):
+        assert re.search(rf'<input[^>]*name="{name}"[^>]*value="{value}"', html), name
+    assert "S7-1200/1500: 1. S7-300: usually 2." in html
+    details = re.search(r"<details.*?</details>", html, re.S)
+    assert details is not None
+    assert re.search(r'<input[^>]*name="max_gap"[^>]*value="16"', details.group(0))
+    assert 'name="slot"' not in details.group(0)
+
+
+def test_create_s7_connection_saves_rack_slot_and_max_gap(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_s7_form(rack="0", slot="2", max_gap="32")
+    )
+
+    assert response.status_code == 303
+    stored = _stores(fake_host).config.get_connection("press3")
+    assert stored is not None
+    assert stored.protocol == "s7"
+    assert stored.endpoint == "tcp://press3-plc:102"
+    assert stored.protocol_options == {"rack": 0, "slot": 2, "max_gap": 32}
+    html = signed_in_client.get("/panel/connections/press3").text
+    assert re.search(r'<input[^>]*name="slot"[^>]*value="2"', html)
+    assert re.search(r'<input[^>]*name="port"[^>]*value="102"', html)
+
+
+def test_s7_connection_refuses_out_of_range_options(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_s7_form(slot="32", rack="8", max_gap="257")
+    )
+
+    assert response.status_code == 400
+    html = response.text
+    assert "Enter a whole number from 0 to 31." in html
+    assert "Enter a whole number from 0 to 7." in html
+    assert "Enter a whole number from 0 to 256." in html
+    assert _stores(fake_host).config.get_connection("press3") is None
