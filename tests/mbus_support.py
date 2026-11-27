@@ -453,6 +453,7 @@ class BusHost:
         """A host with no running Connection."""
         self.registry = registry
         self.applying = False
+        self.accepting_bus_actions = True
         self.running_config: CollectorConfig | None = None
         self.buses: dict[str, MBusBus] = {}
         self.mbus_scans = ScanRegistry(self)

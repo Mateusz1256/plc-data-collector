@@ -29,8 +29,7 @@ from plc_data_collector.protocols import (
     DriverRegistry,
 )
 from plc_data_collector.protocols.mbus import read_tag
-from plc_data_collector.protocols.mbus_bus import BusTransportError
-from plc_data_collector.protocols.mbus_tags import MBusConnectionOptions
+from plc_data_collector.protocols.mbus_bus import BusTransportError, MBusBus
 
 if TYPE_CHECKING:
     from plc_data_collector.app.mbus_access import BusHost
@@ -40,6 +39,8 @@ LOGGER = logging.getLogger(__name__)
 TIMEOUT_CODE = "connection_test_timeout"
 # Extra time on top of the Connection timeout before the whole test gives up.
 DEADLINE_MARGIN_S = 1.0
+# The longest an M-Bus Test connection may take, whatever its settings.
+MBUS_TEST_LIMIT_S = 60.0
 
 
 @dataclass(frozen=True)
@@ -119,10 +120,19 @@ async def _probe_mbus(
     def elapsed_ms() -> int:
         return round((time.monotonic() - started) * 1000)
 
-    deadline_s = _mbus_deadline_s(connection)
+    loop = asyncio.get_running_loop()
+    opened_at = loop.time()
+    deadline_s = MBUS_TEST_LIMIT_S
     try:
-        async with asyncio.timeout(deadline_s):
-            ok, suffix, code = await _mbus_open_and_probe(host, connection, probe_tag)
+        async with (
+            asyncio.timeout(MBUS_TEST_LIMIT_S) as limit,
+            borrow_bus(host, connection) as bus,
+        ):
+            # The bus actually used sets the deadline: a borrowed running bus
+            # keeps its own timeout and telegram limit.
+            deadline_s = mbus_deadline_s(bus)
+            limit.reschedule(opened_at + deadline_s)
+            ok, suffix, code = await _mbus_probe_on(bus, connection, probe_tag)
     except BusAccessRefused as error:
         return _finish(connection, elapsed_ms(), (False, error.message, error.code))
     except TimeoutError:
@@ -137,35 +147,28 @@ async def _probe_mbus(
     )
 
 
-def _mbus_deadline_s(connection: ConnectionConfig) -> float:
-    """Opening the bus, waiting for one meter read, then the probe Tag's read.
+def mbus_deadline_s(bus: MBusBus) -> float:
+    """Waiting for one meter read on ``bus``, then the probe Tag's read.
 
     A meter read is at most a SND_NKE and ``max_telegrams`` telegrams, each
-    tried twice.
+    tried twice, at the bus's timeout; never more than ``MBUS_TEST_LIMIT_S``.
     """
-    timeout_s = connection.timeout_ms / 1000
-    try:
-        telegrams = MBusConnectionOptions.from_options(
-            connection.protocol_options
-        ).max_telegrams
-    except ConfigurationError:
-        return timeout_s + DEADLINE_MARGIN_S  # borrowing the bus reports it
-    meter_read_s = (1 + telegrams) * 2 * timeout_s
-    return timeout_s + 2 * meter_read_s + DEADLINE_MARGIN_S
+    meter_read_s = (1 + bus.max_telegrams) * 2 * bus.timeout_s
+    deadline_s = bus.timeout_s + 2 * meter_read_s + DEADLINE_MARGIN_S
+    return min(deadline_s, MBUS_TEST_LIMIT_S)
 
 
-async def _mbus_open_and_probe(
-    host: BusHost, connection: ConnectionConfig, probe_tag: TagConfig | None
+async def _mbus_probe_on(
+    bus: MBusBus, connection: ConnectionConfig, probe_tag: TagConfig | None
 ) -> _Outcome:
-    async with borrow_bus(host, connection) as bus:
-        description = bus.describe()
-        if description is None:  # a running worker whose bus is closed
-            raise BusTransportError("mbus_not_connected")
-        if probe_tag is None:
-            return True, f" ({description}).", None
-        result = await read_tag(bus, connection, _probe_request(probe_tag, connection))
-        ok, suffix, code = _probe_outcome(probe_tag.address, result)
-        return ok, f" ({description}){suffix}", code
+    description = bus.describe()
+    if description is None:  # a running worker whose bus is closed
+        raise BusTransportError("mbus_not_connected")
+    if probe_tag is None:
+        return True, f" ({description}).", None
+    result = await read_tag(bus, connection, _probe_request(probe_tag, connection))
+    ok, suffix, code = _probe_outcome(probe_tag.address, result)
+    return ok, f" ({description}){suffix}", code
 
 
 async def _connect_and_probe(

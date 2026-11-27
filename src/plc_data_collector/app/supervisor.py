@@ -138,6 +138,16 @@ class RuntimeSupervisor:
         return self._registry
 
     @property
+    def accepting_bus_actions(self) -> bool:
+        """Return whether Panel actions may use a bus now.
+
+        Only while the runtime runs and no apply is in progress: during start
+        the first workers open their ports, and after ``stop()`` cancelled the
+        scans nothing would close a bus opened later.
+        """
+        return self._phase == "running" and not self._applying
+
+    @property
     def mbus_scans(self) -> ScanRegistry:
         """Return the M-Bus scan jobs and temporary buses; one per process."""
         return self._mbus_scans

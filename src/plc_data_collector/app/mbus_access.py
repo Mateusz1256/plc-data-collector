@@ -47,6 +47,7 @@ TEMPORARY_DIFFERS_MESSAGE = (
     "when it has finished."
 )
 APPLYING_MESSAGE = "Changes are being applied. Try again when they are."
+NOT_READY_MESSAGE = "The collector is starting or stopping. Try again in a moment."
 PORT_IN_USE_MESSAGE = (
     "This port is in use by Connection '{connection_id}'. Use that Connection, "
     "or disable it first."
@@ -81,6 +82,11 @@ class BusHost(Protocol):
     @property
     def applying(self) -> bool:
         """Whether an apply is in progress."""
+        ...
+
+    @property
+    def accepting_bus_actions(self) -> bool:
+        """Whether the collector runs (started, not stopping, not applying)."""
         ...
 
     @property
@@ -119,13 +125,18 @@ def bus_settings(connection: ConnectionConfig) -> tuple[object, ...]:
 def check_access(host: BusHost, connection: ConnectionConfig) -> MBusBus | None:
     """The running bus to lend, or None when a temporary bus is due.
 
-    Raises ``BusAccessRefused`` while an apply runs, ``BusSettingsDiffer``
+    Raises ``BusAccessRefused`` while an apply runs or the collector is not
+    running (starting or stopping), ``BusSettingsDiffer``
     when the bus in use has other settings, ``BusInUse`` when a temporary bus
     is due but another Connection holds the endpoint (a running worker or a
     temporary bus), and ``ConfigurationError`` for invalid settings.
     """
     if host.applying:
         raise BusAccessRefused(APPLYING_MESSAGE, code="apply_in_progress")
+    if not host.accepting_bus_actions:
+        # Starting: the first workers are opening their ports. Stopping:
+        # nothing would close a bus opened now.
+        raise BusAccessRefused(NOT_READY_MESSAGE, code="collector_not_ready")
     settings = bus_settings(connection)
     bus = host.mbus_bus(connection.id)
     if bus is None:

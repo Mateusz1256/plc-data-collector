@@ -22,6 +22,7 @@ from plc_data_collector.app.mbus_access import (
     BusSettingsDiffer,
     borrow_bus,
 )
+from plc_data_collector.app.runtime import CollectorRuntime
 from plc_data_collector.app.settings import RuntimeSettings
 from plc_data_collector.app.supervisor import RuntimeSupervisor
 from plc_data_collector.domain import ConnectionConfig
@@ -366,3 +367,89 @@ async def test_another_port_gets_its_own_temporary_bus() -> None:
         other = _other("serial:///dev/ttyUSB1")
         async with borrow_bus(host, other) as bus:
             assert bus.is_open
+
+
+# The collector starting or stopping
+
+NOT_READY = "The collector is starting or stopping. Try again in a moment."
+
+
+async def test_no_bus_is_lent_while_the_collector_is_not_running() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+    host.accepting_bus_actions = False
+
+    with pytest.raises(BusAccessRefused) as caught:
+        async with borrow_bus(host, mbus_connection()):
+            pass
+    with pytest.raises(BusAccessRefused) as scan:
+        host.mbus_scans.start(mbus_connection(), "primary")
+
+    for error in (caught.value, scan.value):
+        assert error.message == NOT_READY
+        assert error.code == "collector_not_ready"
+    assert transport.opens == 0
+
+
+def _settings(tmp_path: Path, *, enabled: bool) -> RuntimeSettings:
+    config_file = tmp_path / "collector.config.json"
+    config_file.write_text(json.dumps(_mbus_config(enabled=enabled)), encoding="utf-8")
+    return RuntimeSettings.from_env(
+        {},
+        data_dir=tmp_path / "data",
+        config_file=config_file,
+        database_wait_timeout_s=2.0,
+        storage_timeout_s=1.0,
+    )
+
+
+async def test_supervisor_lends_no_bus_while_starting_or_after_stop(
+    tmp_path: Path,
+) -> None:
+    gate = asyncio.Event()
+    starting = asyncio.Event()
+
+    class _SlowRuntime(CollectorRuntime):
+        async def start(self) -> None:
+            starting.set()
+            await gate.wait()  # the first workers are still connecting
+            await super().start()
+
+    transport = memory_transport(simulator.demo_meters())
+    registry = build_driver_registry(
+        [("mbus", lambda c: MBusDriver(c, transport_factory=lambda: transport))]
+    )
+    supervisor = RuntimeSupervisor(
+        _settings(tmp_path, enabled=False),
+        registry=registry,
+        runtime_factory=_SlowRuntime,
+    )
+    connection = mbus_connection("serial:///dev/ttyUSB0")
+    assert supervisor.accepting_bus_actions is False  # not started yet
+
+    start = asyncio.create_task(supervisor.start())
+    try:
+        await asyncio.wait_for(starting.wait(), timeout=AWAIT_LIMIT_S)
+        assert supervisor.accepting_bus_actions is False
+        with pytest.raises(BusAccessRefused) as caught:
+            async with borrow_bus(supervisor, connection):
+                pass
+        assert caught.value.code == "collector_not_ready"
+        with pytest.raises(BusAccessRefused):
+            supervisor.mbus_scans.start(connection, "primary")
+
+        gate.set()
+        await asyncio.wait_for(start, timeout=AWAIT_LIMIT_S)
+        assert supervisor.accepting_bus_actions is True
+        async with borrow_bus(supervisor, connection) as bus:
+            assert bus.is_open  # a temporary bus: the Connection is disabled
+    finally:
+        gate.set()
+        await supervisor.stop()
+        await asyncio.gather(start, return_exceptions=True)
+
+    assert supervisor.accepting_bus_actions is False
+    with pytest.raises(BusAccessRefused) as after:
+        supervisor.mbus_scans.start(connection, "primary")
+    assert after.value.code == "collector_not_ready"
+    assert transport.opens == 1  # only the temporary bus while running

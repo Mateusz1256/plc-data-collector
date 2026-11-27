@@ -50,6 +50,7 @@ class FakeHost:
         self.running_config: CollectorConfig | None = None
         self.last_error_code: str | None = None
         self.applying = False
+        self.accepting_bus_actions = True
         self.registry: DriverRegistry = default_driver_registry()
         self.runtime_state = RuntimeApiState()
         self.apply_calls = 0

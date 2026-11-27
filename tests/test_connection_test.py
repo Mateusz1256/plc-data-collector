@@ -20,7 +20,9 @@ from mbus_support import (
 from s7_support import AREA_DB, FakeTransport
 
 from plc_data_collector.app.connection_test import (
+    MBUS_TEST_LIMIT_S,
     ConnectionTestResult,
+    mbus_deadline_s,
     probe_connection,
 )
 from plc_data_collector.domain import (
@@ -38,6 +40,7 @@ from plc_data_collector.protocols import (
     build_driver_registry,
     default_driver_registry,
 )
+from plc_data_collector.protocols.mbus_bus import MBusBus
 from plc_data_collector.protocols.s7 import PUT_GET_MESSAGE, S7Driver
 from plc_data_collector.simulators import mbus as simulator
 
@@ -496,3 +499,35 @@ async def test_mbus_endpoint_of_another_running_connection_is_refused() -> None:
         "This port is in use by Connection 'heat'. Use that Connection, or "
         "disable it first."
     )
+
+
+async def test_mbus_deadline_follows_the_borrowed_running_bus() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = dataclasses.replace(mbus_connection(max_telegrams=1), timeout_ms=50)
+    async with running_host(transport, running) as (host, _):
+        hang = asyncio.Event()
+
+        async def never_answer(frame: object) -> None:
+            await hang.wait()
+
+        transport.on_write = never_answer
+        # The form's own timeout and telegram limit would allow far longer.
+        form = dataclasses.replace(mbus_connection(max_telegrams=16), timeout_ms=10_000)
+        result = await _mbus_probe(host, form, _meter_tag())
+        transport.on_write = None
+
+    # 0.05 s open + 2 meter reads of (1 + 1) x 2 x 0.05 s + 1 s margin.
+    assert result.ok is False
+    assert result.message.startswith(
+        "No answer within 1.45 s (connection_test_timeout)."
+    )
+    assert result.elapsed_ms < 3000
+
+
+def test_mbus_deadline_is_capped() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    slow = MBusBus(lambda: transport, timeout_s=3.0, max_telegrams=16)
+    quick = MBusBus(lambda: transport, timeout_s=0.2, max_telegrams=2)
+
+    assert mbus_deadline_s(slow) == MBUS_TEST_LIMIT_S == 60.0
+    assert mbus_deadline_s(quick) == pytest.approx(0.2 + 2 * 1.2 + 1.0)

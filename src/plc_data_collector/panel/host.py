@@ -51,6 +51,11 @@ class CollectorHost(Protocol):
         ...
 
     @property
+    def accepting_bus_actions(self) -> bool:
+        """Return whether Panel actions may use a bus: running, not applying."""
+        ...
+
+    @property
     def registry(self) -> DriverRegistry:
         """Return the protocol driver registry the runtimes use."""
         ...
