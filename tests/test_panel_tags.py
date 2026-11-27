@@ -1223,7 +1223,8 @@ def test_mbus_tag_form_shows_fields_and_units_of_the_quantity(
     assert _input_value(energy, "name") == "Heat energy"
     assert _options(hca, "unit") == [""]
     assert "(none)" in (_select_body(hca, "unit") or "")
-    assert "Read meter" not in new
+    # The "Read meter" link opens Read meter for the entered meter.
+    assert 'href="/panel/connections/heat/mbus/read?meter="' in new
 
 
 def test_mbus_tag_edit_round_trip(

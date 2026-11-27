@@ -149,6 +149,7 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
         attach_pending_changes,
         create_live_router,
     )
+    from plc_data_collector.panel.routes_mbus import create_mbus_router
     from plc_data_collector.panel.routes_settings import create_settings_router
     from plc_data_collector.panel.routes_tags import create_tags_router
     from plc_data_collector.panel.tia_import import UploadStore
@@ -178,6 +179,7 @@ def _mount_panel(app: FastAPI, web: WebOptions) -> None:
         create_live_router(),
         create_connections_router(),
         create_tags_router(),
+        create_mbus_router(),
         create_settings_router(),
     ):
         app.include_router(router, prefix="/panel", dependencies=banner)

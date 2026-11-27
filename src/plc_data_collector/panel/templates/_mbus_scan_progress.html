@@ -1,0 +1,48 @@
+{#- Scan progress. While the scan runs this block fetches itself every second
+    (htmx replaces it); once finished it has no trigger, so polling stops,
+    and it shows the meters found and the notes. -#}
+{% set finished = progress is none or progress.finished %}
+<div class="inline-form" id="scan-progress"{% if not finished %} hx-get="{{ progress_url }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+{% if progress is none %}
+<p class="secondary" style="margin: 0">No scan has run on this connection since the collector started.</p>
+{% else %}
+<h3>{{ "Scan running" if not finished else "Scan finished" }} ({{ job.kind }})</h3>
+<p class="num" style="margin: 0">
+{% if progress.total %}{{ progress.done }} of {{ progress.total }} probes{% else %}{{ plural(progress.done, "probe") }}{% endif %}, {{ plural(progress.found, "meter") }} found{% if not finished and progress.current %}. Now: <span class="mono">{{ progress.current }}</span>{% endif %}.
+</p>
+{% if progress.message %}<p class="alert alert-degraded" role="status">{{ progress.message }}</p>{% endif %}
+{% if not finished %}
+<form method="post" action="{{ cancel_url }}" class="form-actions">
+<button type="submit" class="btn">Cancel scan</button>
+</form>
+<p class="secondary" style="margin: 0">If the page doesn't update, reload it.</p>
+{% else %}
+{% if meters %}
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col">Primary</th><th scope="col">Secondary ID</th><th scope="col">Manufacturer</th><th scope="col">Version</th><th scope="col">Medium</th><th scope="col">Tags</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+<tbody>
+{% for meter in meters %}
+<tr data-meter="{{ meter.id_digits }}">
+<td class="num">{{ meter.primary }}</td>
+<td class="mono">{{ meter.id_digits }}</td>
+<td class="mono">{{ meter.manufacturer }}</td>
+<td class="mono">{{ meter.version }}</td>
+<td>{{ meter.medium }}</td>
+<td>{% if meter.has_tags %}Has tags{% endif %}</td>
+<td class="actions"><a class="btn" href="{{ read_url }}?meter={{ meter.id_digits | urlencode }}">Read meter</a></td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+{% if notes %}
+<ul class="secondary" style="margin: 0">
+{% for note in notes %}<li>{{ note }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+{% endif %}
+{% endif %}
+</div>

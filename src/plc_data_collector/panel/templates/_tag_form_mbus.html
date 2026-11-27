@@ -24,6 +24,10 @@
 <label for="tag-meter">Meter</label>
 <input class="input mono" type="text" name="meter" id="tag-meter" value="{{ values.get('meter', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("meter", errors, "tag-meter-help") }}>
 <small class="field-help" id="tag-meter-help">Primary address 0-250, secondary ID 12345678, or full secondary address 123456782C2D0104.</small>
+{#- Without scripts the link reads the meter shown when the form was drawn;
+    with them it takes the meter typed now. -#}
+{% set read_url = '/panel/connections/' ~ connection_id ~ '/mbus/read' %}
+<a class="link-button" href="{{ read_url }}?meter={{ values.get('meter', '') | urlencode }}" data-read-url="{{ read_url }}" hx-on:click="this.href = this.dataset.readUrl + '?meter=' + encodeURIComponent(document.getElementById('tag-meter').value.trim())">Read meter</a>
 {{ field_error("meter", errors) }}
 </div>
 <div class="field">
