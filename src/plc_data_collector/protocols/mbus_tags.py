@@ -23,6 +23,7 @@ from plc_data_collector.domain import (
     ConfigurationError,
     ConnectionConfig,
     TagConfig,
+    TagRequest,
     ValueType,
 )
 from plc_data_collector.protocols.endpoints import (
@@ -463,7 +464,7 @@ def _tag_error(address: str, code: str, problem: str) -> ConfigurationError:
     return ConfigurationError(f"Invalid M-Bus tag {address!r}: {problem}", code=code)
 
 
-def _parse(tag: TagConfig) -> tuple[MeterAddress, MBusTagOptions]:
+def _parse(tag: TagConfig | TagRequest) -> tuple[MeterAddress, MBusTagOptions]:
     try:
         meter = parse_meter_address(tag.address)
     except ConfigurationError as error:
@@ -488,8 +489,10 @@ def _key(options: MBusTagOptions) -> RecordKey:
     )
 
 
-def resolve_tag(tag: TagConfig, connection: ConnectionConfig) -> MBusTagPlan:
-    """Validate a Tag and resolve it into a plan.
+def resolve_tag(
+    tag: TagConfig | TagRequest, connection: ConnectionConfig
+) -> MBusTagPlan:
+    """Validate a Tag (configured, or as the driver gets it) into a plan.
 
     Quantities without a unit (``hca_units``) resolve to unit ``""``.
     """
