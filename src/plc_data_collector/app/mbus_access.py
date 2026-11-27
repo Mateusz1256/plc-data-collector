@@ -27,7 +27,11 @@ from plc_data_collector.domain import (
 )
 from plc_data_collector.protocols.mbus import MBusDriver
 from plc_data_collector.protocols.mbus_bus import MBusBus
-from plc_data_collector.protocols.mbus_tags import MBusConnectionOptions, endpoint_key
+from plc_data_collector.protocols.mbus_tags import (
+    MBUS_PROTOCOL,
+    MBusConnectionOptions,
+    endpoint_key,
+)
 
 if TYPE_CHECKING:
     from plc_data_collector.app.config import CollectorConfig
@@ -43,6 +47,10 @@ TEMPORARY_DIFFERS_MESSAGE = (
     "when it has finished."
 )
 APPLYING_MESSAGE = "Changes are being applied. Try again when they are."
+PORT_IN_USE_MESSAGE = (
+    "This port is in use by Connection '{connection_id}'. Use that Connection, "
+    "or disable it first."
+)
 
 
 class BusAccessRefused(CollectorError):
@@ -55,6 +63,16 @@ class BusSettingsDiffer(BusAccessRefused):
     def __init__(self, message: str = SETTINGS_DIFFER_MESSAGE) -> None:
         """Create the refusal with the code ``mbus_bus_settings_differ``."""
         super().__init__(message, code="mbus_bus_settings_differ")
+
+
+class BusInUse(BusAccessRefused):
+    """Another Connection holds the endpoint (its worker or a temporary bus)."""
+
+    def __init__(self, connection_id: str) -> None:
+        """Create the refusal with the code ``bus_in_use``."""
+        super().__init__(
+            PORT_IN_USE_MESSAGE.format(connection_id=connection_id), code="bus_in_use"
+        )
 
 
 class BusHost(Protocol):
@@ -102,15 +120,18 @@ def check_access(host: BusHost, connection: ConnectionConfig) -> MBusBus | None:
     """The running bus to lend, or None when a temporary bus is due.
 
     Raises ``BusAccessRefused`` while an apply runs, ``BusSettingsDiffer``
-    when the bus in use has other settings, and ``ConfigurationError`` for
-    invalid settings.
+    when the bus in use has other settings, ``BusInUse`` when a temporary bus
+    is due but another Connection holds the endpoint (a running worker or a
+    temporary bus), and ``ConfigurationError`` for invalid settings.
     """
     if host.applying:
         raise BusAccessRefused(APPLYING_MESSAGE, code="apply_in_progress")
     settings = bus_settings(connection)
     bus = host.mbus_bus(connection.id)
     if bus is None:
-        host.mbus_scans.temporary_buses.check(connection.id, settings)
+        endpoint = endpoint_key(connection.endpoint)
+        _check_running_holders(host, connection.id, endpoint)
+        host.mbus_scans.temporary_buses.check(connection.id, settings, endpoint)
         return None
     running = _running_connection(host, connection.id)
     if running is None or bus_settings(running) != settings:
@@ -139,6 +160,26 @@ async def borrow_bus(
         yield bus
 
 
+def _check_running_holders(
+    host: BusHost, connection_id: str, endpoint: tuple[object, ...]
+) -> None:
+    """Raise ``BusInUse`` when another running worker holds ``endpoint``."""
+    config = host.running_config
+    if config is None:
+        return
+    for other in config.connections:
+        if other.id == connection_id or other.protocol != MBUS_PROTOCOL:
+            continue
+        if host.mbus_bus(other.id) is None:
+            continue  # not running: holds nothing
+        try:
+            held = endpoint_key(other.endpoint)
+        except ConfigurationError:
+            continue
+        if held == endpoint:
+            raise BusInUse(other.id)
+
+
 def _running_connection(host: BusHost, connection_id: str) -> ConnectionConfig | None:
     config = host.running_config
     if config is None:
@@ -150,6 +191,7 @@ def _running_connection(host: BusHost, connection_id: str) -> ConnectionConfig |
 class _Lease:
     bus: MBusBus
     settings: tuple[object, ...]
+    endpoint: tuple[object, ...]
     users: int = 0
 
 
@@ -160,8 +202,21 @@ class TemporaryBuses:
         """Start with no bus."""
         self._leases: dict[str, _Lease] = {}
 
-    def check(self, connection_id: str, settings: tuple[object, ...]) -> None:
-        """Raise ``BusSettingsDiffer`` when the Connection's bus has other settings."""
+    def check(
+        self,
+        connection_id: str,
+        settings: tuple[object, ...],
+        endpoint: tuple[object, ...],
+    ) -> None:
+        """Refuse a bus the Connection or another one already holds otherwise.
+
+        ``BusSettingsDiffer`` when the Connection's temporary bus has other
+        settings; ``BusInUse`` when another Connection's temporary bus holds
+        the endpoint.
+        """
+        for holder, held in self._leases.items():
+            if holder != connection_id and held.endpoint == endpoint:
+                raise BusInUse(holder)
         lease = self._leases.get(connection_id)
         if lease is not None and lease.settings != settings:
             raise BusSettingsDiffer(TEMPORARY_DIFFERS_MESSAGE)
@@ -172,10 +227,11 @@ class TemporaryBuses:
     ) -> AsyncIterator[MBusBus]:
         """The Connection's temporary bus, opened; closed by its last user."""
         settings = bus_settings(connection)
-        self.check(connection.id, settings)
+        endpoint = endpoint_key(connection.endpoint)
+        self.check(connection.id, settings, endpoint)
         lease = self._leases.get(connection.id)
         if lease is None:
-            lease = _Lease(_new_bus(registry, connection), settings)
+            lease = _Lease(_new_bus(registry, connection), settings, endpoint)
             self._leases[connection.id] = lease
         lease.users += 1
         try:

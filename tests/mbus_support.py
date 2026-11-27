@@ -58,6 +58,7 @@ __all__ = [
     "FakeClock",
     "MBusSimServer",
     "MemoryTransport",
+    "counting_registry",
     "documented_meters",
     "documented_records",
     "free_port",
@@ -516,3 +517,19 @@ def pty_pair() -> Iterator[tuple[int, int, str]]:
     finally:
         os.close(slave)
         os.close(master)
+
+
+def counting_registry(host: BusHost, transport: MemoryTransport) -> list[str]:
+    """Make ``host`` build its M-Bus buses on ``transport``, recording each.
+
+    Returns the list that gets the Connection id of every bus built (that is,
+    every transport factory a Panel action asked for).
+    """
+    built: list[str] = []
+
+    def create(connection: ConnectionConfig) -> MBusDriver:
+        built.append(connection.id)
+        return MBusDriver(connection, transport_factory=lambda: transport)
+
+    host.registry = build_driver_registry([("mbus", create)])
+    return built

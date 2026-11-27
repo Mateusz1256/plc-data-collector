@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from pathlib import Path
 
 import pytest
 from mbus_support import (
     MemoryTransport,
+    counting_registry,
     mbus_connection,
     memory_host,
     memory_transport,
@@ -294,3 +296,73 @@ async def test_apply_stops_a_temporary_bus_scan_and_the_worker_connects(
         assert bus is driver.bus
     finally:
         await supervisor.stop()
+
+
+# Another Connection's port
+
+PORT_IN_USE = (
+    "This port is in use by Connection 'heat'. Use that Connection, or disable "
+    "it first."
+)
+
+
+def _other(endpoint: str, **options: object) -> ConnectionConfig:
+    """Connection ``cold`` (not running) on ``endpoint``."""
+    return dataclasses.replace(mbus_connection(endpoint, **options), id="cold")
+
+
+@pytest.mark.parametrize(
+    ("running_endpoint", "other_endpoint"),
+    [
+        ("serial:///dev/ttyUSB0", "serial:///dev/ttyUSB0"),
+        ("tcp://Gateway.local:10001", "tcp://gateway.local:10001"),
+    ],
+)
+async def test_port_of_a_running_connection_is_not_opened_again(
+    running_endpoint: str, other_endpoint: str
+) -> None:
+    transport = memory_transport(simulator.demo_meters())
+    async with running_host(transport, mbus_connection(running_endpoint)) as (
+        host,
+        _,
+    ):
+        built = counting_registry(host, transport)
+        with pytest.raises(BusAccessRefused) as caught:
+            async with borrow_bus(host, _other(other_endpoint, baud_rate=9600)):
+                pass
+        with pytest.raises(BusAccessRefused) as scan:
+            host.mbus_scans.start(_other(other_endpoint), "primary")
+
+        assert built == []  # no transport factory was asked for
+        assert transport.opens == 1
+
+    for error in (caught.value, scan.value):
+        assert error.message == PORT_IN_USE
+        assert error.code == "bus_in_use"
+
+
+async def test_port_of_another_temporary_bus_is_not_opened_again() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+    built = counting_registry(host, transport)
+
+    async with borrow_bus(host, mbus_connection("serial:///dev/ttyUSB0")):
+        with pytest.raises(BusAccessRefused) as caught:
+            async with borrow_bus(host, _other("serial:///dev/ttyUSB0")):
+                pass
+        with pytest.raises(BusAccessRefused):
+            host.mbus_scans.start(_other("serial:///dev/ttyUSB0"), "secondary")
+
+    assert caught.value.message == PORT_IN_USE
+    assert caught.value.code == "bus_in_use"
+    assert built == ["heat"]
+    assert transport.opens == 1
+
+
+async def test_another_port_gets_its_own_temporary_bus() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = mbus_connection("serial:///dev/ttyUSB0")
+    async with running_host(transport, running) as (host, _):
+        other = _other("serial:///dev/ttyUSB1")
+        async with borrow_bus(host, other) as bus:
+            assert bus.is_open

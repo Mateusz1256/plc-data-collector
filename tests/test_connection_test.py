@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import ClassVar
@@ -10,6 +11,7 @@ from typing import ClassVar
 import pytest
 from mbus_support import (
     BusHost,
+    counting_registry,
     mbus_connection,
     memory_host,
     memory_transport,
@@ -475,3 +477,22 @@ async def test_mbus_without_a_host_uses_a_new_driver() -> None:
 
     assert result.ok is True, result.message
     assert not transport.is_open
+
+
+async def test_mbus_endpoint_of_another_running_connection_is_refused() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = mbus_connection("serial:///dev/ttyUSB0")
+    async with running_host(transport, running) as (host, _):
+        built = counting_registry(host, transport)
+        # Connection B is stopped; its unsaved form names A's port.
+        form = dataclasses.replace(mbus_connection("serial:///dev/ttyUSB0"), id="cold")
+        result = await _mbus_probe(host, form, _meter_tag())
+
+        assert built == []
+        assert transport.opens == 1
+
+    assert result.ok is False
+    assert result.message == (
+        "This port is in use by Connection 'heat'. Use that Connection, or "
+        "disable it first."
+    )
