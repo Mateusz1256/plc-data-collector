@@ -274,6 +274,28 @@ class TagResult:
         )
 
     @classmethod
+    def uncertain(
+        cls,
+        *,
+        tag_id: str,
+        value: TagValue,
+        error_code: str,
+        error_message: str,
+        source_timestamp: datetime | None,
+        received_at: datetime,
+    ) -> Self:
+        """Create an uncertain reading: a value together with the reason."""
+        return cls(
+            tag_id=tag_id,
+            quality=Quality.UNCERTAIN,
+            received_at=received_at,
+            source_timestamp=source_timestamp,
+            value=value,
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+    @classmethod
     def failure(
         cls,
         *,
@@ -317,8 +339,18 @@ class TagResult:
         if self.value is not None:
             if self.quality is Quality.BAD:
                 raise ConfigurationError("Successful TagResult cannot be bad quality.")
-            if self.error_code is not None or self.error_message is not None:
-                raise ConfigurationError("Successful TagResult cannot contain errors.")
+            _set_optional_stripped(self, "error_code", self.error_code)
+            _set_optional_stripped(self, "error_message", self.error_message)
+            has_code = self.error_code is not None
+            has_message = self.error_message is not None
+            if self.quality is Quality.GOOD:
+                if has_code or has_message:
+                    raise ConfigurationError("A good TagResult cannot contain errors.")
+            elif has_code != has_message:
+                raise ConfigurationError(
+                    "An uncertain TagResult needs both error_code and "
+                    "error_message, or neither."
+                )
             return
 
         if self.quality is not Quality.BAD:

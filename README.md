@@ -233,7 +233,7 @@ curl -s -H "X-API-Key: $PDC_API_KEY" \
 | `GET /api/v1/tags/{tag_id}` | One active Tag with its current value |
 | `GET /api/v1/tags/{tag_id}/history` | Stored readings in `[from, to)`, oldest first; archived Tags included. `from` and `to` are ISO 8601 with a timezone (default: the last hour); `limit` is 1 to 10000 (default 1000), and `truncated` is `true` when the range holds more |
 
-Binary values are returned as base64. A missing, unknown or revoked key gets `401`. Revoke a key in Settings when an application no longer needs it.
+Binary values are returned as base64. `error_code` is set on bad readings (with a `null` value) and may also accompany a value on `uncertain` readings, where it says why the value is uncertain; a client must not treat "has `error_code`" as "has no value". A missing, unknown or revoked key gets `401`. Revoke a key in Settings when an application no longer needs it.
 
 **Grafana.** Add a PostgreSQL data source pointing at the collector database, preferably with a read-only role. An example time-series query for one Tag:
 

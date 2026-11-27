@@ -233,6 +233,7 @@ class TagRow:
     updated: str
     bar_width: int | None
     stale: bool
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -420,6 +421,7 @@ def _value_row(
         updated=updated_text(age_s),
         bar_width=width,
         stale=stale,
+        reason=result.error_message if result.value is not None else None,
     )
 
 

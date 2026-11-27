@@ -51,7 +51,11 @@ def utc_now() -> datetime:
 
 
 class CurrentValueOut(BaseModel):
-    """The latest polled value of a Tag."""
+    """The latest polled value of a Tag.
+
+    ``error_code`` is set on a bad reading (no value) and may also accompany a
+    value on an uncertain reading, saying why the value is uncertain.
+    """
 
     value: JsonValue
     quality: Quality
@@ -82,7 +86,11 @@ class TagListOut(BaseModel):
 
 
 class ReadingOut(BaseModel):
-    """One stored reading."""
+    """One stored reading.
+
+    ``error_code`` is set on a bad reading (no value) and may also accompany a
+    value on an uncertain reading, saying why the value is uncertain.
+    """
 
     received_at: datetime
     source_timestamp: datetime | None

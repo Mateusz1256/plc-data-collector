@@ -8,7 +8,7 @@ from threading import Event
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.domain import (
@@ -30,6 +30,7 @@ from plc_data_collector.persistence import (
     create_sqlite_engine,
     initialize_schema,
 )
+from plc_data_collector.persistence.schema import tag_readings
 from plc_data_collector.runtime import ReadingQueue, WorkerPollResult
 
 
@@ -341,6 +342,46 @@ async def test_database_writer_spools_after_database_failure(
     metrics = writer.metrics()
     assert metrics.spooled_poll_results == 1
     assert metrics.failed_batches == 1
+
+
+@pytest.mark.asyncio
+async def test_database_writer_stores_value_and_reason_in_one_row(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(f"sqlite:///{tmp_path / 'collector.db'}")
+    initialize_schema(engine)
+    seed_configuration(engine)
+    now = timestamp()
+    uncertain = TagResult.uncertain(
+        tag_id="temperature",
+        value=TagValue.numeric(20.5),
+        error_code="mbus_value_rounded",
+        error_message="Value was rounded.",
+        source_timestamp=now,
+        received_at=now,
+    )
+    base = make_poll_result("poll-u")
+    queue = make_queue()
+    writer = DatabaseWriter(
+        queue,
+        ReadingRepository(engine),
+        batch_size=1,
+        flush_interval_s=1,
+        storage_timeout_s=1,
+    )
+    task = await start_writer(writer)
+
+    await queue.put(WorkerPollResult(execution=base.execution, results=(uncertain,)))
+    await queue.join()
+    await writer.shutdown(timeout_s=1)
+    await task
+
+    with engine.connect() as connection:
+        row = connection.execute(select(tag_readings)).mappings().one()
+    assert row["quality"] == "uncertain"
+    assert row["numeric_value"] == 20.5
+    assert row["error_code"] == "mbus_value_rounded"
+    assert row["error_message"] == "Value was rounded."
 
 
 @pytest.mark.asyncio

@@ -250,6 +250,44 @@ def test_live_body_fragment_has_values_and_freshness_width(
     assert "opcua_bad_node_id" in bad
 
 
+def test_uncertain_value_shows_its_reason_next_to_the_value(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+    received = NOW - timedelta(seconds=1)
+    fake_host.live_values.update(
+        WorkerPollResult(
+            execution=PollExecution(
+                execution_id="poll-u",
+                connection_id="line1_opcua",
+                tag_group_id="line1_fast",
+                status=PollStatus.SUCCESS,
+                started_at=received,
+                finished_at=received,
+                requested_tags=1,
+                successful_tags=1,
+            ),
+            results=(
+                TagResult.uncertain(
+                    tag_id="temperature",
+                    value=TagValue.numeric(12.5),
+                    error_code="mbus_value_rounded",
+                    error_message="Value was rounded.",
+                    source_timestamp=received,
+                    received_at=received,
+                ),
+            ),
+        )
+    )
+
+    html = signed_in_client.get("/panel/live/body", headers={"HX-Request": "true"}).text
+
+    row = _tag_row(html, "temperature")
+    assert "12.5" in row
+    assert "Value was rounded." in row
+    assert "Uncertain" in row
+
+
 def test_live_body_requires_sign_in(panel_client: TestClient) -> None:
     response = panel_client.get("/panel/live/body", headers={"HX-Request": "true"})
 
