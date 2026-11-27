@@ -528,6 +528,31 @@ def test_qualifiers() -> None:
     assert (per_hour.unit, per_hour.exact_value) == ("L", Decimal(8))
 
 
+@pytest.mark.parametrize(
+    "record_hex",
+    [
+        "04 AB 22 07 00 00 00",  # power W + per hour
+        "04 B3 21 07 00 00 00",  # power J/h + per minute
+        "04 BE 22 07 00 00 00",  # volume flow m3/h + per hour
+        "04 C7 20 07 00 00 00",  # volume flow m3/min + per second
+        "04 CF 22 07 00 00 00",  # volume flow m3/s + per hour
+        "04 D3 22 07 00 00 00",  # mass flow kg/h + per hour
+    ],
+)
+def test_per_time_on_a_timed_quantity_is_unsupported(record_hex: str) -> None:
+    record = _one(record_hex)
+    assert record.key is None
+    assert record.exact_value is None
+    assert "already has a time" in (record.unsupported_reason or "")
+
+
+def test_per_time_on_an_untimed_quantity_is_a_qualifier() -> None:
+    energy = _one("04 83 21 07 00 00 00")
+    assert energy.key == _key(Quantity.ENERGY, qualifiers=("per_minute",))
+    mass = _one("04 9B 20 07 00 00 00")
+    assert mass.key == _key(Quantity.MASS, qualifiers=("per_second",))
+
+
 def test_qualifiers_combine_sorted() -> None:
     record = _one("04 83 BC 22 07 00 00 00")
     assert record.key == _key(Quantity.ENERGY, qualifiers=("backward", "per_hour"))

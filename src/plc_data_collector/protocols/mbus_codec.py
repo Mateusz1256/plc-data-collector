@@ -374,6 +374,12 @@ _QUALIFIER_VIFES: Mapping[int, str] = MappingProxyType(
         0x3C: "backward",
     }
 )
+_PER_TIME_VIFES = frozenset({0x20, 0x21, 0x22})
+# Quantities whose primary VIF already holds a time: a per-time VIFE on them
+# would be a rate of change, not the quantity, so the record is unsupported.
+_TIMED_QUANTITIES = frozenset(
+    {Quantity.POWER, Quantity.VOLUME_FLOW, Quantity.MASS_FLOW}
+)
 _MULTIPLIER_VIFES: Mapping[int, int] = MappingProxyType(
     {**{0x70 + n: n - 6 for n in range(8)}, 0x7D: 3}
 )
@@ -629,6 +635,12 @@ def _record(
     qualifiers: list[str] = []
     for vife in vifes[used:]:
         code = vife & _LOW_SEVEN
+        if code in _PER_TIME_VIFES and meaning.quantity in _TIMED_QUANTITIES:
+            reason = (
+                f"VIFE 0x{code:02X} ({_QUALIFIER_VIFES[code]}) on "
+                f"{meaning.quantity}, which already has a time, is not supported"
+            )
+            return _unsupported(raw, vif, vifes, location, reason)
         if code in _QUALIFIER_VIFES:
             qualifiers.append(_QUALIFIER_VIFES[code])
         elif code in _MULTIPLIER_VIFES:
