@@ -5,6 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
+from plc_data_collector.protocols.mbus_tags import (
+    MBUS_PROTOCOL,
+    MBusRules,
+    endpoint_key,
+)
 from plc_data_collector.protocols.modbus_tags import MODBUS_PROTOCOL, ModbusRules
 from plc_data_collector.protocols.s7_tags import S7_PROTOCOL, S7Rules
 
@@ -73,6 +78,7 @@ def rules_for(protocol: str) -> ProtocolRules:
 register_rules(MODBUS_PROTOCOL, ModbusRules())
 register_rules("opcua", _OpcUaRules())
 register_rules(S7_PROTOCOL, S7Rules())
+register_rules(MBUS_PROTOCOL, MBusRules())
 
 
 def prefixed(
@@ -97,6 +103,7 @@ def validate_config(config: CollectorConfig) -> None:
                 f"Connection '{connection.id}'",
                 {"connection_id": connection.id},
             ) from error
+    _refuse_shared_mbus_endpoints(config)
     group_connection = {group.id: group.connection_id for group in config.tag_groups}
     for tag in config.tags:
         owner = by_id.get(group_connection.get(tag.tag_group_id, ""))
@@ -106,3 +113,23 @@ def validate_config(config: CollectorConfig) -> None:
             rules_for(owner.protocol).validate_tag(tag, owner)
         except ConfigurationError as error:
             raise prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error
+
+
+def _refuse_shared_mbus_endpoints(config: CollectorConfig) -> None:
+    """Two M-Bus Connections cannot share a gateway or a serial port."""
+    seen: dict[tuple[object, ...], str] = {}
+    for connection in config.connections:
+        if connection.protocol != MBUS_PROTOCOL:
+            continue
+        key = endpoint_key(connection.endpoint)
+        other = seen.setdefault(key, connection.id)
+        if other != connection.id:
+            raise ConfigurationError(
+                f"Connections '{other}' and '{connection.id}' use the same M-Bus "
+                f"endpoint {connection.endpoint!r}; one bus needs one Connection.",
+                code="invalid_mbus_connection",
+                details={
+                    "connection_id": connection.id,
+                    "other_connection_id": other,
+                },
+            )
