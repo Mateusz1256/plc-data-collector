@@ -9,6 +9,7 @@ import itertools
 import os
 import sys
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
@@ -733,6 +734,45 @@ async def test_serial_device_missing_is_connect_failed() -> None:
     assert caught.value.code == "mbus_connect_failed"
     assert not bus.is_open
     assert threading.active_count() == threads
+
+
+class _SlowClosingPort:
+    """A serial port whose close blocks its thread for a while."""
+
+    def close(self) -> None:
+        time.sleep(0.5)
+
+
+class _FakeSerial:
+    """Stands in for the pyserial module: every port closes slowly."""
+
+    EIGHTBITS = PARITY_EVEN = STOPBITS_ONE = None
+    SerialException = SerialTimeoutException = OSError
+
+    @staticmethod
+    def Serial(*args: object, **kwargs: object) -> _SlowClosingPort:
+        return _SlowClosingPort()
+
+
+async def test_a_cancelled_serial_close_never_blocks_the_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    threads = threading.active_count()
+    monkeypatch.setattr("plc_data_collector.protocols.mbus_bus.serial", _FakeSerial)
+    transport = SerialTransport("/dev/ttyMBUS", 2400)
+    await transport.open()
+    closing = asyncio.create_task(transport.close())
+    await asyncio.sleep(0.05)  # the port's close is running on its thread
+    closing.cancel()
+
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    await asyncio.sleep(0.01)
+    assert loop.time() - started < 0.2  # the loop was not held up
+
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    assert threading.active_count() == threads  # the thread is gone after all
 
 
 class _ConstantAccess(simulator.SimulatedMeter):

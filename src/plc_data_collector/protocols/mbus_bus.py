@@ -75,6 +75,8 @@ _ATTEMPTS = 2  # one retry
 # pyserial's read timeout: how often the reading thread checks its deadline.
 _SERIAL_POLL_S = 0.05
 _SERIAL_WRITE_TIMEOUT_S = 5.0
+# How often a closing transport checks that the port's thread has ended.
+_SERIAL_JOIN_POLL_S = 0.01
 _SERIAL_CHUNK = 512
 
 
@@ -299,7 +301,8 @@ class SerialTransport(_FramedTransport):
     """A serial port (USB level converter), 8E1, via pyserial.
 
     pyserial blocks, so every call runs in a single-thread executor the
-    transport owns; ``close`` shuts it down, so no thread outlives the port.
+    transport owns; ``close`` shuts it down and waits (without blocking the
+    event loop) for its thread to end, so no thread outlives the port.
     """
 
     def __init__(self, device: str, baud_rate: int) -> None:
@@ -309,6 +312,7 @@ class SerialTransport(_FramedTransport):
         self._baud_rate = baud_rate
         self._executor: concurrent.futures.ThreadPoolExecutor | None = None
         self._port: Any = None
+        self._worker: threading.Thread | None = None
         self._stop = threading.Event()
 
     def describe(self) -> str:
@@ -332,6 +336,7 @@ class SerialTransport(_FramedTransport):
         self._reset_frames()
 
     def _open_port(self) -> Any:
+        self._worker = threading.current_thread()
         return serial.Serial(
             self._device,
             self._baud_rate,
@@ -389,9 +394,14 @@ class SerialTransport(_FramedTransport):
         self._reset_frames()
 
     async def close(self) -> None:
-        """Close the port and shut the thread down (waiting for it)."""
+        """Close the port and shut the thread down (waiting for it to end).
+
+        The wait never blocks the event loop, also when ``close`` is
+        cancelled: the queued port close still runs before the thread ends.
+        """
         executor, self._executor = self._executor, None
         port, self._port = self._port, None
+        worker, self._worker = self._worker, None
         if executor is None:
             return
         self._stop.set()  # a read in progress returns within _SERIAL_POLL_S
@@ -401,8 +411,9 @@ class SerialTransport(_FramedTransport):
                     loop = asyncio.get_running_loop()
                     await loop.run_in_executor(executor, port.close)
         finally:
-            # Also when cancelled: the queued close still runs before shutdown.
-            executor.shutdown(wait=True)
+            executor.shutdown(wait=False)
+            while worker is not None and worker.is_alive():
+                await asyncio.sleep(_SERIAL_JOIN_POLL_S)
 
 
 # The bus
