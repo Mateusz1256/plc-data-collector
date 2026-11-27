@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Protocol
 
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
@@ -103,7 +104,7 @@ def validate_config(config: CollectorConfig) -> None:
                 f"Connection '{connection.id}'",
                 {"connection_id": connection.id},
             ) from error
-    _refuse_shared_mbus_endpoints(config)
+    refuse_shared_mbus_endpoints(config.connections)
     group_connection = {group.id: group.connection_id for group in config.tag_groups}
     for tag in config.tags:
         owner = by_id.get(group_connection.get(tag.tag_group_id, ""))
@@ -115,10 +116,14 @@ def validate_config(config: CollectorConfig) -> None:
             raise prefixed(error, f"Tag '{tag.id}'", {"tag_id": tag.id}) from error
 
 
-def _refuse_shared_mbus_endpoints(config: CollectorConfig) -> None:
-    """Two M-Bus Connections cannot share a gateway or a serial port."""
+def refuse_shared_mbus_endpoints(connections: Iterable[ConnectionConfig]) -> None:
+    """Two M-Bus Connections cannot share a gateway or a serial port.
+
+    The error names the earlier Connection and the later one; ``details``
+    carry the later one as ``connection_id``.
+    """
     seen: dict[tuple[object, ...], str] = {}
-    for connection in config.connections:
+    for connection in connections:
         if connection.protocol != MBUS_PROTOCOL:
             continue
         key = endpoint_key(connection.endpoint)
