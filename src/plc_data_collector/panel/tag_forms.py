@@ -102,6 +102,8 @@ class TagSection:
     tag_form_context: Mapping[str, object] = field(default_factory=dict)
     # Whether the Tags section offers "Import from TIA Portal" (S7).
     tia_import: bool = False
+    # A warning shown on the open Tag Group form (M-Bus battery drain).
+    group_warning: str | None = None
 
     def tag_count(self, group_id: str | None) -> int:
         """Return how many active Tags the Tag Group has."""
@@ -116,6 +118,7 @@ def build_tag_section(
     *,
     group_ui: FormUi | None = None,
     tag_ui: FormUi | None = None,
+    group_warning: str | None = None,
     now: datetime | None = None,
 ) -> TagSection:
     """Collect the Tag Groups and Tags of one Connection for display.
@@ -153,6 +156,7 @@ def build_tag_section(
             adapter.template_context(tag_ui.values, connection) if tag_ui else {}
         ),
         tia_import=connection.protocol == S7_PROTOCOL,
+        group_warning=group_warning,
     )
 
 

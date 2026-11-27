@@ -26,6 +26,7 @@ from plc_data_collector.protocols.mbus_tags import (
     Quantity,
     RecordKey,
     SecondaryAddress,
+    canonical_meter_address,
     convert,
     display_meter_address,
     family_of,
@@ -537,3 +538,22 @@ def test_validate_config_names_bad_mbus_tag() -> None:
         validate_config(config)
     assert info.value.code == "mbus_invalid_options"
     assert info.value.message.startswith("Tag 'heat_energy': ")
+
+
+@pytest.mark.parametrize(
+    ("text", "stored"),
+    [
+        ("5", "5"),
+        ("005", "5"),
+        (" 250 ", "250"),
+        ("12345678", "12345678"),
+        ("1234ffff", "1234FFFF"),
+        ("12345678FFFFFFFF", "12345678"),
+        ("123456782c2d0104", "123456782C2D0104"),
+        ("12345678FFFFFF04", "12345678FFFFFF04"),
+    ],
+)
+def test_canonical_meter_address(text: str, stored: str) -> None:
+    canonical = canonical_meter_address(parse_meter_address(text))
+    assert canonical == stored
+    assert parse_meter_address(canonical) == parse_meter_address(text)

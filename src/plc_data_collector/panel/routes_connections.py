@@ -27,6 +27,7 @@ from plc_data_collector.domain import (
 from plc_data_collector.panel import audit, auth
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
 from plc_data_collector.panel.host import CollectorHost
+from plc_data_collector.panel.mbus_tag_form import group_battery_warning
 from plc_data_collector.panel.protocol_forms import (
     DEFAULT_TIMEOUT_MS,
     ID_HELP,
@@ -418,6 +419,11 @@ def _edit_page(
                 tag_adapter_for(existing.protocol),
                 group_ui=group_ui,
                 tag_ui=tag_ui,
+                group_warning=(
+                    group_battery_warning(config, existing, group_ui.target_id)
+                    if group_ui is not None and group_ui.mode == "edit"
+                    else None
+                ),
             )
         workers = worker_statuses(_host(request))
         badge, detail = connection_status(existing, workers)

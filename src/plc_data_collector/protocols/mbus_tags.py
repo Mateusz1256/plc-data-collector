@@ -162,6 +162,31 @@ def medium_name(value: int) -> str:
     return MEDIUM_NAMES.get(value, f"medium {value:02X}")
 
 
+def canonical_meter_address(address: MeterAddress) -> str:
+    """The stored form: ``5``; ``12345678``; or 16 upper-case hex digits.
+
+    A full secondary address whose manufacturer, version and medium are all
+    wildcards means the same meter as its 8-digit ID, so it is stored as that.
+    """
+    if address.secondary is None:
+        return str(address.primary)
+    secondary = address.secondary
+    if (secondary.manufacturer, secondary.version, secondary.medium) == (
+        None,
+        None,
+        None,
+    ):
+        return secondary.id_digits
+    manufacturer = (
+        _WILDCARD_MANUFACTURER
+        if secondary.manufacturer is None
+        else secondary.manufacturer
+    )
+    version = _WILDCARD_BYTE if secondary.version is None else secondary.version
+    medium = _WILDCARD_BYTE if secondary.medium is None else secondary.medium
+    return f"{secondary.id_digits}{manufacturer:04X}{version:02X}{medium:02X}"
+
+
 def display_meter_address(address: MeterAddress) -> str:
     """``5``; ``12345678``; or ``12345678 PDC heat`` when known."""
     if address.secondary is None:

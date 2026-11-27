@@ -15,13 +15,25 @@ from urllib.parse import urlsplit
 
 from plc_data_collector.app.config import _mask_endpoint
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig
+from plc_data_collector.protocols.endpoints import (
+    is_serial_endpoint,
+    parse_serial_endpoint,
+)
 from plc_data_collector.protocols.modbus_tags import (
     format_endpoint,
     parse_endpoint,
 )
 
 FieldKind = Literal["text", "url", "int", "bool", "password", "select"]
-FieldTarget = Literal["endpoint", "endpoint_host", "endpoint_port", "option", "secret"]
+FieldTarget = Literal[
+    "endpoint",
+    "endpoint_host",
+    "endpoint_port",
+    "endpoint_transport",
+    "endpoint_device",
+    "option",
+    "secret",
+]
 
 # IDs of Connections, Tag Groups and Tags created in the Panel.
 ID_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,128}")
@@ -38,6 +50,10 @@ ENDPOINT_CREDENTIALS_ERROR = (
     "Remove the user name and password from the URL and use the "
     "User name and Password fields instead."
 )
+CHOICE_ERROR = "Choose one of the listed options."
+DEVICE_ERROR = "Enter a device name without spaces, for example /dev/ttyUSB0 or COM3."
+SERIAL_SCHEME = "serial"
+TCP_SCHEME = "tcp"
 
 
 class FormErrors(Exception):
@@ -71,6 +87,10 @@ class FormField:
     max_value: int | None = None
     # Rendered inside a collapsed "Advanced" section.
     advanced: bool = False
+    # Used only when the form's transport field has this value; otherwise the
+    # field is ignored and its option removed. Without scripts every field
+    # shows, so the help text says which transport it belongs to.
+    transport: str | None = None
 
 
 @dataclass(frozen=True)
@@ -91,6 +111,16 @@ class ProtocolForm:
     def endpoint_field(self) -> FormField | None:
         """Return the field that holds the endpoint, if any."""
         return next((f for f in self.fields if f.target == "endpoint"), None)
+
+    @property
+    def transport_field(self) -> FormField | None:
+        """Return the select that chooses between ``tcp`` and ``serial``, if any.
+
+        With it, the endpoint is ``tcp://host:port`` from the ``endpoint_host``
+        and ``endpoint_port`` fields, or ``serial://<device>`` from the
+        ``endpoint_device`` field.
+        """
+        return next((f for f in self.fields if f.target == "endpoint_transport"), None)
 
 
 PROTOCOL_FORMS: tuple[ProtocolForm, ...] = (
@@ -293,9 +323,80 @@ PROTOCOL_FORMS: tuple[ProtocolForm, ...] = (
         protocol="mbus",
         label="M-Bus",
         summary="Serial port or TCP gateway, meter address",
-        fields=(),
-        available=False,
-        available_in="0.6.0",
+        fields=(
+            FormField(
+                name="transport",
+                label="Transport",
+                kind="select",
+                target="endpoint_transport",
+                default=TCP_SCHEME,
+                choices=((TCP_SCHEME, "TCP gateway"), (SERIAL_SCHEME, "Serial port")),
+            ),
+            FormField(
+                name="host",
+                label="Host",
+                kind="text",
+                target="endpoint_host",
+                required=True,
+                transport=TCP_SCHEME,
+                help="TCP gateway only. Host name or IP address of the gateway.",
+            ),
+            FormField(
+                name="port",
+                label="Port",
+                kind="int",
+                target="endpoint_port",
+                required=True,
+                default=10001,
+                min_value=1,
+                max_value=65535,
+                transport=TCP_SCHEME,
+            ),
+            FormField(
+                name="device",
+                label="Device",
+                kind="text",
+                target="endpoint_device",
+                required=True,
+                transport=SERIAL_SCHEME,
+                help="Serial port only. For example /dev/ttyUSB0 or COM3.",
+            ),
+            FormField(
+                name="baud_rate",
+                label="Baud rate",
+                kind="select",
+                target="option",
+                default=2400,
+                choices=tuple(
+                    (str(rate), str(rate))
+                    for rate in (300, 600, 1200, 2400, 4800, 9600, 19200, 38400)
+                ),
+                transport=SERIAL_SCHEME,
+                help="Serial port only. A TCP gateway sets its own baud rate.",
+            ),
+            FormField(
+                name="scan_timeout_ms",
+                label="Scan reply timeout",
+                kind="int",
+                target="option",
+                default=500,
+                min_value=50,
+                max_value=5000,
+                advanced=True,
+                help="Milliseconds to wait for each meter while scanning the bus.",
+            ),
+            FormField(
+                name="max_telegrams",
+                label="Telegrams per meter",
+                kind="int",
+                target="option",
+                default=8,
+                min_value=1,
+                max_value=16,
+                advanced=True,
+                help="Most telegrams read from a meter that sends its data in parts.",
+            ),
+        ),
     ),
 )
 
@@ -394,9 +495,23 @@ def connection_from_form(
     endpoint = ""
     host = ""
     port: int | None = None
+    device = ""
+    scheme = form.endpoint_scheme
+    transport = _parse_transport(form, data, errors)
+    if transport is not None:
+        scheme = transport if transport == TCP_SCHEME else None
     for field in form.fields:
         raw = data.get(field.name, "")
-        if field.target == "endpoint":
+        if field.transport is not None and field.transport != transport:
+            # A field of the other transport: ignored, its option dropped.
+            if field.target == "option":
+                options.pop(field.name, None)
+            continue
+        if field.target == "endpoint_transport":
+            continue
+        if field.target == "endpoint_device":
+            device = _parse_device(field, raw, errors)
+        elif field.target == "endpoint":
             endpoint = _parse_endpoint(field, raw, existing, errors)
         elif field.target == "endpoint_host":
             host = raw.strip()
@@ -411,7 +526,9 @@ def connection_from_form(
         else:
             _apply_option(field, raw, data, options, errors)
 
-    if form.endpoint_scheme is not None:
+    if transport == SERIAL_SCHEME and not errors:
+        endpoint = f"{SERIAL_SCHEME}://{device}"
+    if scheme is not None:
         host_field = next(f for f in form.fields if f.target == "endpoint_host")
         if host and host_field.name not in errors:
             # Check the host alone, with a placeholder port, so a bad host and a
@@ -446,18 +563,30 @@ def connection_form_values(
 ) -> dict[str, object]:
     """Return the field values the edit form shows for ``connection``."""
     values: dict[str, object] = {}
-    host, port = "", None
-    if form.endpoint_scheme is not None:
+    host, port, device = "", None, ""
+    transport = TCP_SCHEME
+    if form.transport_field is not None and is_serial_endpoint(connection.endpoint):
+        transport = SERIAL_SCHEME
+        # As stored, even when invalid, so the user sees what to fix.
+        device = connection.endpoint[len(f"{SERIAL_SCHEME}://") :]
+    elif form.endpoint_scheme is not None or form.transport_field is not None:
         with contextlib.suppress(ConfigurationError):
             host, port = parse_endpoint(connection.endpoint)
     for field in form.fields:
         if field.target == "endpoint":
             values[field.name] = display_endpoint(connection.endpoint)
+        elif field.target == "endpoint_transport":
+            values[field.name] = transport
+        elif field.target == "endpoint_device":
+            values[field.name] = device
         elif field.target == "endpoint_host":
             values[field.name] = host
         elif field.target == "endpoint_port":
             if port is not None:
                 values[field.name] = str(port)
+            elif field.transport not in (None, transport) and field.default:
+                # The other transport's port: offer the default when switching.
+                values[field.name] = str(field.default)
         elif field.target == "option":
             option = connection.protocol_options.get(field.name, field.default)
             if field.kind == "bool":
@@ -498,6 +627,32 @@ def _parse_digits(raw: str) -> int | None:
     if not text or not (text.isascii() and text.isdigit()):
         return None
     return int(text)
+
+
+def _parse_transport(
+    form: ProtocolForm, data: Mapping[str, str], errors: dict[str, str]
+) -> str | None:
+    """Return the chosen transport, or None when the form has no such field."""
+    field = form.transport_field
+    if field is None:
+        return None
+    value = data.get(field.name, "").strip()
+    if value not in {key for key, _ in field.choices}:
+        errors[field.name] = CHOICE_ERROR
+        return None
+    return value
+
+
+def _parse_device(field: FormField, raw: str, errors: dict[str, str]) -> str:
+    device = raw.strip()
+    if not device:
+        errors[field.name] = f"Enter the {field.label.lower()}."
+        return device
+    try:
+        parse_serial_endpoint(f"{SERIAL_SCHEME}://{device}")
+    except ConfigurationError:
+        errors[field.name] = DEVICE_ERROR
+    return device
 
 
 def _parse_timeout(raw: str, errors: dict[str, str]) -> int:
@@ -585,6 +740,8 @@ def _apply_option(
             options[field.name] = number
         return
     if field.kind == "select" and value not in {key for key, _ in field.choices}:
-        errors[field.name] = "Choose one of the listed options."
+        errors[field.name] = CHOICE_ERROR
         return
-    options[field.name] = value
+    # A select whose default is a number stores numbers (M-Bus baud rate).
+    is_number = isinstance(field.default, int) and not isinstance(field.default, bool)
+    options[field.name] = int(value) if is_number else value

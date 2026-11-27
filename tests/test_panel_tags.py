@@ -1099,3 +1099,301 @@ def test_paste_route_ids_taken_meanwhile(
     assert stores.config.all_tag_ids() == {"press2_ram_position"}
     # The fresh preview sees the Tag saved meanwhile at the same register.
     assert "Same register as Tag press2_ram_position." in response.text
+
+
+# M-Bus
+
+BATTERY_WARNING = (
+    "This group polls M-Bus meters every 10 s. Battery-powered meters may drain "
+    "or stop answering when read more often than once a minute."
+)
+
+
+def _mbus_connection() -> ConnectionConfig:
+    return ConnectionConfig(
+        id="heat", name="Heat meters", protocol="mbus", endpoint="tcp://gw:10001"
+    )
+
+
+def _seed_mbus(host: FakeHost, interval_ms: int = 900_000) -> Stores:
+    stores = _stores(host)
+    stores.config.upsert_connection(_mbus_connection())
+    stores.config.upsert_tag_group(
+        TagGroupConfig(
+            id="meters", connection_id="heat", interval_ms=interval_ms, timeout_ms=800
+        )
+    )
+    return stores
+
+
+def _mbus_tag(tag_id: str = "heat_energy") -> TagConfig:
+    return TagConfig(
+        id=tag_id,
+        tag_group_id="meters",
+        name="Energy",
+        address="12345678",
+        value_type=ValueType.NUMERIC,
+        metadata={"unit": "kWh"},
+        protocol_options={"quantity": "energy", "unit": "kWh"},
+    )
+
+
+def _mbus_tag_form(**overrides: str) -> dict[str, str]:
+    data = {
+        "name": "Heat energy",
+        "tag_group": "meters",
+        "meter": "12345678",
+        "quantity": "energy",
+        "unit": "kWh",
+        "storage": "1",
+        "tariff": "0",
+        "subunit": "0",
+        "function": "instantaneous",
+        "occurrence": "1",
+        "meter_id": "",
+        "enabled": "on",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_mbus_tag_form_creates_tag(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_mbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/heat/tags", data=_mbus_tag_form()
+    )
+
+    assert response.status_code == 303
+    tag = stores.config.get_tag("heat_heat_energy")
+    assert tag is not None
+    assert tag.address == "12345678"
+    assert dict(tag.protocol_options) == {
+        "quantity": "energy",
+        "unit": "kWh",
+        "storage": 1,
+    }
+    assert tag.value_type is ValueType.NUMERIC
+    assert tag.metadata == {"unit": "kWh"}
+    page = signed_in_client.get("/panel/connections/heat").text
+    row = re.search(r'<tr data-tag="heat_heat_energy".*?</tr>', page, re.S)
+    assert row is not None
+    assert "energy, storage 1" in row.group(0)
+
+
+def test_mbus_tag_form_shows_fields_and_units_of_the_quantity(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_mbus(fake_host)
+
+    new = signed_in_client.get(
+        "/panel/connections/heat/tags/new", headers={"HX-Request": "true"}
+    ).text
+    energy = signed_in_client.get(
+        "/panel/connections/heat/tags/new",
+        params=_mbus_tag_form(unit="GJ"),
+        headers={"HX-Request": "true"},
+    ).text
+    hca = signed_in_client.get(
+        "/panel/connections/heat/tags/new",
+        params=_mbus_tag_form(quantity="hca_units", unit=""),
+        headers={"HX-Request": "true"},
+    ).text
+
+    for name in ("meter", "storage", "tariff", "subunit", "occurrence", "meter_id"):
+        assert _input_value(new, name) is not None, name
+    assert _selected(new, "quantity") == ""
+    assert "energy" in _options(new, "quantity")
+    assert _options(new, "function") == [
+        "instantaneous",
+        "maximum",
+        "minimum",
+        "error",
+    ]
+    for qualifier in ("backward", "forward", "per_hour", "per_minute", "per_second"):
+        assert f'name="qualifier_{qualifier}"' in new
+    assert 'hx-get="/panel/connections/heat/tags/new"' in new
+    units = _options(energy, "unit")
+    assert "GJ" in units
+    assert "kWh" in units
+    assert "m3" not in units
+    assert _selected(energy, "unit") == "GJ"
+    assert _input_value(energy, "name") == "Heat energy"
+    assert _options(hca, "unit") == [""]
+    assert "(none)" in (_select_body(hca, "unit") or "")
+    assert "Read meter" not in new
+
+
+def test_mbus_tag_edit_round_trip(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_mbus(fake_host)
+    stores.config.upsert_tag(_mbus_tag())
+
+    html = signed_in_client.get(
+        "/panel/tags/heat_energy/edit", headers={"HX-Request": "true"}
+    ).text
+    assert _input_value(html, "meter") == "12345678"
+    assert _selected(html, "quantity") == "energy"
+    assert _selected(html, "unit") == "kWh"
+
+    response = signed_in_client.post(
+        "/panel/tags/heat_energy",
+        data=_mbus_tag_form(meter="005", unit="MWh", qualifier_backward="on"),
+    )
+
+    assert response.status_code == 303
+    tag = stores.config.get_tag("heat_energy")
+    assert tag is not None
+    assert tag.address == "5"
+    assert tag.metadata == {"unit": "MWh"}
+    assert tag.protocol_options["qualifiers"] == ["backward"]
+
+
+def test_mbus_tag_form_errors(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_mbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/heat/tags", data=_mbus_tag_form(meter="P5", unit="m3")
+    )
+
+    assert response.status_code == 400
+    html = unescape(response.text)
+    assert "Invalid M-Bus meter address 'P5'" in html
+    assert "Choose a unit of energy" in html
+
+
+def test_mbus_paste_route_saves(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_mbus(fake_host)
+
+    preview = signed_in_client.get("/panel/connections/heat/tags/paste").text
+    assert "name;meter;quantity;unit" in preview
+    response = signed_in_client.post(
+        "/panel/connections/heat/tags/paste",
+        data={
+            "text": "name;meter;quantity;unit\nHeatTotal;12345678;energy;MWh",
+            "tag_group_id": "meters",
+            "action": "save",
+        },
+    )
+
+    assert response.status_code == 303
+    tag = stores.config.get_tag("heat_heattotal")
+    assert tag is not None
+    assert tag.metadata == {"unit": "MWh"}
+
+
+def test_mbus_paste_preview_shows_failed_row_meter(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_mbus(fake_host)
+
+    response = signed_in_client.post(
+        "/panel/connections/heat/tags/paste",
+        data={
+            "text": "name;meter;quantity;unit\nBad;251;energy;kWh",
+            "tag_group_id": "meters",
+            "action": "preview",
+        },
+    )
+
+    html = unescape(response.text)
+    row = re.search(r'<tr class="row-failed">.*?</tr>', html, re.S)
+    assert row is not None
+    assert "<td>251</td>" in row.group(0)
+    assert "meter: Invalid M-Bus meter address '251'" in row.group(0)
+
+
+def test_battery_warning_on_group_edit_and_save(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_mbus(fake_host, interval_ms=10_000)
+    stores.config.upsert_tag(_mbus_tag())
+
+    edit = signed_in_client.get(
+        "/panel/groups/meters/edit", headers={"HX-Request": "true"}
+    ).text
+    page = signed_in_client.get("/panel/groups/meters/edit").text
+    response = signed_in_client.post(
+        "/panel/groups/meters",
+        data=_group_form(id="meters", interval_ms="10000", timeout_ms="800"),
+    )
+    after_save = signed_in_client.get("/panel/connections/heat").text
+
+    assert BATTERY_WARNING in edit
+    assert BATTERY_WARNING in page
+    assert response.status_code == 303
+    assert BATTERY_WARNING in after_save
+    assert SAVED_FLASH in after_save
+
+
+def test_no_battery_warning_at_a_minute_or_without_tags(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    stores = _seed_mbus(fake_host, interval_ms=60_000)
+    stores.config.upsert_tag(_mbus_tag())
+    stores.config.upsert_tag_group(
+        TagGroupConfig(id="empty", connection_id="heat", interval_ms=10_000)
+    )
+
+    slow = signed_in_client.get(
+        "/panel/groups/meters/edit", headers={"HX-Request": "true"}
+    ).text
+    signed_in_client.post(
+        "/panel/groups/meters",
+        data=_group_form(id="meters", interval_ms="60000", timeout_ms="800"),
+    )
+    after_save = signed_in_client.get("/panel/connections/heat").text
+    empty = signed_in_client.get(
+        "/panel/groups/empty/edit", headers={"HX-Request": "true"}
+    ).text
+
+    assert "Battery-powered" not in slow
+    assert "Battery-powered" not in after_save
+    assert "Battery-powered" not in empty
+
+
+@pytest.mark.parametrize(
+    ("path", "data"),
+    [
+        ("/panel/connections/heat/tags", _mbus_tag_form()),
+        ("/panel/tags/heat_energy", _mbus_tag_form()),
+        ("/panel/groups/meters", _group_form(id="meters")),
+    ],
+)
+def test_mbus_cross_site_posts_are_refused(
+    signed_in_client: TestClient,
+    fake_host: FakeHost,
+    path: str,
+    data: dict[str, str],
+) -> None:
+    stores = _seed_mbus(fake_host)
+    stores.config.upsert_tag(_mbus_tag())
+    before = stores.config.revision()
+
+    response = signed_in_client.post(
+        path, data=data, headers={"Origin": "https://evil.example"}
+    )
+
+    assert response.status_code == 403
+    assert stores.config.revision() == before
+
+
+def test_mbus_tag_routes_require_sign_in(
+    panel_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed_mbus(fake_host)
+
+    assert panel_client.get("/panel/connections/heat/tags/new").status_code == 303
+    assert (
+        panel_client.post(
+            "/panel/connections/heat/tags", data=_mbus_tag_form()
+        ).status_code
+        == 303
+    )
