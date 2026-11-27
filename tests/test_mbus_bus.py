@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import itertools
 import os
 import sys
@@ -129,9 +130,11 @@ class Gateway:
     requests: list[tuple[str, int]] = field(default_factory=list)
     late_sent: asyncio.Event = field(default_factory=asyncio.Event)
     port: int = field(default_factory=free_port)
+    meters: list[simulator.SimulatedMeter] | None = None
 
     def __post_init__(self) -> None:
-        self.bus = simulator.SimulatedBus(simulator.demo_meters(), clock=self.clock)
+        meters = simulator.demo_meters() if self.meters is None else self.meters
+        self.bus = simulator.SimulatedBus(meters, clock=self.clock)
         self._server: asyncio.Server | None = None
         self._writers: set[asyncio.StreamWriter] = set()
 
@@ -584,6 +587,23 @@ async def test_a_dropped_gateway_is_connection_lost_and_reopen_works() -> None:
         await server.stop()
 
 
+async def test_tcp_connect_timeout_is_connect_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.get_running_loop()
+
+    async def never(*args: object, **kwargs: object) -> object:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(loop, "create_connection", never)
+    bus = _tcp_bus(free_port(), timeout_s=0.1)
+    with pytest.raises(BusTransportError) as caught:
+        await bus.open()
+    assert caught.value.code == "mbus_connect_failed"
+    assert not bus.is_open
+
+
 def test_describe() -> None:
     assert TcpTransport("gw", 10001, connect_timeout_s=1.0).describe() == "TCP gateway"
     assert SerialTransport("/dev/ttyUSB0", 2400).describe() == "Serial 2400 baud"
@@ -712,6 +732,48 @@ async def test_serial_device_missing_is_connect_failed() -> None:
     assert caught.value.code == "mbus_connect_failed"
     assert not bus.is_open
     assert threading.active_count() == threads
+
+
+class _ConstantAccess(simulator.SimulatedMeter):
+    """A meter that sends the same access number in every telegram."""
+
+    def header(self, access_no: int) -> bytes:
+        return simulator.SimulatedMeter.header(self, 7)
+
+
+def _constant_access(meter: simulator.SimulatedMeter) -> simulator.SimulatedMeter:
+    fields = dataclasses.fields(meter)
+    return _ConstantAccess(**{f.name: getattr(meter, f.name) for f in fields if f.init})
+
+
+async def test_a_known_fcb_skips_the_repeat_guard() -> None:
+    meters = simulator.demo_meters()
+    meters[1] = _constant_access(meters[1])  # meter 2, one telegram
+    async with _connected(meters=meters) as (gateway, bus):
+        readings = []
+        for _ in range(3):
+            gateway.clock.advance(3600)
+            async with bus.turn() as turn:
+                readings.append(await turn.read_meter(_primary(2)))
+    assert {r.header.access_no for r in readings} == {7}
+    # One SND_NKE, then exactly one REQ_UD2 per read.
+    assert gateway.requests == [("snd_nke", 2)] + [("req_ud2", 2)] * 3
+
+
+async def test_reading_a_selected_header_forgets_the_meters_fcb() -> None:
+    async with _connected() as (gateway, bus):
+        async with bus.turn() as turn:
+            await turn.read_meter(_primary(2))
+        async with bus.turn() as turn:
+            assert await turn.probe_secondary(_pattern("12399999"), TIMEOUT_S) == "ack"
+            header = await turn.read_selected_header(TIMEOUT_S)
+        async with bus.turn() as turn:
+            again = await turn.read_meter(_primary(2))
+    assert header is not None
+    assert header.id_digits == "12399999"
+    assert again.header.id_digits == "12399999"
+    # The header read used a guessed FCB: the next read starts over.
+    assert gateway.requests.count(("snd_nke", 2)) == 2
 
 
 def test_repeat_guard_skips_meters_that_do_not_count_telegrams() -> None:

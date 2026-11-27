@@ -232,7 +232,7 @@ class TcpTransport(_FramedTransport):
                 )
         except TimeoutError as error:
             raise BusTransportError(
-                "mbus_timeout",
+                "mbus_connect_failed",
                 "The M-Bus gateway did not accept the connection in time.",
             ) from error
         except OSError as error:
@@ -639,7 +639,7 @@ class BusTurn:
                 snd_nke(primary), bus.timeout_s, _ack, f"SND_NKE to {primary}"
             )
             fcb = True
-        result = await self._telegrams(primary, fcb)
+        result = await self._telegrams(primary, fcb, guessed=False)
         bus._ids[primary] = result.reading.header.id_digits
         return result.reading
 
@@ -659,18 +659,23 @@ class BusTurn:
             # A full ID shares the FCB state of the meter's primary reads.
             known = None if "F" in address.id_digits else address.id_digits
             fcb = self._take_fcb(known)
-            result = await self._telegrams(None, True if fcb is None else fcb)
+            result = await self._telegrams(
+                None, True if fcb is None else fcb, guessed=fcb is None
+            )
         except MeterError:
             await self.deselect()
             raise
         await self.deselect()
         return result.reading
 
-    async def _telegrams(self, primary: int | None, fcb: bool) -> _Read:
+    async def _telegrams(
+        self, primary: int | None, fcb: bool, *, guessed: bool
+    ) -> _Read:
         """REQ_UD2 and follow-ups; on success the meter's state is remembered.
 
-        A first telegram whose access number is one of the meter's previous
-        read is a repeat (the meter saw this FCB last time): the FCB is
+        When ``fcb`` is a guess (a selected meter whose state the bus does not
+        know), a first telegram whose access number is one of the meter's
+        previous read is a repeat (the meter saw this FCB last time): the FCB is
         toggled and the telegram requested once more. Not for a
         multi-telegram meter whose telegrams shared one access number (it
         does not count them): the extra request would skip its telegram 1.
@@ -689,7 +694,8 @@ class BusTurn:
             fcb = not fcb
             if first is None:
                 header = telegram.header
-                if _repeated(header, bus._access.get(header.id_digits, ())):
+                previous = bus._access.get(header.id_digits, ())
+                if guessed and _repeated(header, previous):
                     LOGGER.debug(
                         "mbus_repeated_telegram",
                         extra={"address": address, "access_no": header.access_no},
@@ -785,4 +791,7 @@ class BusTurn:
             )
         except MeterNoReply:
             return None
+        # FCB 1 was a guess, and not every meter resets on SND_NKE 253: the
+        # meter's next read starts over (SND_NKE).
+        self._bus._fcb.pop(telegram.header.id_digits, None)
         return telegram.header
