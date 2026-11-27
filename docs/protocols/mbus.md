@@ -200,6 +200,9 @@ therefore never scales with floats:
 - A 32-bit real is stored as the shortest decimal that gives back the same
   float32. A meter that sends 2345.6 as a real stores `2345.6`, not
   `2345.60009765625`.
+- Live tags shows an M-Bus value with every digit it has (`12 345.678`), not
+  rounded to 2 decimals as for the other protocols, so you can compare it
+  with the display there.
 
 Two VIF extensions change a value exactly: the multiplicative correction
 factors 10^(nnn-6) (`E111 0nnn`) and 10^3 (`E111 1101`). The additive
