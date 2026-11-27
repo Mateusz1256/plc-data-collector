@@ -1,0 +1,10 @@
+# Source: hand-assembled, checked by the pyMeterBus oracle (tests/test_mbus_oracle.py).
+# Value errors: BCD digit A, real NaN and +Inf (energy VIF 0x03).
+68 2B 2B 68 08 01 72  # start, L, L, start, C, A, CI
+04 00 00 10 83 40 01 04 24 00 00 00  # header: ID, manufacturer PDC (0x4083), version 1, medium, access no, status, signature
+0C 03 0A 00 00 00  # BCD8 with digit A -> mbus_value_invalid
+0A 03 34 1C  # BCD4 with digit C -> mbus_value_invalid
+05 03 00 00 C0 7F  # real32 NaN -> mbus_value_not_finite
+05 03 00 00 80 7F  # real32 +Inf -> mbus_value_not_finite
+04 03 05 00 00 00  # int32 5 (good record after the bad ones)
+4B 16  # checksum, stop

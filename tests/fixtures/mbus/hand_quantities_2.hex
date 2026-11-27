@@ -1,0 +1,20 @@
+# Source: hand-assembled, checked by the pyMeterBus oracle (tests/test_mbus_oracle.py).
+# Flow, temperature, pressure, HCA, voltage and current rows of the quantity table.
+68 62 62 68 08 01 72  # start, L, L, start, C, A, CI
+02 00 00 10 83 40 01 04 22 00 00 00  # header: ID, manufacturer PDC (0x4083), version 1, medium, access no, status, signature
+04 3B 71 00 00 00  # volume_flow, VIF 0x3B m3/h x10^-3, int32 113 -> 113 L/h
+04 3E 02 00 00 00  # volume_flow, VIF 0x3E m3/h x10^0, int32 2 -> 2 m3/h
+04 47 03 00 00 00  # volume_flow, VIF 0x47 m3/min x10^0, int32 3 -> 3 m3/min
+04 4F 0C 00 00 00  # volume_flow, VIF 0x4F m3/s x10^-2, int32 12 -> 0.12 m3/s
+04 53 58 02 00 00  # mass_flow, VIF 0x53 kg/h x10^0, int32 600 -> 600 kg/h
+04 56 04 00 00 00  # mass_flow, VIF 0x56 kg/h x10^3, int32 4 -> 4 t/h
+02 59 E6 1C  # flow_temperature, VIF 0x59 C x10^-2, int16 7398 -> 73.98 C
+02 5D 6A 11  # return_temperature, VIF 0x5D C x10^-2, int16 4458 -> 44.58 C
+02 62 B8 01  # temperature_difference, VIF 0x62 K x10^-1, int16 440 -> 44.0 K
+02 66 9C FF  # external_temperature, VIF 0x66 C x10^-1, int16 -100 -> -10.0 C
+02 69 2C 01  # pressure, VIF 0x69 bar x10^-2, int16 300 -> 3.00 bar
+04 6E 39 05 00 00  # hca_units, VIF 0x6E, int32 1337 -> 1337
+04 FD 48 FA 08 00 00  # voltage, VIF 0xFD 0x48 V x10^-1, int32 2298 -> 229.8 V
+04 FD 4C 0B 00 00 00  # voltage, VIF 0xFD 0x4C V x10^3, int32 11 -> 11 kV
+04 FD 59 E8 03 00 00  # current, VIF 0xFD 0x59 A x10^-3, int32 1000 -> 1.000 A
+AE 16  # checksum, stop

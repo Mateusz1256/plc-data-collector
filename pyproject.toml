@@ -35,7 +35,8 @@ dev = [
   "pytest-asyncio==1.4.0",
   "packaging==23.2",
   "ruff==0.15.21",
-  "mypy==2.2.0"
+  "mypy==2.2.0",
+  "pyMeterBus==0.8.5"
 ]
 
 [project.scripts]

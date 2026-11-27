@@ -1,0 +1,25 @@
+# Source: hand-assembled, checked by the pyMeterBus oracle (tests/test_mbus_oracle.py).
+# Energy, volume, mass, durations and power rows of the quantity table.
+68 8B 8B 68 08 01 72  # start, L, L, start, C, A, CI
+01 00 00 10 83 40 01 04 21 00 00 00  # header: ID, manufacturer PDC (0x4083), version 1, medium, access no, status, signature
+04 03 E8 03 00 00  # energy, VIF 0x03 Wh x10^0, int32 1000 -> 1000 Wh
+04 06 39 30 00 00  # energy, VIF 0x06 Wh x10^3, int32 12345 -> 12345 kWh
+04 01 D2 04 00 00  # energy, VIF 0x01 Wh x10^-2, int32 1234 -> 12.34 Wh
+04 0E 15 00 00 00  # energy, VIF 0x0E J x10^6, int32 21 -> 21 MJ
+04 FB 00 7B 00 00 00  # energy, VIF 0xFB 0x00 MWh x10^-1, int32 123 -> 12300 kWh
+04 FB 01 7B 00 00 00  # energy, VIF 0xFB 0x01 MWh x10^0, int32 123 -> 123 MWh
+04 FB 08 2D 00 00 00  # energy, VIF 0xFB 0x08 GJ x10^-1, int32 45 -> 4500 MJ
+04 FB 09 2D 00 00 00  # energy, VIF 0xFB 0x09 GJ x10^0, int32 45 -> 45 GJ
+04 13 4E 61 BC 00  # volume, VIF 0x13 m3 x10^-3, int32 12345678 -> 12345678 L
+04 16 0A 00 00 00  # volume, VIF 0x16 m3 x10^0, int32 10 -> 10 m3
+04 15 05 00 00 00  # volume, VIF 0x15 m3 x10^-1, int32 5 -> 500 L
+04 1B 64 00 00 00  # mass, VIF 0x1B kg x10^0, int32 100 -> 100 kg
+04 1E 07 00 00 00  # mass, VIF 0x1E kg x10^3, int32 7 -> 7 t
+04 20 10 0E 00 00  # on_time, VIF 0x20 seconds, int32 3600 -> 3600 s
+04 22 18 00 00 00  # on_time, VIF 0x22 hours, int32 24 -> 24 h
+04 25 3C 00 00 00  # operating_time, VIF 0x25 minutes, int32 60 -> 60 min
+04 27 6E 01 00 00  # operating_time, VIF 0x27 days, int32 366 -> 366 d
+04 2B 2C 01 00 00  # power, VIF 0x2B W x10^0, int32 300 -> 300 W
+04 2E 0F 00 00 00  # power, VIF 0x2E W x10^3, int32 15 -> 15 kW
+04 33 4D 00 00 00  # power, VIF 0x33 J/h x10^3, int32 77 -> 77 kJ/h
+4A 16  # checksum, stop

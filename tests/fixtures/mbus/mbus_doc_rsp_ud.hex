@@ -1,0 +1,9 @@
+# Source: "The M-Bus: A Documentation", Rev. 4.8 (m-bus.com), example RSP_UD with
+# variable data structure (mode 1); the same telegram EN 13757-3 inherits.
+# Meter ID 12345678, manufacturer 0x4024 (PAD), version 1, water, access 0x55.
+68 1F 1F 68 08 02 72  # start, L=31, start, C=RSP_UD, A=2, CI=0x72
+78 56 34 12 24 40 01 07 55 00 00 00  # header: ID 12345678, PAD, version 1, water, access 0x55, status 0, signature 0
+03 13 15 31 00  # volume, int24 12565 x 10^-3 m3 (12565 L)
+DA 02 3B 13 01  # storage 5, maximum volume flow, BCD4 113 x 10^-3 m3/h (113 L/h)
+8B 60 04 37 18 02  # subunit 1, tariff 2, energy BCD6 21837 x 10 Wh (218.37 kWh)
+18 16  # checksum, stop

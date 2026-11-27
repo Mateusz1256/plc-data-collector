@@ -651,6 +651,76 @@ introduced.
 - Bundled in distribution: no
 - Notes: installed transitively in the `dev` extra.
 
+### pyMeterBus
+
+- Version: 0.8.5
+- Purpose: test-only oracle for the M-Bus codec (never imported by the
+  application)
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/pyMeterBus/0.8.5/
+- Copyright notice: Copyright (c) 2014, Mikael Ganehag Brorsson
+- Bundled in distribution: no
+- Notes: declared directly in the `dev` extra. License verified from package
+  metadata `License: BSD-3-Clause` and the bundled LICENSE file.
+
+### pyaml
+
+- Version: 26.7.0
+- Purpose: transitive pyMeterBus dependency
+- License: WTFPL
+- Source: https://pypi.org/project/pyaml/26.7.0/
+- Copyright notice: Copyright (C) 2012 Mike Kazantsev
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata `License: WTFPL` and the bundled COPYING file.
+
+### PyYAML
+
+- Version: 6.0.4
+- Purpose: transitive pyaml dependency
+- License: MIT
+- Source: https://pypi.org/project/PyYAML/6.0.4/
+- Copyright notice: Copyright (c) 2017-2021 Ingy döt Net; Copyright (c)
+  2006-2016 Kirill Simonov
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata `License: MIT`.
+
+### pycryptodome
+
+- Version: 4.6.0
+- Purpose: transitive pyMeterBus dependency
+- License: BSD-2-Clause AND Unlicense AND MIT
+- Source: https://pypi.org/project/pycryptodome/4.6.0/
+- Copyright notice: See package license files.
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata `License-Expression: BSD-2-Clause AND Unlicense AND MIT`.
+
+### simplejson
+
+- Version: 4.3.0
+- Purpose: transitive pyMeterBus dependency
+- License: MIT OR AFL-2.1
+- Source: https://pypi.org/project/simplejson/4.3.0/
+- Copyright notice: Copyright (c) 2006 Bob Ippolito
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. License verified from
+  package metadata `License: MIT OR AFL-2.1`.
+
+### pyserial
+
+- Version: 3.5
+- Purpose: transitive pyMeterBus dependency
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/pyserial/3.5/
+- Copyright notice: Copyright (c) 2001-2020 Chris Liechti
+- Bundled in distribution: no
+- Notes: installed transitively in the `dev` extra. Package metadata says
+  `License: BSD`; the source header of `serial/__init__.py` gives
+  `SPDX-License-Identifier: BSD-3-Clause`. Move this entry to Runtime
+  Dependencies when pyserial is declared as a runtime dependency.
+
 ## Vendored Assets
 
 Files copied into the package rather than installed by pip. They are not in

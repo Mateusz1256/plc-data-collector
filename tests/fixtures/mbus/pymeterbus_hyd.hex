@@ -1,0 +1,8 @@
+# Source: pyMeterBus 0.8.5 test frame, tests/test_hyd.py (self.frame).
+# Hydrometer heat meter: tariff and subunit DIFEs (two DIFEs), error-function records with invalid BCD digits, VIF 0xFD 0x17.
+68 54 54 68 08 4E 72 78 75 01 51 24 23 20 04 46
+70 00 00 0C 06 00 00 00 00 8C 10 06 00 00 00 00
+0C 13 43 94 36 01 8C 20 13 00 00 00 00 8C 40 13
+48 00 00 00 8C 80 40 13 12 00 00 00 02 FD 17 10
+00 3B 3B BD EB DD 3C 2B BD EB DD DD 0A 5A 74 01
+0A 5E 72 01 0A 62 01 00 6B 16

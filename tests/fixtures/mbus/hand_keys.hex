@@ -1,0 +1,22 @@
+# Source: hand-assembled, checked by the pyMeterBus oracle (tests/test_mbus_oracle.py).
+# DIF/DIFE storage, tariff, subunit and function; qualifier and multiplier VIFEs; unsupported records; fill and 0x1F.
+68 70 70 68 08 01 72  # start, L, L, start, C, A, CI
+05 00 00 10 83 40 01 04 25 00 00 00  # header: ID, manufacturer PDC (0x4083), version 1, medium, access no, status, signature
+84 10 03 01 00 00 00  # DIFE 0x10: tariff 1; energy int32 1 Wh
+C4 81 7A 03 02 00 00 00  # DIF storage bit, DIFE 0x81 (storage 0001), DIFE 0x7A (subunit 1, tariff 3, storage 1010): storage 323, tariff 12, subunit 2
+14 03 03 00 00 00  # function maximum
+24 03 04 00 00 00  # function minimum
+34 03 05 00 00 00  # function error
+2F 2F  # fill bytes
+04 83 3B 06 00 00 00  # VIFE 0x3B forward: energy 6 Wh, qualifiers [forward]
+04 83 3C 07 00 00 00  # VIFE 0x3C backward: energy 7 Wh, qualifiers [backward]
+04 93 22 08 00 00 00  # VIFE 0x22 per hour: volume 8 L, qualifiers [per_hour]
+04 83 7D 09 00 00 00  # VIFE 0x7D multiplicative correction x10^3: 9 kWh
+04 86 73 0A 00 00 00  # VIFE 0x73 multiplicative correction x10^-3 on kWh: 10 Wh
+04 83 3A 0B 00 00 00  # VIFE 0x3A uncorrected unit: unsupported
+02 6C 21 2B  # VIF 0x6C date (type G): unsupported
+02 FD 17 00 00  # VIF 0xFD 0x17 error flags: unsupported
+00 03  # DIF data field 0x0 no data: unsupported
+0D 03 02 41 42  # DIF data field 0xD variable length (LVAR 2): unsupported
+1F 01 02 03  # DIF 0x1F: more records follow, then manufacturer data
+78 16  # checksum, stop
