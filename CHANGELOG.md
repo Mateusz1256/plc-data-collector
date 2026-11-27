@@ -7,6 +7,64 @@ Versioning.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
+### Added
+
+- Wired M-Bus driver (EN 13757-2/-3), read-only, through a TCP gateway
+  (`tcp://host:port`) or a serial level converter (`serial://<device>`, 300 to
+  38400 baud, 8E1). Meters by primary address (`5`) or secondary address
+  (`12345678`, or `123456782C2D0104` with manufacturer, version and medium).
+  A Tag selects a record by its meaning (`quantity`, `storage`, `tariff`,
+  `subunit`, `function`, `qualifiers`, `occurrence`), never by position, and
+  stores it in a declared `unit`; values are converted exactly in decimal
+  within one unit family, and a record in another family is
+  `mbus_unit_mismatch` ([ADR 0005](docs/adr/0005-mbus-records-selected-by-meaning.md)).
+  An optional `meter_id` makes a reply from another meter `mbus_wrong_meter`.
+  Multi-telegram meters, CI `0x72` and `0x76`, integer, BCD and real data,
+  `forward`/`backward` and per-time qualifiers, and the multiplicative VIF
+  corrections are decoded by the project's own codec. Errors are stored as
+  `mbus_*` codes. See `docs/protocols/mbus.md`.
+- One meter that does not answer never makes another meter's Tags bad, and a
+  missing record never makes the meter's other Tags bad. A meter whose status
+  byte reports an error gives `uncertain` readings with the reason
+  (`mbus_meter_status`); "power low" alone is logged once and stays good.
+- One shared bus per M-Bus Connection: polling, "Test connection", "Read
+  meter" and "Scan bus" take turns on it. Panel actions borrow the running
+  bus, use a temporary bus when the Connection does not run, and are refused
+  when the running settings differ, while an apply runs or the collector
+  starts or stops, and when another Connection holds the port.
+- Panel: M-Bus Connection form (transport, host and port or device, baud
+  rate, scan reply timeout, telegrams per meter), "Scan bus" (primary or
+  secondary, in the background, with progress and Cancel), "Read meter"
+  (one meter's records with value and unit, ticked records saved as Tags with
+  `meter_id`), the M-Bus Tag form, and CSV paste with a `meter` column. A
+  warning when an M-Bus Tag Group polls more often than once a minute
+  (battery-powered meters).
+- M-Bus simulator with five meters (`python -m
+  plc_data_collector.simulators.mbus`, port 10001), an `mbus-sim` service in
+  Docker Compose, a `heating_mbus` Connection in the demo configuration, and
+  an M-Bus check in the smoke test.
+
+### Changed
+
+- An `uncertain` reading may now carry `error_code` and `error_message` with
+  its value, in `tag_readings` and in `/api/v1`. `good` readings still have
+  neither, and `bad` readings are unchanged. Only M-Bus produces such
+  readings so far.
+- Two M-Bus Connections on the same endpoint are refused
+  (`invalid_mbus_connection`).
+- New direct runtime dependency: `pyserial` 3.5 (BSD-3-Clause), listed in
+  `THIRD_PARTY_NOTICES.md`. `pyMeterBus` 0.8.5 is a development dependency,
+  used only by the tests as an independent decoder.
+
+### Known limitations
+
+- M-Bus support is not tested on real hardware. Compare a billing total digit
+  by digit with the meter's display before relying on it.
+- No wireless M-Bus, encryption, writes to meters, manufacturer-specific or
+  date/time records as Tags.
+
 ## [0.5.0] - 2026-11-27
 
 ### Added

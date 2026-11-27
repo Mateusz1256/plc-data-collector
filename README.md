@@ -1,6 +1,6 @@
 # PLC Data Collector
 
-An asyncio service that polls industrial controllers over OPC UA, Modbus TCP and Siemens S7, stores the Tag readings in PostgreSQL, and has a web Panel and a REST API.
+An asyncio service that polls industrial controllers and meters over OPC UA, Modbus TCP, Siemens S7 and wired M-Bus, stores the Tag readings in PostgreSQL, and has a web Panel and a REST API.
 
 <!--
 Demo GIF placeholder. To record it: start the stack (Quick start below), sign in
@@ -25,6 +25,7 @@ Production data lives in controllers that are awkward to query: values are addre
 - OPC UA driver (`asyncua`) with batched reads, source timestamps and per-Tag quality.
 - Modbus TCP driver (`pymodbus`), read-only: Coils, Discrete inputs, Holding and Input registers, all common data types, byte and word order, unit ID, scale and offset, block reads, and Tag entry by form or by pasting CSV. See [docs/protocols/modbus.md](docs/protocols/modbus.md).
 - Siemens S7 driver (`python-snap7`), read-only: S7-300/400/1200/1500 by rack and slot, data blocks, merkers, inputs and outputs, block reads, Tag entry by form, CSV paste or import from TIA Portal (tag tables, DB and UDT sources). See [docs/protocols/s7.md](docs/protocols/s7.md). **Not tested on real hardware** (see below).
+- Wired M-Bus driver, read-only: heat, water and electricity meters through a TCP gateway or a serial level converter, by primary or secondary address. A Tag selects a record by its meaning (quantity, storage, tariff...) and stores it exactly in a declared unit; "Scan bus" finds the meters and "Read meter" creates Tags from one reading. See [docs/protocols/mbus.md](docs/protocols/mbus.md). **Not tested on real hardware** (see below).
 - Mock driver for local development and deterministic tests.
 - One isolated worker per Connection, with automatic reconnect.
 - Fixed-interval scheduler per Tag Group that never overlaps its own cycles.
@@ -33,18 +34,18 @@ Production data lives in controllers that are awkward to query: values are addre
 - Durable on-disk Spool that holds Poll Results while PostgreSQL is down and replays them afterwards.
 - PostgreSQL storage with Alembic migrations applied at startup (SQLite is the fallback when no database URL is set).
 - HTTP endpoints for liveness, readiness, runtime state and build information.
-- Built-in OPC UA, Modbus and S7 simulators and a Docker Compose demo stack.
-- Read-only toward controllers: the collector never writes to a PLC.
+- Built-in OPC UA, Modbus, S7 and M-Bus simulators and a Docker Compose demo stack.
+- Read-only toward controllers and meters: the collector never writes to a PLC or a meter.
 
 ## Tech stack
 
-Python 3.12, asyncio, `asyncua` (OPC UA), `pymodbus` (Modbus TCP), `python-snap7` (Siemens S7), SQLAlchemy 2 with `pg8000` (PostgreSQL), Alembic, FastAPI with uvicorn, Jinja2 and htmx (Panel), `cryptography` (Fernet), Pydantic, pytest, ruff, mypy, Docker and GitHub Actions.
+Python 3.12, asyncio, `asyncua` (OPC UA), `pymodbus` (Modbus TCP), `python-snap7` (Siemens S7), `pyserial` (M-Bus serial ports), SQLAlchemy 2 with `pg8000` (PostgreSQL), Alembic, FastAPI with uvicorn, Jinja2 and htmx (Panel), `cryptography` (Fernet), Pydantic, pytest, ruff, mypy, Docker and GitHub Actions.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    PLC[OPC UA server, Modbus or S7 device] --> W[ConnectionWorker]
+    PLC[OPC UA server, Modbus or S7 device, M-Bus meters] --> W[ConnectionWorker]
     W --> S[PollScheduler]
     S --> Q[Reading Queue]
     Q --> D[Database Writer]
@@ -68,7 +69,7 @@ The Panel, the data API (`/api/v1`) and the operational endpoints (`/health/*`, 
 
 ## Quick start
 
-You need Docker with Compose. The stack starts PostgreSQL 17, an OPC UA simulator of a production line, a Modbus TCP simulator of a press and a meter, an S7 simulator of a press, and the collector.
+You need Docker with Compose. The stack starts PostgreSQL 17, an OPC UA simulator of a production line, a Modbus TCP simulator of a press and a meter, an S7 simulator of a press, an M-Bus simulator with five meters, and the collector.
 
 ```bash
 git clone https://github.com/Mateusz1256/plc-data-collector.git
@@ -106,7 +107,7 @@ Configuration is three lists: Connections, Tag Groups and Tags. A Tag Group belo
 Sign in at `/panel/login` with the admin password. Then:
 
 1. On **Connections**, choose "Add connection", pick a protocol and enter the endpoint. "Test connection" checks that the controller answers.
-2. On the Connection's page, add a Tag Group with its read interval, then add Tags to it. OPC UA Tags have an address and a value type (`numeric`, `integer`, `boolean`, `text` or `binary`); Modbus Tags have a register address and a data type instead, and "Paste tags" adds many at once from CSV; S7 Tags have an area, DB number, byte and data type, and can also be imported from TIA Portal.
+2. On the Connection's page, add a Tag Group with its read interval, then add Tags to it. OPC UA Tags have an address and a value type (`numeric`, `integer`, `boolean`, `text` or `binary`); Modbus Tags have a register address and a data type instead, and "Paste tags" adds many at once from CSV; S7 Tags have an area, DB number, byte and data type, and can also be imported from TIA Portal; M-Bus Tags have a meter address, a quantity and a unit, and "Scan bus" and "Read meter" on the Connection's page create them from the meters on the bus.
 3. Saved changes do not affect collection yet: a banner shows what is pending. Choose "Apply changes" to restart collection with the saved configuration.
 
 Deleting a Connection, Tag Group or Tag archives it: it is no longer polled or shown, and its stored readings stay ([ADR 0002](docs/adr/0002-archive-instead-of-delete.md)).
@@ -212,6 +213,22 @@ The demo stack's `s7-sim` serves a press as DB1 "PressData" and 16 merker bytes 
 
 To read a real S7-1200 or S7-1500, enable "Permit access with PUT/GET communication from remote partner" in the CPU, switch off "Optimized block access" on each DB you read, and download. Then add an S7 Connection with its host, rack and slot (slot 1 for S7-1200/1500, usually 2 for S7-300), and add Tags by form, CSV paste or TIA import. The guide covers addresses, data types, error codes and the import.
 
+### M-Bus quick look
+
+> **Not tested on real hardware.** M-Bus support is verified only against the simulator, telegram fixtures, a serial pseudo-terminal and pyMeterBus as an independent decoder in the tests. Compare a billing total digit by digit with the meter's display before relying on it, and report any meter that behaves differently.
+
+The demo stack's `mbus-sim` serves five meters on one bus on port 10001, like a transparent M-Bus/TCP gateway; run it alone with `python -m plc_data_collector.simulators.mbus`. The demo Connection `heating_mbus` reads billing totals every 60 s and monitoring values every 10 s (which shows the battery warning; fine for a simulator).
+
+| Primary | ID | Meter |
+| --- | --- | --- |
+| 1 | 12345678 | Heat: energy in MWh, energy at the billing date, volume, power, flow, temperatures (two telegrams) |
+| 2 | 12399999 | Water: volume, volume at the billing date, flow |
+| 3 | 22223333 | Electricity: energy forward and backward at tariffs 1 and 2, power, voltage, current |
+| 0 | 87654321 | Heat, in GJ; only the secondary scan finds it |
+| 5 | 55667788 | Warm water, status "power low" |
+
+To read a real bus, add an M-Bus Connection with the gateway's host and port, or the serial device and baud rate (usually 2400). Choose "Scan bus" to find the meters, then "Read meter" on one of them, tick its records, choose a Tag Group and save. Keep "meters × 2.5 s" below the Tag Group interval, and do not read battery-powered meters more often than once a minute. [docs/protocols/mbus.md](docs/protocols/mbus.md) covers addressing, record keys, units, bus sharing, error codes and a hardware validation checklist.
+
 ## Reading the data
 
 There are two ways to read collected data.
@@ -270,17 +287,19 @@ The time range compares `received_at` as text against bounds in its stored forma
 
 **Worker isolation and reconnect.** Each Connection has its own worker and driver instance (`runtime/connection_worker.py`), so a dead controller degrades only its own worker. When a poll fails for every Tag, the worker calls the driver's `health_check()` and reconnects if it fails; Tags then report `connection_unavailable` until the link is back. Reconnects are counted in the `reconnect_attempts` metric. The runtime starts even when a controller is unreachable, and the supervisor waits for PostgreSQL up to a bounded timeout before exiting non-zero (`app/supervisor.py`).
 
-**Driver contract.** Protocols plug in through one async `CommunicationDriver` interface with `connect`, `disconnect`, `read` and `health_check` (`protocols/driver.py`), created per Connection by a registry (`protocols/registry.py`). Adding a protocol means implementing that interface; the OPC UA (`protocols/opcua.py`), Modbus (`protocols/modbus.py`), S7 (`protocols/s7.py`) and mock (`protocols/mock.py`) drivers are the implementations today. Protocol-specific Tag settings are structured options validated by per-protocol rules ([ADR 0003](docs/adr/0003-protocol-tag-settings-are-structured-options.md)).
+**Driver contract.** Protocols plug in through one async `CommunicationDriver` interface with `connect`, `disconnect`, `read` and `health_check` (`protocols/driver.py`), created per Connection by a registry (`protocols/registry.py`). Adding a protocol means implementing that interface; the OPC UA (`protocols/opcua.py`), Modbus (`protocols/modbus.py`), S7 (`protocols/s7.py`), M-Bus (`protocols/mbus.py`) and mock (`protocols/mock.py`) drivers are the implementations today. Protocol-specific Tag settings are structured options validated by per-protocol rules ([ADR 0003](docs/adr/0003-protocol-tag-settings-are-structured-options.md)).
 
 **PostgreSQL and the `tag_readings` row format.** PostgreSQL is the storage target because readings are relational, queried with SQL and joined to configuration. Each Tag reading is one row (`persistence/schema.py`) with `source_timestamp`, `received_at`, `quality`, `value_type`, one typed column per value kind (`numeric_value`, `integer_value`, `boolean_value`, `text_value`, `binary_value`) and `error_code` / `error_message`. Failed reads are stored too, as rows with bad quality, so gaps are visible. Migrations ship inside the package (`persistence/migrations`) and run at startup (`persistence/migrate.py`).
 
 ## Known limitations and roadmap
 
-Known limitations of 0.5.0:
+Known limitations of 0.6.0:
 
+- **M-Bus is not tested on real hardware.** It is verified against the simulator, telegram fixtures, a serial pseudo-terminal and pyMeterBus only. Compare a billing total with the meter's display before relying on it, and report meters that behave differently.
+- M-Bus is wired and read-only: no wireless M-Bus, encryption or OMS, and no manufacturer-specific or date/time records as Tags. One collector process and one Connection per bus.
 - **S7 is not tested on real hardware.** It is verified against the python-snap7 server, protocol fixtures and the simulator only, and the TIA tag-table column names come from TIA documentation without a real export. Compare imported offsets with the Offset column in TIA, and report mismatches.
-- OPC UA, Modbus TCP and S7 are the real protocols; the mock driver is for development. Modbus and S7 are read-only. No Modbus RTU or serial, no TLS, no S7 DBs with optimized block access.
-- Saving a large CSV paste writes one audit entry per Tag.
+- OPC UA, Modbus TCP, S7 and M-Bus are the real protocols; the mock driver is for development. Modbus, S7 and M-Bus are read-only. No Modbus RTU or serial, no TLS, no S7 DBs with optimized block access.
+- Saving a large CSV paste, TIA import or Read meter selection writes one audit entry per Tag.
 - The Panel has one admin password and no user accounts. Serve it over HTTPS (for example behind a reverse proxy) beyond a trusted network.
 - `/health/*`, `/api/runtime/*` and `/api/about` have no authentication; they carry operational state, not collected data.
 - Every API key can read every Tag.
@@ -292,8 +311,8 @@ Roadmap:
 
 - 0.4.0: Modbus TCP (done).
 - 0.5.0: Siemens S7 (done).
-- 0.6.0: M-Bus.
-- 1.0.0: stabilization.
+- 0.6.0: M-Bus (done).
+- 1.0.0: stabilization (next).
 - Later: MQTT, TimescaleDB, OPC UA browse, writes to PLC, API key permissions per Connection, retention per Connection or Tag.
 
 ## Development

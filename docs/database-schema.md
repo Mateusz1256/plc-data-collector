@@ -4,7 +4,7 @@ This page describes the tables PLC Data Collector creates in PostgreSQL (or
 SQLite, the fallback when no database URL is set). The definition lives in
 `src/plc_data_collector/persistence/schema.py`, and Alembic migrations in
 `src/plc_data_collector/persistence/migrations/versions/` apply it at startup.
-The schema matches release 0.5.0 (migration `0004`).
+The schema matches release 0.6.0 (migration `0004`).
 
 ## What is stable
 
