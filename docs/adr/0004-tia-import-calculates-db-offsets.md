@@ -40,7 +40,7 @@ guessing.
 - Refused: optimized DBs, instance DBs of function blocks, `Variant`, `Pointer`,
   `Any` and `DB_ANY`, missing UDTs, `Array of String[n]` with an odd `n`, and
   unknown constructs. Types with a known size that the driver cannot read are
-  shown greyed with "Not supported in 0.5.0", and their size keeps the other
+  shown greyed with "Not supported.", and their size keeps the other
   offsets right.
 - The upload is kept on the server only between preview and save, under a
   short-lived token. Every preview and the save parse the files again and trust
