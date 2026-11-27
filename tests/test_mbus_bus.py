@@ -16,6 +16,7 @@ import pytest
 from mbus_support import (
     FakeClock,
     MBusSimServer,
+    MemoryTransport,
     documented_meters,
     documented_records,
     free_port,
@@ -758,6 +759,59 @@ async def test_a_known_fcb_skips_the_repeat_guard() -> None:
     assert {r.header.access_no for r in readings} == {7}
     # One SND_NKE, then exactly one REQ_UD2 per read.
     assert gateway.requests == [("snd_nke", 2)] + [("req_ud2", 2)] * 3
+
+
+class _NoResetOnDeselect(simulator.SimulatedBus):
+    """Meters that keep their FCB state across SND_NKE 253 (some do)."""
+
+    def _snd_nke(self, address: int) -> bytes | None:
+        if address != ADDRESS_SECONDARY:
+            return super()._snd_nke(address)
+        targets = self._addressed(address)
+        for index in targets:
+            self._states[index].selected = False
+        return b"\xe5" if targets else None
+
+
+def _same_id_meters() -> tuple[list[simulator.SimulatedMeter], MBusBus]:
+    """Meter 2 (water, 12399999) and a heat meter with the same ID digits."""
+    water = dataclasses.replace(simulator.demo_meters()[1], primary=0)
+    heat = dataclasses.replace(water, medium=0x04)
+    meters = [heat, water]
+    transport = MemoryTransport(_NoResetOnDeselect(meters, clock=lambda: 0.0))
+    bus = MBusBus(lambda: transport, timeout_s=TIMEOUT_S, max_telegrams=8)
+    return meters, bus
+
+
+HEAT_ADDRESS = "1239999940830104"
+WATER_ADDRESS = "1239999940830107"
+
+
+async def test_meters_with_one_id_keep_their_own_link_state() -> None:
+    _, bus = _same_id_meters()
+    access: dict[int, list[int]] = {0x04: [], 0x07: []}
+    async with _opened(bus):
+        for address in (HEAT_ADDRESS, WATER_ADDRESS) * 2:
+            async with bus.turn() as turn:
+                reading = await turn.read_meter(parse_meter_address(address))
+            access[reading.header.medium].append(reading.header.access_no)
+    # Every read got a fresh telegram, never the other meter's FCB's repeat.
+    assert access == {0x04: [1, 2], 0x07: [1, 2]}
+
+
+async def test_a_wildcard_read_matching_two_known_meters_guesses_the_fcb() -> None:
+    meters, bus = _same_id_meters()
+    async with _opened(bus):
+        for address in (HEAT_ADDRESS, WATER_ADDRESS):
+            async with bus.turn() as turn:
+                await turn.read_meter(parse_meter_address(address))
+        meters[1].id_digits = "55555555"  # only the heat meter matches now
+        async with bus.turn() as turn:
+            reading = await turn.read_meter(parse_meter_address("12399999"))
+    # Both known meters match "12399999": the FCB is a guess, the repeat is
+    # spotted by its access number and a fresh telegram requested.
+    assert reading.header.medium == 0x04
+    assert reading.header.access_no == 2
 
 
 async def test_reading_a_selected_header_forgets_the_meters_fcb() -> None:
