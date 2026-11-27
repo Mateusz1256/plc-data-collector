@@ -309,6 +309,21 @@ regenerated from a lockfile once dependency locking is introduced.
 - Notes: installed transitively by asyncua. License verified from package
   metadata field `License: Apache License, Version 2.0`.
 
+### pyserial
+
+- Version: 3.5
+- Purpose: serial port access (8E1) for the `mbus` protocol driver's serial
+  transport; also a pyMeterBus dependency in the `dev` extra
+- License: BSD-3-Clause
+- Source: https://pypi.org/project/pyserial/3.5/
+- Copyright notice: Copyright (c) 2001-2020 Chris Liechti
+- Bundled in distribution: yes
+- Notes: declared directly as a runtime dependency. Package metadata says
+  `License: BSD`; the source header of `serial/__init__.py` gives
+  `SPDX-License-Identifier: BSD-3-Clause`. Pure Python; its only declared
+  requirement (`hidapi`) belongs to the optional `cp2110` extra, which is not
+  installed.
+
 ### python-dateutil
 
 - Version: 4.0.0
@@ -707,19 +722,6 @@ introduced.
 - Bundled in distribution: no
 - Notes: installed transitively in the `dev` extra. License verified from
   package metadata `License: MIT OR AFL-2.1`.
-
-### pyserial
-
-- Version: 3.5
-- Purpose: transitive pyMeterBus dependency
-- License: BSD-3-Clause
-- Source: https://pypi.org/project/pyserial/3.5/
-- Copyright notice: Copyright (c) 2001-2020 Chris Liechti
-- Bundled in distribution: no
-- Notes: installed transitively in the `dev` extra. Package metadata says
-  `License: BSD`; the source header of `serial/__init__.py` gives
-  `SPDX-License-Identifier: BSD-3-Clause`. Move this entry to Runtime
-  Dependencies when pyserial is declared as a runtime dependency.
 
 ## Vendored Assets
 

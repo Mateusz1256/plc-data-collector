@@ -242,6 +242,16 @@
     },
     {
       "bundled_in_distribution": true,
+      "copyright_notice": "Copyright (c) 2001-2020 Chris Liechti",
+      "license": "BSD-3-Clause",
+      "name": "pyserial",
+      "notes": "declared directly as a runtime dependency. Package metadata says `License: BSD`; the source header of `serial/__init__.py` gives `SPDX-License-Identifier: BSD-3-Clause`. Pure Python; its only declared requirement (`hidapi`) belongs to the optional `cp2110` extra, which is not installed.",
+      "purpose": "serial port access (8E1) for the `mbus` protocol driver's serial transport; also a pyMeterBus dependency in the `dev` extra",
+      "source": "https://pypi.org/project/pyserial/3.5/",
+      "version": "3.5"
+    },
+    {
+      "bundled_in_distribution": true,
       "copyright_notice": "See package license file.",
       "license": "BSD-3-Clause",
       "name": "python-dateutil",

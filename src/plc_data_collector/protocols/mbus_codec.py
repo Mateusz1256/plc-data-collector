@@ -143,6 +143,11 @@ class FrameReader:
         """Append received bytes."""
         self._buffer += data
 
+    @property
+    def buffered(self) -> int:
+        """Bytes received but not yet taken as a frame (an incomplete frame)."""
+        return len(self._buffer)
+
     def next_frame(self) -> Frame | None:
         """The next complete frame, or ``None`` while incomplete."""
         if not self._buffer:

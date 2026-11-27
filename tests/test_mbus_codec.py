@@ -226,6 +226,21 @@ def test_reader_is_empty_after_garbage() -> None:
     with pytest.raises(GarbledFrame):
         reader.next_frame()
     assert reader.next_frame() is None
+    assert reader.buffered == 0
+
+
+def test_reader_counts_the_bytes_of_an_incomplete_frame() -> None:
+    reader = FrameReader()
+    assert reader.buffered == 0
+    data = read_frame("mbus_doc_rsp_ud.hex")
+    reader.feed(b"\xe5" + data[:5])
+    assert reader.buffered == 6
+    assert reader.next_frame() == Ack()
+    assert reader.next_frame() is None
+    assert reader.buffered == 5
+    reader.feed(data[5:])
+    assert isinstance(reader.next_frame(), LongFrame)
+    assert reader.buffered == 0
 
 
 # Fixed header and status
