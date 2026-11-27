@@ -137,6 +137,127 @@ def _unit_text(unit: str) -> str:
     return unit or "no unit"
 
 
+# Per-Tag results, shared by polls and Panel reads
+
+
+def _plan_failure(error: ConfigurationError) -> _Failure:
+    return (error.code or "mbus_invalid_options", error.message)
+
+
+def _meter_failure(meter: MeterAddress, error: MeterError) -> _Failure:
+    return (
+        error.code or "mbus_no_reply",
+        f"Meter {display_meter_address(meter)}: {error.message}",
+    )
+
+
+def _failure(tag_id: str, failure: _Failure, received_at: datetime) -> TagResult:
+    code, message = failure
+    return TagResult.failure(
+        tag_id=tag_id,
+        error_code=code,
+        error_message=message,
+        received_at=received_at,
+    )
+
+
+def _meter_results(
+    meter: MeterAddress,
+    reading: MeterReading,
+    members: Sequence[tuple[str, MBusTagPlan]],
+    received_at: datetime,
+) -> dict[str, TagResult]:
+    """Each Tag's result from one reading of its meter."""
+    header = reading.header
+    display = display_meter_address(meter)
+    mismatch = _secondary_mismatch(meter, header)
+    problems = status_problems(header.status)
+    results: dict[str, TagResult] = {}
+    for tag_id, plan in members:
+        outcome: TagValue | _Failure
+        if mismatch is not None:
+            outcome = ("mbus_wrong_meter", f"Meter {display}: {mismatch}.")
+        elif plan.meter_id is not None and plan.meter_id != header.id_digits:
+            outcome = (
+                "mbus_wrong_meter",
+                f"Meter {display} answered with ID {header.id_digits}, not "
+                f"the configured meter ID {plan.meter_id}.",
+            )
+        else:
+            outcome = _value(display, plan, reading.records)
+        if isinstance(outcome, tuple):
+            results[tag_id] = _failure(tag_id, outcome, received_at)
+        elif problems:
+            results[tag_id] = TagResult.uncertain(
+                tag_id=tag_id,
+                value=outcome,
+                error_code="mbus_meter_status",
+                error_message=(f"Meter {display} reports: {', '.join(problems)}."),
+                source_timestamp=received_at,
+                received_at=received_at,
+            )
+        else:
+            results[tag_id] = TagResult.success(
+                tag_id=tag_id,
+                value=outcome,
+                source_timestamp=received_at,
+                received_at=received_at,
+            )
+    return results
+
+
+def _value(
+    display: str, plan: MBusTagPlan, records: Sequence[MBusRecord]
+) -> TagValue | _Failure:
+    matches = [record for record in records if record.key == plan.key]
+    if len(matches) < plan.occurrence:
+        return (
+            "mbus_record_not_found",
+            f"Meter {display} sent no record {_record_text(plan)}.",
+        )
+    record = matches[plan.occurrence - 1]
+    if record.value_error is not None:
+        return (
+            record.value_error,
+            f"Meter {display}, record {_record_text(plan)}: "
+            f"{record.unsupported_reason}.",
+        )
+    if (
+        record.exact_value is None
+        or record.unit is None
+        or record.family is None
+        or record.unsupported_reason is not None
+    ):
+        return (
+            "mbus_record_unsupported",
+            f"Meter {display}, record {_record_text(plan)}: "
+            f"{record.unsupported_reason or 'no value'}.",
+        )
+    if record.family.name != plan.family.name:
+        return (
+            "mbus_unit_mismatch",
+            f"Meter {display} sends {_record_text(plan)} in "
+            f"{_unit_text(record.unit)}, which does not convert to the "
+            f"Tag's unit {_unit_text(plan.unit)}.",
+        )
+    value = convert(Decimal(record.exact_value), record.unit, plan.unit, plan.family)
+    if plan.value_type is ValueType.INTEGER:
+        if value != value.to_integral_value():
+            return (
+                "mbus_record_unsupported",
+                f"Meter {display}, record {_record_text(plan)}: {value} "
+                f"{plan.unit} is not a whole number.",
+            )
+        return TagValue.integer(int(value))
+    number = float(value)
+    if not math.isfinite(number):
+        return (
+            "mbus_value_not_finite",
+            f"Meter {display}, record {_record_text(plan)}: the value is out of range.",
+        )
+    return TagValue.numeric(number)
+
+
 class MBusDriver:
     """M-Bus driver: one bus per connection, one turn per meter and poll."""
 
@@ -157,6 +278,7 @@ class MBusDriver:
             factory,
             timeout_s=connection.timeout_ms / 1000,
             max_telegrams=options.max_telegrams,
+            scan_timeout_s=options.scan_timeout_ms / 1000,
         )
         self._clock = clock
         # The transient error that closed the bus; repeated by read() until
@@ -218,10 +340,8 @@ class MBusDriver:
         for tag in tags:
             plan = self._resolve(tag)
             if isinstance(plan, ConfigurationError):
-                results[tag.tag_id] = self._failure(
-                    tag.tag_id,
-                    (plan.code or "mbus_invalid_options", plan.message),
-                    self._now(),
+                results[tag.tag_id] = _failure(
+                    tag.tag_id, _plan_failure(plan), self._now()
                 )
                 continue
             meters.setdefault(plan.meter, []).append((tag.tag_id, plan))
@@ -233,10 +353,7 @@ class MBusDriver:
                     reading = await turn.read_meter(meter)
             except MeterError as error:
                 received_at = self._now()
-                failure = (
-                    error.code or "mbus_no_reply",
-                    f"Meter {display_meter_address(meter)}: {error.message}",
-                )
+                failure = _meter_failure(meter, error)
                 LOGGER.debug(
                     "mbus_meter_failed",
                     extra={
@@ -246,14 +363,16 @@ class MBusDriver:
                     },
                 )
                 for tag_id, _ in members:
-                    results[tag_id] = self._failure(tag_id, failure, received_at)
+                    results[tag_id] = _failure(tag_id, failure, received_at)
                 continue
             except TransientCommunicationError as error:
                 # The bus has closed its transport; the worker reconnects.
                 self._closed_by = error
                 await self._bus.close()
                 raise
-            results.update(self._results(meter, reading, members))
+            if _secondary_mismatch(meter, reading.header) is None:
+                self._note_power_low(meter, reading.header)
+            results.update(_meter_results(meter, reading, members, self._now()))
         return [results[tag.tag_id] for tag in tags]
 
     # -- planning ---------------------------------------------------------
@@ -276,106 +395,6 @@ class MBusDriver:
 
     # -- results ----------------------------------------------------------
 
-    def _results(
-        self,
-        meter: MeterAddress,
-        reading: MeterReading,
-        members: list[tuple[str, MBusTagPlan]],
-    ) -> dict[str, TagResult]:
-        received_at = self._now()
-        header = reading.header
-        display = display_meter_address(meter)
-        mismatch = _secondary_mismatch(meter, header)
-        if mismatch is None:
-            self._note_power_low(meter, header)
-        problems = status_problems(header.status)
-        results: dict[str, TagResult] = {}
-        for tag_id, plan in members:
-            outcome: TagValue | _Failure
-            if mismatch is not None:
-                outcome = ("mbus_wrong_meter", f"Meter {display}: {mismatch}.")
-            elif plan.meter_id is not None and plan.meter_id != header.id_digits:
-                outcome = (
-                    "mbus_wrong_meter",
-                    f"Meter {display} answered with ID {header.id_digits}, not "
-                    f"the configured meter ID {plan.meter_id}.",
-                )
-            else:
-                outcome = self._value(display, plan, reading.records)
-            if isinstance(outcome, tuple):
-                results[tag_id] = self._failure(tag_id, outcome, received_at)
-            elif problems:
-                results[tag_id] = TagResult.uncertain(
-                    tag_id=tag_id,
-                    value=outcome,
-                    error_code="mbus_meter_status",
-                    error_message=(f"Meter {display} reports: {', '.join(problems)}."),
-                    source_timestamp=received_at,
-                    received_at=received_at,
-                )
-            else:
-                results[tag_id] = TagResult.success(
-                    tag_id=tag_id,
-                    value=outcome,
-                    source_timestamp=received_at,
-                    received_at=received_at,
-                )
-        return results
-
-    def _value(
-        self, display: str, plan: MBusTagPlan, records: Sequence[MBusRecord]
-    ) -> TagValue | _Failure:
-        matches = [record for record in records if record.key == plan.key]
-        if len(matches) < plan.occurrence:
-            return (
-                "mbus_record_not_found",
-                f"Meter {display} sent no record {_record_text(plan)}.",
-            )
-        record = matches[plan.occurrence - 1]
-        if record.value_error is not None:
-            return (
-                record.value_error,
-                f"Meter {display}, record {_record_text(plan)}: "
-                f"{record.unsupported_reason}.",
-            )
-        if (
-            record.exact_value is None
-            or record.unit is None
-            or record.family is None
-            or record.unsupported_reason is not None
-        ):
-            return (
-                "mbus_record_unsupported",
-                f"Meter {display}, record {_record_text(plan)}: "
-                f"{record.unsupported_reason or 'no value'}.",
-            )
-        if record.family.name != plan.family.name:
-            return (
-                "mbus_unit_mismatch",
-                f"Meter {display} sends {_record_text(plan)} in "
-                f"{_unit_text(record.unit)}, which does not convert to the "
-                f"Tag's unit {_unit_text(plan.unit)}.",
-            )
-        value = convert(
-            Decimal(record.exact_value), record.unit, plan.unit, plan.family
-        )
-        if plan.value_type is ValueType.INTEGER:
-            if value != value.to_integral_value():
-                return (
-                    "mbus_record_unsupported",
-                    f"Meter {display}, record {_record_text(plan)}: {value} "
-                    f"{plan.unit} is not a whole number.",
-                )
-            return TagValue.integer(int(value))
-        number = float(value)
-        if not math.isfinite(number):
-            return (
-                "mbus_value_not_finite",
-                f"Meter {display}, record {_record_text(plan)}: the value is out "
-                "of range.",
-            )
-        return TagValue.numeric(number)
-
     def _note_power_low(self, meter: MeterAddress, header: MeterHeader) -> None:
         """Warn once per meter while its status says "power low"."""
         if not power_low(header.status):
@@ -395,17 +414,6 @@ class MBusDriver:
 
     # -- helpers ----------------------------------------------------------
 
-    def _failure(
-        self, tag_id: str, failure: _Failure, received_at: datetime
-    ) -> TagResult:
-        code, message = failure
-        return TagResult.failure(
-            tag_id=tag_id,
-            error_code=code,
-            error_message=message,
-            received_at=received_at,
-        )
-
     def _repeat(
         self, error: TransientCommunicationError
     ) -> TransientCommunicationError:
@@ -415,6 +423,36 @@ class MBusDriver:
 
     def _now(self) -> datetime:
         return self._clock().astimezone(UTC)
+
+
+async def read_tag(
+    bus: MBusBus,
+    connection: ConnectionConfig,
+    tag: TagRequest,
+    *,
+    clock: Callable[[], datetime] = _utc_now,
+) -> TagResult:
+    """Read one Tag's meter in one turn of ``bus``, matched as a poll matches it.
+
+    For Panel actions on a borrowed bus (Test connection). A meter that does
+    not answer cleanly gives a bad result; a transport error raises
+    ``BusTransportError`` and leaves the bus closed (a running worker then
+    reconnects).
+    """
+    try:
+        plan = resolve_tag(tag, connection)
+    except ConfigurationError as error:
+        return _failure(tag.tag_id, _plan_failure(error), clock().astimezone(UTC))
+    try:
+        async with bus.turn() as turn:
+            reading = await turn.read_meter(plan.meter)
+    except MeterError as error:
+        failure = _meter_failure(plan.meter, error)
+        return _failure(tag.tag_id, failure, clock().astimezone(UTC))
+    received_at = clock().astimezone(UTC)
+    return _meter_results(plan.meter, reading, [(tag.tag_id, plan)], received_at)[
+        tag.tag_id
+    ]
 
 
 def create_mbus_driver(connection: ConnectionConfig) -> MBusDriver:

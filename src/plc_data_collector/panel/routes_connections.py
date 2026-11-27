@@ -294,10 +294,12 @@ def create_connections_router() -> APIRouter:
                     message="Fix the form first: " + " ".join(error.errors.values()),
                 )
             config = await _load_config(stores)
+            host = _host(request)
             result = await probe_connection(
                 candidate,
-                _host(request).registry,
+                host.registry,
                 probe_tag=_probe_tag(config, connection_id),
+                host=host,
             )
         return _test_result(request, ok=result.ok, message=result.message)
 

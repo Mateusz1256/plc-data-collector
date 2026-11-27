@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from plc_data_collector.api.state import RuntimeApiState
     from plc_data_collector.app.config import CollectorConfig
+    from plc_data_collector.app.mbus_scan import ScanRegistry
     from plc_data_collector.app.stores import Stores
     from plc_data_collector.protocols import DriverRegistry
+    from plc_data_collector.protocols.mbus_bus import MBusBus
     from plc_data_collector.runtime.live_values import LiveValueCache
 
 
@@ -51,6 +53,15 @@ class CollectorHost(Protocol):
     @property
     def registry(self) -> DriverRegistry:
         """Return the protocol driver registry the runtimes use."""
+        ...
+
+    @property
+    def mbus_scans(self) -> ScanRegistry:
+        """Return the M-Bus scan jobs and temporary buses."""
+        ...
+
+    def mbus_bus(self, connection_id: str) -> MBusBus | None:
+        """Return the bus of the running M-Bus worker for the Connection, if any."""
         ...
 
     def api_state(self) -> RuntimeApiState:

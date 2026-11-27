@@ -12,15 +12,20 @@ Loaded as a pytest plugin from ``conftest.py``.
   reference the driver and demo tests check against.
 * ``mbus_sim`` serves the five demo meters over TCP on a free port, with a
   clock the test moves.
+* ``MemoryTransport`` puts a ``SimulatedBus`` behind the transport interface
+  without a socket: silence costs no time.
+* ``BusHost`` is the part of the collector host the M-Bus Panel actions use;
+  ``running_host`` pretends a worker runs on a memory transport.
 * ``pty_pair`` opens a raw pseudo-terminal pair (POSIX only).
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
-from collections.abc import AsyncIterator, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -29,27 +34,41 @@ import meterbus  # type: ignore[import-untyped]
 import pytest_asyncio
 from net_support import free_port
 
+from plc_data_collector.app.config import CollectorConfig
+from plc_data_collector.app.mbus_scan import ScanRegistry
+from plc_data_collector.domain import ConnectionConfig
+from plc_data_collector.protocols import DriverRegistry, build_driver_registry
+from plc_data_collector.protocols.mbus import MBusDriver
+from plc_data_collector.protocols.mbus_bus import BusTransportError, MBusBus
 from plc_data_collector.protocols.mbus_codec import (
+    Frame,
     FrameReader,
     LongFrame,
     MBusRecord,
+    ShortFrame,
     parse_rsp_ud,
 )
 from plc_data_collector.protocols.mbus_tags import Function, Quantity, convert
 from plc_data_collector.simulators import mbus as simulator
 
 __all__ = [
+    "BusHost",
     "DocumentedMeter",
     "DocumentedRecord",
     "FakeClock",
     "MBusSimServer",
+    "MemoryTransport",
     "documented_meters",
     "documented_records",
     "free_port",
     "long_frames",
+    "mbus_connection",
     "mbus_sim",
+    "memory_host",
+    "memory_transport",
     "oracle_compare",
     "pty_pair",
+    "running_host",
 ]
 
 # Oracle
@@ -335,6 +354,143 @@ async def mbus_sim() -> AsyncIterator[MBusSimServer]:
         yield server
     finally:
         await server.stop()
+
+
+# The simulator in memory
+
+_REQ_UD2 = 0x4B  # FCB and FCV masked out
+
+
+class MemoryTransport:
+    """``MBusTransport`` straight onto a ``SimulatedBus``.
+
+    Every write yields to the event loop once, as real I/O does, so other
+    tasks waiting for the bus get their turn. ``requests`` lists the
+    addresses of the REQ_UD2 frames, ``frames`` every request frame;
+    ``on_write`` (if set) runs before each request is answered; ``lose``
+    makes writes fail as a lost connection.
+    """
+
+    def __init__(self, bus: simulator.SimulatedBus) -> None:
+        """Wrap ``bus``; the transport starts closed."""
+        self._bus = bus
+        self._pending = b""
+        self.lose = False
+        self.opens = 0
+        self.is_open = False
+        self.requests: list[int] = []
+        self.frames: list[Frame] = []
+        self.on_write: Callable[[Frame], Awaitable[None]] | None = None
+
+    async def open(self) -> None:
+        """Count the open."""
+        self.opens += 1
+        self.is_open = True
+        self._pending = b""
+
+    async def write(self, data: bytes) -> None:
+        """Answer the request from the simulated bus."""
+        if self.lose:
+            raise BusTransportError("mbus_connection_lost")
+        await asyncio.sleep(0)
+        reader = FrameReader()
+        reader.feed(data)
+        frame = reader.next_frame()
+        assert frame is not None
+        self.frames.append(frame)
+        if isinstance(frame, ShortFrame) and frame.control & 0x4F == _REQ_UD2:
+            self.requests.append(frame.address)
+        if self.on_write is not None:
+            await self.on_write(frame)
+        self._pending += self._bus.handle(data) or b""
+
+    async def read_frame(self, timeout_s: float) -> Frame | None:
+        """The answer to the last request, at once; ``None`` on silence."""
+        reader = FrameReader()
+        reader.feed(self._pending)
+        self._pending = b""
+        return reader.next_frame()
+
+    async def flush_input(self) -> None:
+        """Drop an unread answer."""
+        self._pending = b""
+
+    async def close(self) -> None:
+        """Mark the transport closed."""
+        self.is_open = False
+
+    def describe(self) -> str:
+        """The transport kind."""
+        return "Memory"
+
+
+def memory_transport(meters: list[simulator.SimulatedMeter]) -> MemoryTransport:
+    """A memory transport onto a bus of ``meters`` whose clock stays at 0."""
+    return MemoryTransport(simulator.SimulatedBus(meters, clock=lambda: 0.0))
+
+
+# Panel actions
+
+
+def mbus_connection(
+    endpoint: str = "tcp://127.0.0.1:10001", **options: object
+) -> ConnectionConfig:
+    """Connection ``heat`` with a short timeout and scan timeout (50 ms)."""
+    return ConnectionConfig(
+        id="heat",
+        protocol="mbus",
+        endpoint=endpoint,
+        timeout_ms=200,
+        protocol_options={"scan_timeout_ms": 50, **options},
+    )
+
+
+class BusHost:
+    """The part of the collector host the M-Bus Panel actions use."""
+
+    def __init__(self, registry: DriverRegistry) -> None:
+        """A host with no running Connection."""
+        self.registry = registry
+        self.applying = False
+        self.running_config: CollectorConfig | None = None
+        self.buses: dict[str, MBusBus] = {}
+        self.mbus_scans = ScanRegistry(self)
+
+    def mbus_bus(self, connection_id: str) -> MBusBus | None:
+        """The running Connection's bus."""
+        return self.buses.get(connection_id)
+
+    def run(self, connection: ConnectionConfig, bus: MBusBus) -> None:
+        """Pretend ``connection``'s worker runs on ``bus``."""
+        self.running_config = CollectorConfig(
+            connections=(connection,), tag_groups=(), tags=()
+        )
+        self.buses[connection.id] = bus
+
+
+def memory_host(transport: MemoryTransport) -> BusHost:
+    """A host whose M-Bus drivers (and so temporary buses) use ``transport``."""
+    return BusHost(
+        build_driver_registry(
+            [("mbus", lambda c: MBusDriver(c, transport_factory=lambda: transport))]
+        )
+    )
+
+
+@asynccontextmanager
+async def running_host(
+    transport: MemoryTransport, connection: ConnectionConfig
+) -> AsyncIterator[tuple[BusHost, MBusDriver]]:
+    """A host whose worker for ``connection`` runs on ``transport``."""
+    host = memory_host(transport)
+    driver = MBusDriver(connection, transport_factory=lambda: transport)
+    await driver.connect()
+    host.run(connection, driver.bus)
+    try:
+        yield host, driver
+    finally:
+        await host.mbus_scans.cancel_all("Scan stopped: the test ended.")
+        await driver.disconnect()
 
 
 # Pseudo-terminal

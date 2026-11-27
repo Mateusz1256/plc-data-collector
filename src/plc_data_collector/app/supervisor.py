@@ -13,6 +13,7 @@ from sqlalchemy.engine import make_url
 from plc_data_collector.api.state import RuntimeApiState
 from plc_data_collector.app.config import CollectorConfig, load_collector_config
 from plc_data_collector.app.config_transfer import keep_stored_values
+from plc_data_collector.app.mbus_scan import ScanRegistry
 from plc_data_collector.app.retention import RetentionJob
 from plc_data_collector.app.runtime import CollectorRuntime, error_code
 from plc_data_collector.app.secrets import SecretBox
@@ -30,12 +31,16 @@ from plc_data_collector.persistence import (
     wait_for_database,
 )
 from plc_data_collector.protocols import DriverRegistry, default_driver_registry
+from plc_data_collector.protocols.mbus import MBusDriver
+from plc_data_collector.protocols.mbus_bus import MBusBus
 from plc_data_collector.runtime.live_values import LiveValueCache
 
 LOGGER = logging.getLogger(__name__)
 DATABASE_PROBE_INTERVAL_S = 1.0
 RuntimeFactory = Callable[..., CollectorRuntime]
 RetentionJobFactory = Callable[[Stores], RetentionJob]
+SCAN_STOPPED_BY_APPLY = "Scan stopped: the configuration changed."
+SCAN_STOPPED_BY_STOP = "Scan stopped: the collector is stopping."
 
 
 class RuntimeSupervisor:
@@ -69,6 +74,7 @@ class RuntimeSupervisor:
         self._engine: Engine | None = None
         self._stores: Stores | None = None
         self._live_values = LiveValueCache()
+        self._mbus_scans = ScanRegistry(self)
         self._runtime: CollectorRuntime | None = None
         self._running_revision: int | None = None
         self._running_config: CollectorConfig | None = None
@@ -130,6 +136,21 @@ class RuntimeSupervisor:
     def registry(self) -> DriverRegistry:
         """Return the protocol driver registry the runtimes use."""
         return self._registry
+
+    @property
+    def mbus_scans(self) -> ScanRegistry:
+        """Return the M-Bus scan jobs and temporary buses; one per process."""
+        return self._mbus_scans
+
+    def mbus_bus(self, connection_id: str) -> MBusBus | None:
+        """Return the bus of the running M-Bus worker for ``connection_id``.
+
+        None when the Connection has no running worker (disabled, no Tags,
+        not M-Bus, or the runtime is stopped or being replaced).
+        """
+        runtime = self._runtime
+        driver = None if runtime is None else runtime.driver_for(connection_id)
+        return driver.bus if isinstance(driver, MBusDriver) else None
 
     async def start(self) -> None:
         """Prepare the database and configuration, then start the runtime.
@@ -229,6 +250,9 @@ class RuntimeSupervisor:
     async def _apply(self) -> None:
         try:
             LOGGER.info("runtime_apply_started")
+            # Every worker restarts: scans stop first, and their temporary
+            # buses close, so the new workers can open the ports.
+            await self._mbus_scans.cancel_all(SCAN_STOPPED_BY_APPLY)
             runtime, self._runtime = self._runtime, None
             previous_config = self._running_config
             previous_revision = self._running_revision
@@ -313,6 +337,7 @@ class RuntimeSupervisor:
             return
         if self._phase == "running":
             self._phase = "stopping"
+            await self._mbus_scans.cancel_all(SCAN_STOPPED_BY_STOP)
             starting = self._runtime if self._applying else None
             if starting is not None:
                 await starting.stop(timeout_s=timeout_s)

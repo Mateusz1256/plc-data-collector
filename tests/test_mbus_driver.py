@@ -9,7 +9,12 @@ from contextlib import asynccontextmanager
 from decimal import Decimal
 
 import pytest
-from mbus_support import MBusSimServer, documented_meters, documented_records
+from mbus_support import (
+    MBusSimServer,
+    MemoryTransport,
+    documented_meters,
+    documented_records,
+)
 
 from plc_data_collector.domain import (
     ConnectionConfig,
@@ -33,7 +38,7 @@ from plc_data_collector.protocols.mbus_bus import (
     MBusBus,
     TcpTransport,
 )
-from plc_data_collector.protocols.mbus_codec import Frame, FrameReader, ShortFrame
+from plc_data_collector.protocols.mbus_codec import FrameReader, ShortFrame
 from plc_data_collector.runtime import ConnectionWorker
 from plc_data_collector.simulators import mbus as simulator
 
@@ -503,49 +508,11 @@ async def _no_sleep(_: float) -> None:
 # In memory: the simulator without a socket
 
 
-class _MemoryTransport:
-    """``MBusTransport`` straight onto a ``SimulatedBus``."""
-
-    def __init__(self, bus: simulator.SimulatedBus) -> None:
-        self._bus = bus
-        self._pending = b""
-        self.lose = False
-        self.requests: list[int] = []
-
-    async def open(self) -> None:
-        self._pending = b""
-
-    async def write(self, data: bytes) -> None:
-        if self.lose:
-            raise BusTransportError("mbus_connection_lost")
-        reader = FrameReader()
-        reader.feed(data)
-        frame = reader.next_frame()
-        if isinstance(frame, ShortFrame) and frame.control & 0x4F == REQ_UD2:
-            self.requests.append(frame.address)
-        self._pending += self._bus.handle(data) or b""
-
-    async def read_frame(self, timeout_s: float) -> Frame | None:
-        reader = FrameReader()
-        reader.feed(self._pending)
-        self._pending = b""
-        return reader.next_frame()
-
-    async def flush_input(self) -> None:
-        self._pending = b""
-
-    async def close(self) -> None:
-        return None
-
-    def describe(self) -> str:
-        return "Memory"
-
-
 @asynccontextmanager
 async def _memory_driver(
     meters: list[simulator.SimulatedMeter],
-) -> AsyncIterator[tuple[MBusDriver, _MemoryTransport]]:
-    transport = _MemoryTransport(simulator.SimulatedBus(meters, clock=lambda: 0.0))
+) -> AsyncIterator[tuple[MBusDriver, MemoryTransport]]:
+    transport = MemoryTransport(simulator.SimulatedBus(meters, clock=lambda: 0.0))
     driver = MBusDriver(
         _connection("tcp://127.0.0.1:10001"), transport_factory=lambda: transport
     )

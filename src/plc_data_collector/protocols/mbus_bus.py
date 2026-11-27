@@ -466,11 +466,17 @@ class MBusBus:
         *,
         timeout_s: float,
         max_telegrams: int,
+        scan_timeout_s: float = 0.5,
     ) -> None:
-        """Create a closed bus; ``transport_factory`` makes a fresh transport."""
+        """Create a closed bus; ``transport_factory`` makes a fresh transport.
+
+        ``scan_timeout_s`` is the reply timeout of a scan probe; a scan that
+        borrows the bus uses it, so a running bus keeps its own settings.
+        """
         self._factory = transport_factory
         self.timeout_s = timeout_s
         self.max_telegrams = max_telegrams
+        self.scan_timeout_s = scan_timeout_s
         self._lock = asyncio.Lock()
         self._transport: MBusTransport | None = None
         # Link state per meter identity (ID digits), whatever the address form
@@ -492,6 +498,11 @@ class MBusBus:
     def is_open(self) -> bool:
         """Whether the transport is open."""
         return self._transport is not None
+
+    def describe(self) -> str | None:
+        """The open transport's kind (``"TCP gateway"``...); ``None`` when closed."""
+        transport = self._transport
+        return None if transport is None else transport.describe()
 
     async def open(self) -> None:
         """Open the transport (no-op when open); raises ``BusTransportError``."""
