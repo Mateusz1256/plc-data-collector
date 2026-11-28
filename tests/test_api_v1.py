@@ -280,6 +280,50 @@ def test_tag_404_for_archived_in_current_but_history_works(
     assert never.json() == {"detail": "Tag not found."}
 
 
+def test_uncertain_reading_has_value_and_error_code_in_current_and_history(
+    api_client: TestClient, fake_host: FakeHost, auth: dict[str, str]
+) -> None:
+    stores = _stores(fake_host)
+    _seed_config(stores)
+    at = NOW - timedelta(seconds=2)
+    uncertain = TagResult.uncertain(
+        tag_id="temperature",
+        value=TagValue.numeric(21.5),
+        error_code="mbus_value_rounded",
+        error_message="Value was rounded.",
+        source_timestamp=at,
+        received_at=at,
+    )
+    fake_host.live_values.update(
+        WorkerPollResult(
+            execution=PollExecution(
+                execution_id="x2",
+                connection_id="line1",
+                tag_group_id="fast",
+                status=PollStatus.SUCCESS,
+                started_at=at,
+                finished_at=at,
+                requested_tags=1,
+                successful_tags=1,
+            ),
+            results=(uncertain,),
+        )
+    )
+    _save(fake_host.engine, [uncertain])
+
+    current = api_client.get("/api/v1/tags/temperature", headers=auth).json()["current"]
+    history = api_client.get(
+        "/api/v1/tags/temperature/history",
+        params={"from": "2026-11-13T11:00:00Z", "to": "2026-11-13T12:00:00Z"},
+        headers=auth,
+    ).json()["readings"]
+
+    for body in (current, history[0]):
+        assert body["quality"] == "uncertain"
+        assert body["value"] == 21.5
+        assert body["error_code"] == "mbus_value_rounded"
+
+
 def test_history_range_order_limit_truncated(
     api_client: TestClient, fake_host: FakeHost, auth: dict[str, str]
 ) -> None:

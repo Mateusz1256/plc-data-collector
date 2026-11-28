@@ -1,0 +1,3 @@
+# Source: pyMeterBus 0.8.5 test frame, tests/test_short_frame.py (self.frame).
+# Short frame.
+10 08 0B 13 16

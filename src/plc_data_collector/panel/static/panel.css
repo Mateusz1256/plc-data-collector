@@ -241,6 +241,9 @@ h1, h2, h3 { margin: 0; font-weight: 700; font-stretch: var(--stretch-heading); 
 }
 .picker { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 10px; }
 .picker legend { padding: 0; margin-bottom: 10px; font-size: var(--text-table); font-weight: 600; }
+/* A group of checkboxes inside a form, such as M-Bus qualifiers */
+.check-group { margin: 0; padding: 0; border: 0; }
+.check-group legend { padding: 0; margin-bottom: 6px; }
 .picker-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .opt {
   display: flex; flex-direction: column; gap: 4px; padding: 14px 16px;

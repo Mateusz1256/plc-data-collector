@@ -24,6 +24,7 @@ from plc_data_collector.app.stores import Stores
 from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagConfig
 from plc_data_collector.panel import audit
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
+from plc_data_collector.panel.mbus_tag_form import group_battery_warning
 from plc_data_collector.panel.protocol_forms import FormErrors
 from plc_data_collector.panel.rendering import flash, render
 from plc_data_collector.panel.routes_connections import (
@@ -178,7 +179,13 @@ def create_tags_router() -> APIRouter:
             await asyncio.to_thread(
                 audit.configuration_changed, stores, "tag_group", group.id, "updated"
             )
-            flash(request, SAVED_MESSAGE)
+            connection = await _connection(stores, existing.connection_id)
+            warning = (
+                group_battery_warning(await _load_config(stores), connection, group.id)
+                if connection is not None
+                else None
+            )
+            flash(request, f"{SAVED_MESSAGE} {warning}" if warning else SAVED_MESSAGE)
             return _back_to(existing.connection_id)
         ui = FormUi("edit", existing.id, group_values_from_data(data), errors)
         return await render_connection_page(
@@ -696,9 +703,13 @@ def _paste_row_view(
     if row.tag is not None:
         read_from, address, value_type = adapter.table_cells(row.tag, connection)
     else:
-        read_from = values.get("read_from", "")
-        address = values.get("address", "")
-        value_type = values.get("data_type") or values.get("value_type", "")
+        read_from = values.get("read_from") or values.get("meter", "")
+        address = values.get("address") or values.get("quantity", "")
+        value_type = (
+            values.get("data_type")
+            or values.get("value_type")
+            or values.get("unit", "")
+        )
     group_id = row.tag.tag_group_id if row.tag else values.get("tag_group", "")
     return {
         "line": row.line,
@@ -831,13 +842,24 @@ async def _group_form(
 ) -> HTMLResponse:
     if _is_htmx(request):
         tag_count = 0
+        warning = None
         if ui.target_id is not None:
             active = await asyncio.to_thread(stores.config.active_tags)
             tag_count = sum(1 for tag, _ in active if tag.tag_group_id == ui.target_id)
+            connection = await _connection(stores, connection_id)
+            if connection is not None:
+                warning = group_battery_warning(
+                    await _load_config(stores), connection, ui.target_id
+                )
         return render(
             request,
             "_group_form.html",
-            {"connection_id": connection_id, "ui": ui, "tag_count": tag_count},
+            {
+                "connection_id": connection_id,
+                "ui": ui,
+                "tag_count": tag_count,
+                "warning": warning,
+            },
         )
     return await render_connection_page(request, stores, connection_id, group_ui=ui)
 

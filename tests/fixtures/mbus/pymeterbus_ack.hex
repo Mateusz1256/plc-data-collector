@@ -1,0 +1,3 @@
+# Source: pyMeterBus 0.8.5 test frame, tests/test_frametype.py (self.ack_frame).
+# Single character acknowledgement.
+E5

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from panel_support import FakeHost
 from sqlalchemy.exc import OperationalError
 
+from plc_data_collector.app.config import CollectorConfig
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.stores import Stores, build_stores
 from plc_data_collector.domain import (
@@ -250,6 +251,44 @@ def test_live_body_fragment_has_values_and_freshness_width(
     assert "opcua_bad_node_id" in bad
 
 
+def test_uncertain_value_shows_its_reason_next_to_the_value(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    _seed(fake_host)
+    received = NOW - timedelta(seconds=1)
+    fake_host.live_values.update(
+        WorkerPollResult(
+            execution=PollExecution(
+                execution_id="poll-u",
+                connection_id="line1_opcua",
+                tag_group_id="line1_fast",
+                status=PollStatus.SUCCESS,
+                started_at=received,
+                finished_at=received,
+                requested_tags=1,
+                successful_tags=1,
+            ),
+            results=(
+                TagResult.uncertain(
+                    tag_id="temperature",
+                    value=TagValue.numeric(12.5),
+                    error_code="mbus_value_rounded",
+                    error_message="Value was rounded.",
+                    source_timestamp=received,
+                    received_at=received,
+                ),
+            ),
+        )
+    )
+
+    html = signed_in_client.get("/panel/live/body", headers={"HX-Request": "true"}).text
+
+    row = _tag_row(html, "temperature")
+    assert "12.5" in row
+    assert "Value was rounded." in row
+    assert "Uncertain" in row
+
+
 def test_live_body_requires_sign_in(panel_client: TestClient) -> None:
     response = panel_client.get("/panel/live/body", headers={"HX-Request": "true"})
 
@@ -302,6 +341,60 @@ def test_stale_value_gets_amber_marker(
 )
 def test_format_value(value: TagValue | None, expected: str) -> None:
     assert format_value(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (TagValue.numeric(12345.678), "12\u2009345.678"),
+        (TagValue.numeric(4812.3), "4\u2009812.3"),
+        (TagValue.numeric(1234567.0), "1\u2009234\u2009567.0"),
+        (TagValue.numeric(-0.001234), "-0.001234"),
+        (TagValue.integer(1234567), "1\u2009234\u2009567"),
+    ],
+)
+def test_format_value_exact_keeps_every_digit(value: TagValue, expected: str) -> None:
+    assert format_value(value, exact=True) == expected
+
+
+def test_mbus_values_show_every_digit_on_the_live_page(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    fake_host.running_config = CollectorConfig(
+        connections=(
+            ConnectionConfig(
+                id="heat_mbus",
+                name="Heat meters",
+                protocol="mbus",
+                endpoint="tcp://gw:10001",
+            ),
+        ),
+        tag_groups=(
+            TagGroupConfig(id="heat", connection_id="heat_mbus", interval_ms=60000),
+        ),
+        tags=(
+            TagConfig(
+                id="volume_total",
+                tag_group_id="heat",
+                name="Volume total",
+                address="5",
+                value_type=ValueType.NUMERIC,
+                protocol_options={"quantity": "volume", "unit": "m3"},
+            ),
+        ),
+    )
+    fake_host.running_revision = 1
+    _poll(
+        fake_host,
+        "heat",
+        {"volume_total": TagValue.numeric(12345.678)},
+        age_s=1.0,
+        connection_id="heat_mbus",
+    )
+
+    html = signed_in_client.get("/panel/live/body", headers={"HX-Request": "true"}).text
+
+    assert "12\u2009345.678" in _tag_row(html, "volume_total")
 
 
 def test_freshness_inputs_are_clamped() -> None:

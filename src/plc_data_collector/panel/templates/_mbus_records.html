@@ -1,0 +1,76 @@
+{#- The records of one meter read. The reading is kept on the server
+    (``token``); the page posts only the ticks, the units, the prefix and the
+    Tag IDs it showed, so a save never renames silently. -#}
+<form class="inline-form" method="post" action="{{ read_url }}/save" aria-label="Records of meter {{ meter_display }}">
+<h3>Meter {{ meter_display }}</h3>
+{% if error %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<p class="secondary" style="margin: 0">ID <span class="mono">{{ header.id_digits }}</span>, manufacturer <span class="mono">{{ header.manufacturer }}</span>, version <span class="mono">{{ "%02X" | format(header.version) }}</span>, medium {{ header.medium_name }}, status {{ status_text }}. Values as read now, in the meter's own unit.</p>
+<input type="hidden" name="token" value="{{ token }}">
+<input type="hidden" name="shown_ids" value="{{ shown_ids }}">
+<div class="inline-form-grid">
+<div class="field">
+<label for="read-prefix">Name prefix</label>
+<input class="input mono" type="text" name="prefix" id="read-prefix" value="{{ prefix }}" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="read-prefix-help">
+<small class="field-help" id="read-prefix-help">Names are the prefix, the quantity and the parts of the record that are not 0 or instantaneous. Change it, then Update names.</small>
+</div>
+<div class="field">
+<label for="read-group">Tag group</label>
+{% if group_choices %}
+<select class="input" name="tag_group" id="read-group">
+{% for group_id, label in group_choices %}
+<option value="{{ group_id }}"{% if group_id == selected_group %} selected{% endif %}>{{ label }}</option>
+{% endfor %}
+</select>
+{% else %}
+<p class="alert alert-degraded" style="font-weight: 400">This connection has no tag group yet. Add one on the <a href="/panel/connections/{{ connection_id }}">connection page</a> first.</p>
+{% endif %}
+</div>
+</div>
+<div class="form-actions">
+{# First submit button of the form: Enter in the prefix updates the names. #}
+<button type="submit" class="btn" name="action" value="names">Update names</button>
+</div>
+<div class="panel-scroll">
+<table class="tbl">
+<thead><tr><th scope="col"><span class="visually-hidden">Save</span></th><th scope="col">Name</th><th scope="col">Quantity</th><th scope="col">Value</th><th scope="col">Unit</th><th scope="col">Storage</th><th scope="col">Tariff</th><th scope="col">Function</th><th scope="col">Other</th><th scope="col">Note</th></tr></thead>
+<tbody>
+{% for row in rows %}
+{% if row.supported %}
+{% set problem = problems.get(row.index) %}
+<tr data-row="{{ row.index }}" class="{{ 'row-failed' if problem else ('row-muted' if row.existing_tag else '') }}">
+<td><input class="tia-check" type="checkbox" name="select" value="{{ row.index }}"{% if row.selected %} checked{% endif %} aria-label="Save {{ row.name }}"></td>
+<td><span class="addr name">{{ row.name }}</span><div class="secondary addr">{{ row.tag_id }}</div></td>
+<td class="mono">{{ row.quantity }}</td>
+<td class="num">{{ row.value }}{% if row.value and row.natural_unit %} <span class="secondary">{{ row.natural_unit }}</span>{% endif %}</td>
+<td>
+{% if row.units %}
+<select class="input" name="unit_{{ row.index }}" aria-label="Unit for {{ row.name }}">
+{% for unit in row.units %}
+<option value="{{ unit }}"{% if unit == row.unit %} selected{% endif %}>{{ unit }}</option>
+{% endfor %}
+</select>
+{% else %}(none){% endif %}
+</td>
+<td class="num">{{ row.storage }}</td>
+<td class="num">{{ row.tariff }}</td>
+<td>{{ row.function }}</td>
+<td class="secondary">{% set other = [] %}{% if row.subunit %}{% set _ = other.append("subunit " ~ row.subunit) %}{% endif %}{% for q in row.qualifiers %}{% set _ = other.append(q) %}{% endfor %}{% if row.occurrence > 1 %}{% set _ = other.append("occurrence " ~ row.occurrence) %}{% endif %}{{ other | join(", ") }}</td>
+<td>{% if problem %}{{ problem }}{% elif row.existing_tag %}Already read by tag {{ row.existing_tag }}.{% elif row.reason %}{{ row.reason }}{% endif %}</td>
+</tr>
+{% else %}
+<tr data-row="{{ row.index }}" class="row-muted">
+<td></td>
+<td colspan="8">{{ row.description }}</td>
+<td>Not supported: {{ row.reason }}</td>
+</tr>
+{% endif %}
+{% endfor %}
+</tbody>
+</table>
+</div>
+<div class="form-actions">
+{% if group_choices %}<button type="submit" class="btn btn-primary" name="action" value="save">Save selected tags</button>{% endif %}
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Cancel</a>
+</div>
+<p class="secondary" style="margin: 0">Tags read the meter at <span class="mono">{{ meter }}</span> and check its ID {{ header.id_digits }} on every read. Saved changes take effect after you apply them from the banner.</p>
+</form>

@@ -350,7 +350,7 @@ def test_save_refused_when_a_selected_row_has_a_problem(
     )
 
     assert status == 400
-    assert "Not supported in 0.5.0" in rows(page)["Data.db#Data#Stamp"][PROBLEM]
+    assert "Not supported." in rows(page)["Data.db#Data#Stamp"][PROBLEM]
     assert "Some selected rows have a problem" in text(page)
     assert stores.config.all_tag_ids() == set()
     assert stores.config.revision() == before

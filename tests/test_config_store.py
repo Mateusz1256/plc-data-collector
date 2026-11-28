@@ -810,3 +810,102 @@ def test_create_tags_one_revision_and_refuses_active_ids(store: ConfigStore) -> 
         store.create_tags([_tag("t4"), _tag("t2")])
     assert caught.value.code == "duplicate_id"
     assert store.all_tag_ids() == {"t1", "t2", "t3"}
+
+
+def _mbus(connection_id: str, endpoint: str, **options: object) -> ConnectionConfig:
+    return ConnectionConfig(
+        id=connection_id,
+        protocol="mbus",
+        endpoint=endpoint,
+        protocol_options=options,
+    )
+
+
+def test_create_refuses_a_second_mbus_connection_on_one_endpoint(
+    store: ConfigStore,
+) -> None:
+    store.create_connection(_mbus("m1", "tcp://GW:10001"))
+    store.create_connection(_connection("o1"))
+    before = store.revision()
+
+    with pytest.raises(ConfigurationError) as caught:
+        store.create_connection(_mbus("m2", "tcp://gw:10001"))
+
+    assert caught.value.code == "invalid_mbus_connection"
+    assert "'m1'" in caught.value.message
+    assert "'m2'" in caught.value.message
+    assert store.get_connection("m2") is None
+    assert store.revision() == before
+
+
+def test_update_refuses_moving_an_mbus_connection_onto_a_used_endpoint(
+    store: ConfigStore,
+) -> None:
+    store.create_connection(_mbus("m1", "serial:///dev/ttyUSB0", baud_rate=2400))
+    store.create_connection(_mbus("m2", "serial:///dev/ttyUSB1"))
+
+    with pytest.raises(ConfigurationError) as caught:
+        store.upsert_connection(_mbus("m2", "serial:///dev/ttyUSB0"))
+
+    assert caught.value.code == "invalid_mbus_connection"
+    stored = store.get_connection("m2")
+    assert stored is not None
+    assert stored.endpoint == "serial:///dev/ttyUSB1"
+
+
+def test_editing_an_mbus_connection_without_moving_it_saves(
+    store: ConfigStore,
+) -> None:
+    store.create_connection(_mbus("m1", "tcp://gw:10001"))
+    store.create_connection(_mbus("m2", "tcp://gw:10002"))
+
+    store.upsert_connection(_mbus("m1", "tcp://GW:10001", max_telegrams=4))
+
+    stored = store.get_connection("m1")
+    assert stored is not None
+    assert stored.protocol_options == {"max_telegrams": 4}
+
+
+def test_archived_mbus_connection_does_not_hold_its_endpoint(
+    store: ConfigStore,
+) -> None:
+    store.create_connection(_mbus("m1", "tcp://gw:10001"))
+    store.archive_connection("m1")
+
+    store.create_connection(_mbus("m2", "tcp://gw:10001"))
+
+    assert store.get_connection("m2") is not None
+
+
+def test_replace_all_may_swap_mbus_endpoints_but_not_share_one(
+    store: ConfigStore,
+) -> None:
+    store.create_connection(_mbus("m1", "tcp://gw:10001"))
+    store.create_connection(_mbus("m2", "tcp://gw:10002"))
+
+    store.replace_all(
+        CollectorConfig(
+            connections=(
+                _mbus("m1", "tcp://gw:10002"),
+                _mbus("m2", "tcp://gw:10001"),
+            ),
+            tag_groups=(),
+            tags=(),
+        )
+    )
+    m1 = store.get_connection("m1")
+    assert m1 is not None
+    assert m1.endpoint == "tcp://gw:10002"
+
+    with pytest.raises(ConfigurationError) as caught:
+        store.replace_all(
+            CollectorConfig(
+                connections=(
+                    _mbus("m1", "tcp://gw:10001"),
+                    _mbus("m2", "tcp://gw:10001"),
+                ),
+                tag_groups=(),
+                tags=(),
+            )
+        )
+    assert caught.value.code == "invalid_mbus_connection"

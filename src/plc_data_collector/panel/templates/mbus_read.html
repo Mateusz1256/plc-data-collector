@@ -1,0 +1,28 @@
+{#- Read meter: the meter address form, then the meter's header and records. -#}
+{% extends "base.html" %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/connections">Connections</a> / <a href="/panel/connections/{{ connection_id }}">{{ connection_name }}</a> / Read meter</nav>
+<div class="title-row"><h1 class="page-title">Read meter</h1></div>
+</div>
+<section class="panel" aria-label="Read meter">
+<form class="inline-form" method="post" action="{{ read_url }}" aria-label="Meter to read">
+<h3>Meter</h3>
+{% if error and not token %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="read-meter">Meter address</label>
+<input class="input mono" type="text" name="meter" id="read-meter" value="{{ meter }}" spellcheck="false" autocapitalize="off" autocomplete="off" aria-describedby="read-meter-help">
+<small class="field-help" id="read-meter-help">Primary address 0-250, secondary ID 12345678, or full secondary address 123456782C2D0104. The read uses the saved settings and takes one turn on the bus.</small>
+</div>
+</div>
+<div class="form-actions">
+<button type="submit" class="btn{% if not token %} btn-primary{% endif %}">Read</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Back to the connection</a>
+</div>
+</form>
+{% if token %}
+{% include "_mbus_records.html" %}
+{% endif %}
+</section>
+{% endblock %}

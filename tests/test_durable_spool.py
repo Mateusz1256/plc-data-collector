@@ -62,6 +62,25 @@ def test_durable_spool_survives_process_restart(tmp_path: Path) -> None:
     assert due[0].poll_result.results[0].value.numeric_value == 20.5
 
 
+def test_durable_spool_round_trips_an_uncertain_reason(tmp_path: Path) -> None:
+    now = timestamp()
+    uncertain = TagResult.uncertain(
+        tag_id="energy",
+        value=TagValue.numeric(7.5),
+        error_code="mbus_value_rounded",
+        error_message="Value was rounded.",
+        source_timestamp=now,
+        received_at=now,
+    )
+    poll = make_poll_result("poll-u")
+    spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
+    spool.append([WorkerPollResult(execution=poll.execution, results=(uncertain,))])
+
+    [due] = spool.fetch_due(limit=10)
+
+    assert due.poll_result.results == (uncertain,)
+
+
 def test_durable_spool_uses_execution_id_as_unique_event_id(tmp_path: Path) -> None:
     spool = DurableSqliteSpool(tmp_path / "spool.db", max_items=10)
     item = make_poll_result("poll-1")

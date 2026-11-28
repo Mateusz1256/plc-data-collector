@@ -1,0 +1,9 @@
+# Source: pyMeterBus 0.8.5 test frame, tests/test_unknown_pl.py (self.frame).
+# CI 0x76 (mode 2, MSB first) telegram: date record, error-function records, tariff and subunit DIFEs, VIF 0x7E record.
+68 64 64 68 08 01 76 15 53 11 11 00 00 52 04 0A
+10 00 00 02 6C 23 12 3C 0F 00 58 53 40 BC 20 0F
+00 00 00 00 3C 15 03 79 71 68 8C 10 13 00 00 00
+00 8C 20 13 00 00 00 00 8C 30 13 00 00 00 00 8C
+40 13 00 00 00 00 3A 3D 02 63 3A 2E 01 07 0A 5A
+04 25 0A 5E 03 89 0C 22 00 03 80 71 3C 22 00 02
+90 80 04 7E 00 00 3A 12 2C 16

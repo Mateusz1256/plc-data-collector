@@ -120,6 +120,68 @@ def test_tag_result_rejects_invalid_success_and_error_shapes() -> None:
         )
 
 
+def test_uncertain_result_keeps_value_code_and_message() -> None:
+    timestamp = utc_now()
+
+    result = TagResult.uncertain(
+        tag_id="energy",
+        value=TagValue.numeric(12.5),
+        error_code="mbus_value_rounded",
+        error_message="Value was rounded to fit a float.",
+        source_timestamp=timestamp,
+        received_at=timestamp,
+    )
+
+    assert result.quality is Quality.UNCERTAIN
+    assert result.value == TagValue.numeric(12.5)
+    assert result.error_code == "mbus_value_rounded"
+    assert result.error_message == "Value was rounded to fit a float."
+    assert result.is_success is True
+
+
+def test_uncertain_result_without_reason_is_allowed() -> None:
+    timestamp = utc_now()
+
+    result = TagResult.success(
+        tag_id="energy",
+        value=TagValue.numeric(1.0),
+        source_timestamp=timestamp,
+        received_at=timestamp,
+        quality=Quality.UNCERTAIN,
+    )
+
+    assert result.error_code is None and result.error_message is None
+
+
+def test_good_result_with_a_reason_is_refused() -> None:
+    timestamp = utc_now()
+
+    with pytest.raises(ConfigurationError, match="good"):
+        TagResult(
+            tag_id="energy",
+            quality=Quality.GOOD,
+            received_at=timestamp,
+            value=TagValue.numeric(1.0),
+            error_code="x",
+            error_message="y",
+        )
+
+
+@pytest.mark.parametrize(("error_code", "error_message"), [("x", None), (None, "y")])
+def test_uncertain_result_with_half_a_reason_is_refused(
+    error_code: str | None, error_message: str | None
+) -> None:
+    with pytest.raises(ConfigurationError, match="both"):
+        TagResult(
+            tag_id="energy",
+            quality=Quality.UNCERTAIN,
+            received_at=utc_now(),
+            value=TagValue.numeric(1.0),
+            error_code=error_code,
+            error_message=error_message,
+        )
+
+
 def test_timestamps_must_be_timezone_aware_and_are_normalized_to_utc() -> None:
     local_time = datetime(
         2026,

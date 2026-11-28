@@ -284,7 +284,7 @@ def test_connections_require_sign_in(panel_client: TestClient) -> None:
 # Add
 
 
-def test_add_connection_picker_hides_mock_and_marks_future_protocols(
+def test_add_connection_picker_hides_mock(
     signed_in_client: TestClient,
 ) -> None:
     response = signed_in_client.get("/panel/connections/new")
@@ -294,21 +294,17 @@ def test_add_connection_picker_hides_mock_and_marks_future_protocols(
     assert re.search(r'<input[^>]*value="opcua"(?![^>]*disabled)[^>]*>', html)
     assert 'value="mock"' not in html
     assert ">Mock<" not in html
-    for label, protocol, version in (("M-Bus", "mbus", "0.6.0"),):
-        assert label in html
-        assert re.search(rf'<input[^>]*value="{protocol}"[^>]*disabled', html)
-        assert f"Coming in {version}" in html
+    assert "M-Bus" in html
+    assert "Coming in" not in html
     assert "Endpoint URL, optional user and certificate" in html
     assert "Host, port and unit ID" in html
-    assert "Coming in 0.4.0" not in html
-    assert "Coming in 0.5.0" not in html
     assert "Continue to settings" in html
 
 
 def test_new_form_for_unavailable_protocol_shows_picker(
     signed_in_client: TestClient,
 ) -> None:
-    for protocol in ("mock", "mbus", "nonsense"):
+    for protocol in ("mock", "nonsense"):
         response = signed_in_client.get(f"/panel/connections/new?protocol={protocol}")
         assert response.status_code == 400, protocol
         assert "Choose a protocol" in response.text
@@ -1031,9 +1027,7 @@ def test_picker_offers_modbus(signed_in_client: TestClient) -> None:
     html = signed_in_client.get("/panel/connections/new").text
 
     assert re.search(r'<input[^>]*value="modbus"(?![^>]*disabled)[^>]*>', html)
-    assert "Coming in 0.5.0" not in html
-    assert "Coming in 0.6.0" in html
-    assert "Coming in 0.4.0" not in html
+    assert "Coming in" not in html
 
 
 def test_create_modbus_connection(
@@ -1271,3 +1265,167 @@ def test_s7_connection_refuses_out_of_range_options(
     assert "Enter a whole number from 0 to 7." in html
     assert "Enter a whole number from 0 to 256." in html
     assert _stores(fake_host).config.get_connection("press3") is None
+
+
+# M-Bus
+
+
+def _mbus_form(**overrides: str) -> dict[str, str]:
+    data = {
+        "protocol": "mbus",
+        "id": "heat",
+        "name": "Heat meters",
+        "transport": "serial",
+        "host": "",
+        "port": "10001",
+        "device": "/dev/ttyUSB0",
+        "baud_rate": "9600",
+        "scan_timeout_ms": "500",
+        "max_telegrams": "8",
+        "timeout_ms": "3000",
+        "enabled": "on",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_picker_offers_mbus(signed_in_client: TestClient) -> None:
+    html = signed_in_client.get("/panel/connections/new").text
+
+    assert re.search(r'<input[^>]*value="mbus"(?![^>]*disabled)[^>]*>', html)
+    assert "Coming in 0.6.0" not in html
+
+
+def test_new_mbus_form_shows_transport_and_defaults(
+    signed_in_client: TestClient,
+) -> None:
+    html = signed_in_client.get("/panel/connections/new?protocol=mbus").text
+
+    transport = re.search(r'<select[^>]*name="transport".*?</select>', html, re.S)
+    assert transport is not None
+    assert re.search(r'<option value="tcp" selected>TCP gateway</option>', html)
+    assert '<option value="serial">Serial port</option>' in transport.group(0)
+    assert re.search(r'<input[^>]*name="port"[^>]*value="10001"', html)
+    assert re.search(r'<input[^>]*name="device"', html)
+    assert re.search(r'<option value="2400" selected>2400</option>', html)
+    assert re.search(r'<input[^>]*name="timeout_ms"[^>]*value="3000"', html)
+    assert re.search(r'data-transport="tcp"', html)
+    assert re.search(r'data-transport="serial"', html)
+    assert "/panel/static/transport-fields.js" in html
+    details = re.search(r"<details.*?</details>", html, re.S)
+    assert details is not None
+    assert "Scan reply timeout" in details.group(0)
+    assert re.search(r'name="scan_timeout_ms"[^>]*value="500"', details.group(0))
+    assert "Telegrams per meter" in details.group(0)
+    assert re.search(r'name="max_telegrams"[^>]*value="8"', details.group(0))
+
+
+def test_create_mbus_serial_connection(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_mbus_form(host="ignored-gw")
+    )
+
+    assert response.status_code == 303
+    stored = _stores(fake_host).config.get_connection("heat")
+    assert stored is not None
+    assert stored.protocol == "mbus"
+    assert stored.endpoint == "serial:///dev/ttyUSB0"
+    assert stored.timeout_ms == 3000
+    assert stored.protocol_options == {
+        "baud_rate": 9600,
+        "scan_timeout_ms": 500,
+        "max_telegrams": 8,
+    }
+    html = signed_in_client.get("/panel/connections/heat").text
+    assert re.search(r'<option value="serial" selected>Serial port</option>', html)
+    assert re.search(r'<input[^>]*name="device"[^>]*value="/dev/ttyUSB0"', html)
+    assert re.search(r'<option value="9600" selected>9600</option>', html)
+
+
+def test_create_mbus_tcp_connection_ignores_baud_rate(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    response = signed_in_client.post(
+        "/panel/connections",
+        data=_mbus_form(transport="tcp", host="gw", device="junk ?#"),
+    )
+
+    assert response.status_code == 303
+    stored = _stores(fake_host).config.get_connection("heat")
+    assert stored is not None
+    assert stored.endpoint == "tcp://gw:10001"
+    assert "baud_rate" not in stored.protocol_options
+    html = signed_in_client.get("/panel/connections/heat").text
+    assert re.search(r'<option value="tcp" selected>TCP gateway</option>', html)
+    assert re.search(r'<input[^>]*name="host"[^>]*value="gw"', html)
+    assert re.search(r'<input[^>]*name="port"[^>]*value="10001"', html)
+
+
+def test_mbus_switch_serial_to_tcp_drops_baud_rate(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    signed_in_client.post("/panel/connections", data=_mbus_form())
+    edit = _mbus_form(transport="tcp", host="gw", port="2000")
+    del edit["protocol"], edit["id"]
+
+    response = signed_in_client.post("/panel/connections/heat", data=edit)
+
+    assert response.status_code == 303
+    stored = _stores(fake_host).config.get_connection("heat")
+    assert stored is not None
+    assert stored.endpoint == "tcp://gw:2000"
+    assert "baud_rate" not in stored.protocol_options
+
+
+def test_mbus_connection_field_errors(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    serial = signed_in_client.post(
+        "/panel/connections",
+        data=_mbus_form(device="", baud_rate="1234", max_telegrams="17"),
+    )
+    tcp = signed_in_client.post(
+        "/panel/connections", data=_mbus_form(transport="tcp", host="", port="0")
+    )
+    neither = signed_in_client.post(
+        "/panel/connections", data=_mbus_form(transport="radio")
+    )
+
+    assert serial.status_code == 400
+    assert "Enter the device." in serial.text
+    assert "Choose one of the listed options." in serial.text
+    assert "Enter a whole number from 1 to 16." in serial.text
+    assert tcp.status_code == 400
+    assert "Enter the host." in tcp.text
+    assert "Enter a whole number from 1 to 65535." in tcp.text
+    assert neither.status_code == 400
+    assert "Choose one of the listed options." in neither.text
+    assert _stores(fake_host).config.get_connection("heat") is None
+
+
+def test_mbus_bad_device_is_a_field_error(signed_in_client: TestClient) -> None:
+    response = signed_in_client.post(
+        "/panel/connections", data=_mbus_form(device="/dev/tty USB0")
+    )
+
+    assert response.status_code == 400
+    assert (
+        "Enter a device name without spaces, for example /dev/ttyUSB0 or COM3."
+        in response.text
+    )
+
+
+def test_mbus_shared_endpoint_is_refused_on_the_form(
+    signed_in_client: TestClient, fake_host: FakeHost
+) -> None:
+    signed_in_client.post("/panel/connections", data=_mbus_form())
+
+    response = signed_in_client.post(
+        "/panel/connections", data=_mbus_form(id="heat2", name="Second")
+    )
+
+    assert response.status_code == 400
+    assert "use the same M-Bus" in response.text
+    assert _stores(fake_host).config.get_connection("heat2") is None

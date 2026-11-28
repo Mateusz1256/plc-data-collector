@@ -4,6 +4,7 @@
 <form class="inline-form" method="post" action="{{ '/panel/groups/' ~ ui.target_id if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/groups' }}" aria-label="{{ 'Edit tag group' if ui.mode == 'edit' else 'New tag group' }}" novalidate>
 <h3>{{ "Edit tag group" if ui.mode == "edit" else "New tag group" }}</h3>
 {% if errors.get("form") %}<p class="alert alert-failed" role="alert">{{ errors.form }}</p>{% endif %}
+{% if warning %}<p class="alert alert-degraded" role="status">{{ warning }}</p>{% endif %}
 <div class="inline-form-grid">
 <div class="field">
 <label for="group-id">ID</label>

@@ -17,6 +17,7 @@ from plc_data_collector.domain import ConfigurationError, ConnectionConfig, TagC
 from plc_data_collector.panel.protocol_forms import FormErrors
 from plc_data_collector.panel.tag_adapters import TagFormAdapter
 from plc_data_collector.panel.tag_forms import generate_tag_id
+from plc_data_collector.protocols.mbus_tags import MBUS_PROTOCOL
 from plc_data_collector.protocols.modbus_tags import (
     MODBUS_PROTOCOL,
     ModbusConnectionOptions,
@@ -151,6 +152,8 @@ def parse_paste(
 
     taken = set(taken_ids)
     noun = adapter.duplicate_noun
+    # Duplicate errors go on the column that names the place read.
+    place = "meter" if "meter" in allowed_columns else "address"
     holders: dict[Hashable, str] = {}
     for existing in existing_tags:
         holders.setdefault(adapter.register_key(existing, connection), existing.id)
@@ -190,10 +193,10 @@ def parse_paste(
                 holder = holders.get(key)
                 earlier = seen.get(key)
                 if holder is not None:
-                    errors["address"] = f"Same {noun} as Tag {holder}."
+                    errors[place] = f"Same {noun} as Tag {holder}."
                     tag = None
                 elif earlier is not None:
-                    errors["address"] = f"Same {noun} as line {earlier}."
+                    errors[place] = f"Same {noun} as line {earlier}."
                     tag = None
                 else:
                     seen[key] = line
@@ -209,6 +212,12 @@ def example_paste(connection: ConnectionConfig) -> str:
             "name;address;data_type;unit\n"
             "Line speed;%DB10.DBD4;real;m/min\n"
             "Motor running;%DB10.DBX8.0;bool;"
+        )
+    if connection.protocol == MBUS_PROTOCOL:
+        return (
+            "name;meter;quantity;unit;storage\n"
+            "Heat energy;12345678;energy;MWh;\n"
+            "Heat energy last year;12345678;energy;MWh;1"
         )
     if connection.protocol != MODBUS_PROTOCOL:
         return "name,address,value_type\nTemperature,ns=2;s=Line1.Temperature,numeric"

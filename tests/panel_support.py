@@ -16,6 +16,7 @@ from sqlalchemy import Engine
 
 from plc_data_collector.api import RuntimeApiState, WebOptions, create_api_app
 from plc_data_collector.app.config import CollectorConfig
+from plc_data_collector.app.mbus_scan import ScanRegistry
 from plc_data_collector.app.secrets import SecretBox
 from plc_data_collector.app.stores import Stores, build_stores
 from plc_data_collector.domain import CollectorError
@@ -23,6 +24,7 @@ from plc_data_collector.panel import auth
 from plc_data_collector.panel.host import CollectorHost
 from plc_data_collector.persistence import create_database_engine, run_migrations
 from plc_data_collector.protocols import DriverRegistry, default_driver_registry
+from plc_data_collector.protocols.mbus_bus import MBusBus
 from plc_data_collector.runtime.live_values import LiveValueCache
 
 PANEL_SESSION_SECRET = b"panel-test-session-secret-32byte"
@@ -35,6 +37,7 @@ class FakeHost:
     ``apply_error`` to make the next ``apply()`` calls raise it. With
     ``apply_falls_back`` a failed apply keeps the previous configuration
     running, as the supervisor's rollback does; without it collection stops.
+    ``mbus_buses`` holds the buses of "running" M-Bus Connections.
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -47,12 +50,19 @@ class FakeHost:
         self.running_config: CollectorConfig | None = None
         self.last_error_code: str | None = None
         self.applying = False
+        self.accepting_bus_actions = True
         self.registry: DriverRegistry = default_driver_registry()
         self.runtime_state = RuntimeApiState()
         self.apply_calls = 0
         self.apply_error: BaseException | None = None
         self.apply_falls_back = False
         self.retention_triggers = 0
+        self.mbus_buses: dict[str, MBusBus] = {}
+        self.mbus_scans = ScanRegistry(self)
+
+    def mbus_bus(self, connection_id: str) -> MBusBus | None:
+        """Return the scripted bus of a running M-Bus Connection."""
+        return self.mbus_buses.get(connection_id)
 
     def api_state(self) -> RuntimeApiState:
         """Return the scripted runtime snapshot."""
@@ -65,6 +75,7 @@ class FakeHost:
     async def apply(self) -> None:
         """Record the call, then fail as scripted or adopt the stored config."""
         self.apply_calls += 1
+        await self.mbus_scans.cancel_all("Scan stopped: the configuration changed.")
         if self.apply_error is not None:
             if not self.apply_falls_back:
                 self.running_revision = None

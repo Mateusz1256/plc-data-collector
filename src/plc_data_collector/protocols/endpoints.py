@@ -1,4 +1,4 @@
-"""Endpoint helpers shared by the TCP-based protocols."""
+"""Endpoint helpers shared by the TCP- and serial-based protocols."""
 
 from __future__ import annotations
 
@@ -38,8 +38,38 @@ def _endpoint_error(endpoint: str, protocol_label: str) -> ConfigurationError:
     return ConfigurationError(
         f"Invalid {protocol_label} endpoint {endpoint!r}; "
         "use tcp://host:port with a port from 1 to 65535.",
-        code=f"invalid_{protocol_label.lower()}_endpoint",
+        code=f"invalid_{protocol_label.lower().replace('-', '')}_endpoint",
     )
+
+
+_SERIAL_SCHEME = "serial://"
+
+
+def is_serial_endpoint(endpoint: str) -> bool:
+    """Return whether the endpoint names a serial port (``serial://...``)."""
+    return endpoint[: len(_SERIAL_SCHEME)].lower() == _SERIAL_SCHEME
+
+
+def parse_serial_endpoint(endpoint: str) -> str:
+    """Return the device of ``serial://<device>``.
+
+    ``serial:///dev/ttyUSB0`` gives ``/dev/ttyUSB0`` and ``serial://COM3``
+    gives ``COM3``. The device is not checked for existence.
+    """
+    device = endpoint[len(_SERIAL_SCHEME) :]
+    if (
+        not is_serial_endpoint(endpoint)
+        or not device
+        or any(char.isspace() or not char.isprintable() for char in device)
+        or "?" in device
+        or "#" in device
+    ):
+        raise ConfigurationError(
+            f"Invalid serial endpoint {endpoint!r}; use serial://<device>, "
+            "for example serial:///dev/ttyUSB0 or serial://COM3.",
+            code="invalid_serial_endpoint",
+        )
+    return device
 
 
 def format_endpoint(host: str, port: int) -> str:

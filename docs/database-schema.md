@@ -4,7 +4,7 @@ This page describes the tables PLC Data Collector creates in PostgreSQL (or
 SQLite, the fallback when no database URL is set). The definition lives in
 `src/plc_data_collector/persistence/schema.py`, and Alembic migrations in
 `src/plc_data_collector/persistence/migrations/versions/` apply it at startup.
-The schema matches release 0.5.0 (migration `0004`).
+The schema matches release 0.6.0 (migration `0004`).
 
 ## What is stable
 
@@ -58,8 +58,8 @@ and an error code, so gaps in the data are visible.
 | `boolean_value` | `BOOLEAN` | yes | Value of a `boolean` Tag. |
 | `text_value` | `TEXT` | yes | Value of a `text` Tag. |
 | `binary_value` | `BYTEA` | yes | Value of a `binary` Tag. |
-| `error_code` | `VARCHAR(128)` | yes | Error code of a failed read, for example `connection_unavailable`. |
-| `error_message` | `TEXT` | yes | Error description of a failed read. |
+| `error_code` | `VARCHAR(128)` | yes | Error code of a failed read, for example `connection_unavailable`, or the reason an `uncertain` value is uncertain. |
+| `error_message` | `TEXT` | yes | Error description of a failed read, or of why an `uncertain` value is uncertain. |
 
 ### Value-type columns
 
@@ -78,8 +78,8 @@ failed (`quality = 'bad'`).
 
 | `quality` | Meaning |
 | --- | --- |
-| `good` | The value was read and the controller reported it as good. A value column is filled. |
-| `uncertain` | The value was read, but the controller marked it as uncertain. A value column is filled. |
+| `good` | The value was read and the controller reported it as good. A value column is filled; `error_code` and `error_message` are empty. |
+| `uncertain` | The value was read, but it is not fully trustworthy (the controller marked it uncertain, or the driver says why). A value column is filled. `error_code` and `error_message` may accompany the value, both set or both empty. |
 | `bad` | The read failed, or the controller reported the value as bad. No value column is filled; `error_code` and `error_message` say why. |
 
 ## `tags`

@@ -394,3 +394,92 @@ def test_example_paste_for_s7_parses() -> None:
 
     assert "%DB10.DBD4" in example
     assert _parse(example, S7).ok
+
+
+# M-Bus
+
+MBUS = ConnectionConfig(
+    id="heat", name="Heat meters", protocol="mbus", endpoint="tcp://gw:10001"
+)
+
+
+def test_paste_mbus_required_columns_only() -> None:
+    result = _parse("name;meter;quantity;unit\nHeatTotal;12345678;energy;MWh", MBUS)
+
+    assert result.ok
+    tag = result.rows[0].tag
+    assert tag is not None
+    assert tag.id == "heat_heattotal"
+    assert tag.address == "12345678"
+    assert dict(tag.protocol_options) == {"quantity": "energy", "unit": "MWh"}
+    assert tag.value_type is ValueType.NUMERIC
+    assert tag.metadata == {"unit": "MWh"}
+
+
+def test_paste_mbus_all_columns() -> None:
+    text = (
+        "name;meter;quantity;unit;storage;tariff;subunit;function;qualifiers;"
+        "occurrence;meter_id;tag_group;enabled\n"
+        "Flow;005;volume_flow;m3/h;1;2;1;maximum;forward+per_hour;2;12345678;slow;no"
+    )
+
+    result = _parse(text, MBUS)
+
+    assert result.ok
+    tag = result.rows[0].tag
+    assert tag is not None
+    assert tag.address == "5"
+    assert tag.tag_group_id == "slow"
+    assert tag.enabled is False
+    assert dict(tag.protocol_options) == {
+        "quantity": "volume_flow",
+        "unit": "m3/h",
+        "storage": 1,
+        "tariff": 2,
+        "subunit": 1,
+        "function": "maximum",
+        "qualifiers": ["forward", "per_hour"],
+        "occurrence": 2,
+        "meter_id": "12345678",
+    }
+
+
+def test_paste_mbus_bad_address_names_it() -> None:
+    result = _parse("name;meter;quantity;unit\nBad;251;energy;kWh", MBUS)
+
+    assert not result.ok
+    errors = result.rows[0].errors
+    assert set(errors) == {"meter"}
+    assert "'251'" in errors["meter"]
+
+
+def test_paste_mbus_duplicate_record_in_one_paste() -> None:
+    text = (
+        "name;meter;quantity;unit;storage\n"
+        "A;5;energy;kWh;0\n"
+        "B;005;energy;MWh;\n"
+        "C;5;energy;kWh;1\n"
+    )
+
+    result = _parse(text, MBUS)
+
+    assert result.rows[0].errors == {}
+    assert result.rows[1].errors == {"meter": "Same record as line 2."}
+    assert result.rows[2].errors == {}
+
+
+def test_paste_mbus_flags_an_existing_tag_with_the_same_record() -> None:
+    existing = _saved(MBUS, "name;meter;quantity;unit\nOld;12345678;energy;kWh")
+
+    result = _parse(
+        "name;meter;quantity;unit\nNew;12345678;energy;GJ", MBUS, existing=[existing]
+    )
+
+    assert result.rows[0].errors == {"meter": f"Same record as Tag {existing.id}."}
+
+
+def test_example_paste_for_mbus_parses() -> None:
+    example = example_paste(MBUS)
+
+    assert example.startswith("name;meter;quantity;unit")
+    assert _parse(example, MBUS).ok

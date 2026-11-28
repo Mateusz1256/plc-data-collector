@@ -34,7 +34,7 @@ from plc_data_collector.tia.source import (
     TypeSource,
 )
 
-UNSUPPORTED_PROBLEM = "Not supported in 0.5.0"
+UNSUPPORTED_PROBLEM = "Not supported."
 OPTIMIZED_MESSAGE = (
     "DB is optimized; switch off 'Optimized block access' in TIA, compile, "
     "download, export again."

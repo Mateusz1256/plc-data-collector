@@ -67,6 +67,10 @@ Stored readings are kept. Collection stops after you apply changes.
 <div class="form-actions">
 {% if existing %}
 <button type="button" class="btn" hx-post="/panel/connections/{{ existing.id }}/test" hx-include="closest form" hx-target="#test-result" hx-swap="innerHTML" hx-disabled-elt="this">Test connection</button>
+{% if existing.protocol == "mbus" %}
+<a class="btn" href="/panel/connections/{{ existing.id }}/mbus/scan">Scan bus</a>
+<a class="btn" href="/panel/connections/{{ existing.id }}/mbus/read">Read meter</a>
+{% endif %}
 {% endif %}
 <button type="submit" class="btn btn-primary">Save connection</button>
 </div>

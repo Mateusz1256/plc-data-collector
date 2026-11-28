@@ -4,7 +4,8 @@ An adapter turns submitted form fields (or one pasted CSV row, keyed by the
 same names) into a ``TagConfig``, and a saved Tag back into form values and
 Tags table cells. ``columns`` are the CSV columns; for the Modbus and generic
 forms they are also the form field names, while the S7 form takes its address
-in separate fields and a pasted row as one ``address``.
+in separate fields and a pasted row as one ``address``, and the M-Bus form its
+qualifiers as checkboxes and a pasted row as one ``qualifiers`` cell.
 """
 
 from __future__ import annotations
@@ -13,9 +14,11 @@ from collections.abc import Collection, Hashable, Mapping
 from typing import Protocol
 
 from plc_data_collector.domain import ConnectionConfig, TagConfig
+from plc_data_collector.panel.mbus_tag_form import MBusTagForm
 from plc_data_collector.panel.modbus_tag_form import ModbusTagForm
 from plc_data_collector.panel.s7_tag_form import S7TagForm
 from plc_data_collector.panel.tag_forms import GenericTagForm
+from plc_data_collector.protocols.mbus_tags import MBUS_PROTOCOL
 from plc_data_collector.protocols.modbus_tags import MODBUS_PROTOCOL
 from plc_data_collector.protocols.s7_tags import S7_PROTOCOL
 
@@ -31,7 +34,8 @@ class TagFormAdapter(Protocol):
     # Whether the Tags table shows a Read from column.
     read_from_column: bool
     # What two Tags with the same ``register_key`` share, in duplicate errors:
-    # "Same register as line 3." for Modbus, "Same address as ..." otherwise.
+    # "Same register as line 3." for Modbus, "Same record as ..." for M-Bus,
+    # "Same address as ..." otherwise.
     duplicate_noun: str
 
     def defaults(
@@ -100,4 +104,6 @@ def tag_adapter_for(protocol: str) -> TagFormAdapter:
         return ModbusTagForm()
     if protocol == S7_PROTOCOL:
         return S7TagForm()
+    if protocol == MBUS_PROTOCOL:
+        return MBusTagForm()
     return GenericTagForm()

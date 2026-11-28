@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plc-data-collector"
-version = "0.5.0"
+version = "0.6.0"
 description = "Industrial PLC and OPC UA data collector with web Panel and REST API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,7 +25,8 @@ dependencies = [
   "python-multipart==0.0.33",
   "itsdangerous==2.2.0",
   "pymodbus==3.16.2",
-  "python-snap7==3.6.0"
+  "python-snap7==3.6.0",
+  "pyserial==3.5"
 ]
 
 [project.optional-dependencies]
@@ -35,7 +36,8 @@ dev = [
   "pytest-asyncio==1.4.0",
   "packaging==23.2",
   "ruff==0.15.21",
-  "mypy==2.2.0"
+  "mypy==2.2.0",
+  "pyMeterBus==0.8.5"
 ]
 
 [project.scripts]

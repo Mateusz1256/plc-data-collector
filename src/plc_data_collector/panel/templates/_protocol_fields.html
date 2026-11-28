@@ -54,17 +54,33 @@
 {% endif %}
 {% endmacro %}
 
+{#- A field of one transport is wrapped in a data-transport box, which
+    transport-fields.js hides while the other transport is chosen. Without
+    scripts both sets show and the server ignores the inactive one. -#}
+{% macro wrapped_field(field, values, errors, saved_secrets) %}
+{% if field.transport %}
+<div data-transport="{{ field.transport }}">
+{{ one_field(field, values, errors, saved_secrets) }}
+</div>
+{% else %}
+{{ one_field(field, values, errors, saved_secrets) }}
+{% endif %}
+{% endmacro %}
+
 {% macro protocol_fields(form, values, errors, saved_secrets) %}
 {% for field in form.fields if not field.advanced %}
-{{ one_field(field, values, errors, saved_secrets) }}
+{{ wrapped_field(field, values, errors, saved_secrets) }}
 {% endfor %}
 {% set advanced = form.fields | selectattr("advanced") | list %}
 {% if advanced %}
 <details class="advanced"{% if advanced | selectattr("name", "in", errors) | list %} open{% endif %}>
 <summary>Advanced</summary>
 {% for field in advanced %}
-{{ one_field(field, values, errors, saved_secrets) }}
+{{ wrapped_field(field, values, errors, saved_secrets) }}
 {% endfor %}
 </details>
+{% endif %}
+{% if form.transport_field %}
+<script src="/panel/static/transport-fields.js?v={{ version }}" defer></script>
 {% endif %}
 {% endmacro %}

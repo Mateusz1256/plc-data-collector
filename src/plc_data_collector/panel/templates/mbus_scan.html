@@ -1,0 +1,30 @@
+{#- Scan bus: start a primary or secondary scan; its progress polls itself
+    until the scan finishes, then shows the meters found. -#}
+{% extends "base.html" %}
+{% block main %}
+<div class="page-head-stack">
+<nav aria-label="Breadcrumb" class="breadcrumb"><a href="/panel/connections">Connections</a> / <a href="/panel/connections/{{ connection_id }}">{{ connection_name }}</a> / Scan bus</nav>
+<div class="title-row"><h1 class="page-title">Scan bus</h1></div>
+</div>
+<section class="panel" aria-label="Scan bus">
+{% if not running %}
+<form class="inline-form" method="post" action="{{ scan_url }}" aria-label="Start a scan">
+<h3>Start a scan</h3>
+{% if error %}<p class="alert alert-failed" role="alert">{{ error }}</p>{% endif %}
+<fieldset class="field check-group">
+<legend>Scan</legend>
+<label class="check check-small"><input type="radio" name="kind" value="secondary"{% if kind == "secondary" %} checked{% endif %}>Secondary addresses: finds every meter by its ID; seconds to a few minutes</label>
+<label class="check check-small"><input type="radio" name="kind" value="primary"{% if kind == "primary" %} checked{% endif %}>Primary addresses 0-250: about 2-3 minutes at 2400 baud</label>
+</fieldset>
+<p class="secondary" style="margin: 0">The scan uses the saved settings and takes turns with polling, so collection goes on, more slowly, while it runs.</p>
+<div class="form-actions">
+<button type="submit" class="btn btn-primary">Start scan</button>
+<a class="btn btn-quiet" href="/panel/connections/{{ connection_id }}">Back to the connection</a>
+</div>
+</form>
+{% elif error %}
+<p class="alert alert-failed" role="alert">{{ error }}</p>
+{% endif %}
+{% include "_mbus_scan_progress.html" %}
+</section>
+{% endblock %}

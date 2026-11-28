@@ -1,0 +1,93 @@
+{#- M-Bus fields of the Tag form. Changing Quantity fetches the form again
+    with the current values, so Unit lists only the quantity's units. Without
+    scripts Save checks the unit and shows the right list with the error. -#}
+{% from "_protocol_fields.html" import field_error %}
+{% set rerender_url = '/panel/tags/' ~ ui.target_id ~ '/edit' if ui.mode == 'edit' else '/panel/connections/' ~ connection_id ~ '/tags/new' %}
+{% macro described(name, errors, help_id=None) -%}
+{%- set ids = [] -%}
+{%- if help_id %}{% set _ = ids.append(help_id) %}{% endif -%}
+{%- if errors.get(name) %}{% set _ = ids.append("field-" ~ name ~ "-error") %}{% endif -%}
+{%- if ids %} aria-describedby="{{ ids | join(' ') }}"{% endif -%}
+{%- if errors.get(name) %} aria-invalid="true"{% endif -%}
+{%- endmacro %}
+{% macro number(name, label, help) %}
+<div class="field">
+<label for="tag-{{ name }}">{{ label }}</label>
+<input class="input mono" type="text" inputmode="numeric" name="{{ name }}" id="tag-{{ name }}" value="{{ values.get(name, '') }}" autocomplete="off"{{ described(name, errors, "tag-" ~ name ~ "-help") }}>
+<small class="field-help" id="tag-{{ name }}-help">{{ help }}</small>
+{{ field_error(name, errors) }}
+</div>
+{% endmacro %}
+{% if ui.mode == "edit" %}<input type="hidden" name="tag_id" value="{{ ui.target_id }}">{% endif %}
+<div class="inline-form-grid">
+<div class="field">
+<label for="tag-meter">Meter</label>
+<input class="input mono" type="text" name="meter" id="tag-meter" value="{{ values.get('meter', '') }}" spellcheck="false" autocapitalize="off" autocomplete="off"{{ described("meter", errors, "tag-meter-help") }}>
+<small class="field-help" id="tag-meter-help">Primary address 0-250, secondary ID 12345678, or full secondary address 123456782C2D0104.</small>
+{#- Without scripts the link reads the meter shown when the form was drawn;
+    with them it takes the meter typed now. -#}
+{% set read_url = '/panel/connections/' ~ connection_id ~ '/mbus/read' %}
+<a class="link-button" href="{{ read_url }}?meter={{ values.get('meter', '') | urlencode }}" data-read-url="{{ read_url }}" hx-on:click="this.href = this.dataset.readUrl + '?meter=' + encodeURIComponent(document.getElementById('tag-meter').value.trim())">Read meter</a>
+{{ field_error("meter", errors) }}
+</div>
+<div class="field">
+<label for="tag-quantity">Quantity</label>
+<select class="input" name="quantity" id="tag-quantity" hx-get="{{ rerender_url }}" hx-trigger="change" hx-sync="closest form:replace" hx-include="closest form" hx-target="#tag-form-slot" hx-swap="innerHTML"{{ described("quantity", errors) }}>
+{% if values.get('quantity') not in extra.quantities %}<option value="" selected>Choose a quantity</option>{% endif %}
+{% for quantity in extra.quantities %}
+<option value="{{ quantity }}"{% if quantity == values.get('quantity') %} selected{% endif %}>{{ quantity }}</option>
+{% endfor %}
+</select>
+{{ field_error("quantity", errors) }}
+</div>
+<div class="field">
+<label for="tag-unit">Unit</label>
+<select class="input" name="unit" id="tag-unit"{{ described("unit", errors) }}>
+{% if not extra.quantity_known %}
+<option value="" selected>Choose a quantity first</option>
+{% elif not extra.units %}
+<option value="" selected>(none)</option>
+{% else %}
+{% if values.get('unit') not in extra.units %}<option value="" selected>Choose a unit</option>{% endif %}
+{% for unit in extra.units %}
+<option value="{{ unit }}"{% if unit == values.get('unit') %} selected{% endif %}>{{ unit }}</option>
+{% endfor %}
+{% endif %}
+</select>
+{{ field_error("unit", errors) }}
+</div>
+</div>
+<div class="inline-form-grid">
+{{ number("storage", "Storage", "0 = current value; 1 and up = stored (billing-date) values.") }}
+{{ number("tariff", "Tariff", "0 unless the meter counts per tariff.") }}
+</div>
+{% set advanced_errors = ["subunit", "function", "qualifiers", "occurrence", "meter_id"] | select("in", errors) | list %}
+<details class="advanced"{% if extra.advanced_open or advanced_errors %} open{% endif %}>
+<summary>Advanced</summary>
+<div class="inline-form-grid">
+{{ number("subunit", "Subunit", "Device or subunit number, usually 0.") }}
+<div class="field">
+<label for="tag-function">Function</label>
+<select class="input" name="function" id="tag-function"{{ described("function", errors) }}>
+{% for function in extra.functions %}
+<option value="{{ function }}"{% if function == values.get('function') %} selected{% endif %}>{{ function }}</option>
+{% endfor %}
+</select>
+{{ field_error("function", errors) }}
+</div>
+{{ number("occurrence", "Occurrence", "1 unless the meter sends the same record more than once.") }}
+<div class="field">
+<label for="tag-meter_id">Meter ID</label>
+<input class="input mono" type="text" inputmode="numeric" name="meter_id" id="tag-meter_id" value="{{ values.get('meter_id', '') }}" autocomplete="off"{{ described("meter_id", errors, "tag-meter_id-help") }}>
+<small class="field-help" id="tag-meter_id-help">Optional. The meter's 8-digit identification number, checked on every read.</small>
+{{ field_error("meter_id", errors) }}
+</div>
+</div>
+<fieldset class="field check-group"{{ described("qualifiers", errors) }}>
+<legend>Qualifiers</legend>
+{% for name, field_name in extra.qualifiers %}
+<label class="check check-small"><input type="checkbox" name="{{ field_name }}"{% if values.get(field_name) %} checked{% endif %}><span class="mono">{{ name }}</span></label>
+{% endfor %}
+{{ field_error("qualifiers", errors) }}
+</fieldset>
+</details>

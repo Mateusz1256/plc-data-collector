@@ -74,7 +74,7 @@ ENABLED_ERROR = "Enter yes or no."
 PASTE_REQUIRED_ERROR = "Enter an address, for example %DB10.DBD4 or %MW20."
 PASTE_PENDING_ERROR = "Choose Fill in to use this address, or clear the box."
 
-_ENABLED_WORDS = {
+ENABLED_WORDS = {
     "": True,
     "yes": True,
     "y": True,
@@ -215,7 +215,7 @@ class S7TagForm:
             if offset is not None and "offset" not in errors:
                 errors["offset"] = f"Offset isn't used with {data_type}."
         if enabled is None:
-            enabled = _ENABLED_WORDS.get(data.get("enabled", "").strip().lower())
+            enabled = ENABLED_WORDS.get(data.get("enabled", "").strip().lower())
             if enabled is None:
                 errors["enabled"] = ENABLED_ERROR
 

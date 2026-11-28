@@ -283,7 +283,7 @@ def test_unsupported_types_have_sizes_and_become_problem_candidates() -> None:
     by_path = {c.path: c for c in layout.candidates}
     for path in "abcdefg":
         assert by_path[path].data_type is None
-        assert by_path[path].problem == "Not supported in 0.5.0"
+        assert by_path[path].problem == "Not supported."
     assert by_path["h"].data_type is DataType.LWORD
     assert by_path["h"].problem is None
     assert layout.size == 56

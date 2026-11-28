@@ -33,7 +33,12 @@ from plc_data_collector.persistence.schema import (
     tags,
 )
 from plc_data_collector.persistence.sql import insert_for
-from plc_data_collector.protocols.rules import prefixed, rules_for
+from plc_data_collector.protocols.mbus_tags import MBUS_PROTOCOL
+from plc_data_collector.protocols.rules import (
+    prefixed,
+    refuse_shared_mbus_endpoints,
+    rules_for,
+)
 
 
 class ConfigStore:
@@ -277,9 +282,14 @@ class ConfigStore:
                     code="revision_changed",
                     details={"expected": expected_revision, "actual": revision},
                 )
+            # The new set replaces the stored one, so endpoints are compared
+            # within it (two Connections may swap endpoints).
+            refuse_shared_mbus_endpoints(config.connections)
             for item in config.connections:
                 # Every Tag is validated by _write_tag below, against the new set.
-                self._write_connection(connection, item, check_tags=False)
+                self._write_connection(
+                    connection, item, check_tags=False, check_endpoint=False
+                )
             for group in config.tag_groups:
                 _write_tag_group(connection, group, check_tags=False)
             for tag in config.tags:
@@ -418,6 +428,7 @@ class ConfigStore:
         config: ConnectionConfig,
         *,
         check_tags: bool = True,
+        check_endpoint: bool = True,
     ) -> None:
         rules = rules_for(config.protocol)
         prefix = f"Connection '{config.id}'"
@@ -425,6 +436,10 @@ class ConfigStore:
             rules.validate_connection(config)
         except ConfigurationError as error:
             raise prefixed(error, prefix, {"connection_id": config.id}) from error
+        if check_endpoint and config.protocol == MBUS_PROTOCOL:
+            refuse_shared_mbus_endpoints(
+                [*_other_active_mbus_connections(connection, config.id), config]
+            )
         if check_tags:
             _validate_existing_tags(
                 connection,
@@ -539,6 +554,22 @@ def _load_connection(
         endpoint=row.endpoint,
         protocol_options=row.protocol_options or {},
     )
+
+
+def _other_active_mbus_connections(
+    connection: Connection, connection_id: str
+) -> list[ConnectionConfig]:
+    rows = connection.execute(
+        select(connections.c.id, connections.c.endpoint).where(
+            connections.c.protocol == MBUS_PROTOCOL,
+            connections.c.archived_at.is_(None),
+            connections.c.id != connection_id,
+        )
+    ).all()
+    return [
+        ConnectionConfig(id=row.id, protocol=MBUS_PROTOCOL, endpoint=row.endpoint)
+        for row in rows
+    ]
 
 
 def _validate_existing_tags(

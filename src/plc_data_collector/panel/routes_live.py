@@ -62,6 +62,7 @@ from plc_data_collector.panel.routes_connections import (
     worker_statuses,
 )
 from plc_data_collector.panel.tag_forms import UNIT_KEY
+from plc_data_collector.protocols.mbus_tags import MBUS_PROTOCOL
 from plc_data_collector.runtime.live_values import LiveValue, freshness
 
 LOGGER = logging.getLogger(__name__)
@@ -233,6 +234,7 @@ class TagRow:
     updated: str
     bar_width: int | None
     stale: bool
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -267,15 +269,21 @@ class LiveView:
     stopped: bool = False
 
 
-def format_value(value: TagValue | None) -> str:
-    """Format a live value: 2 decimals, thin-space thousands, ``—`` for none."""
+def format_value(value: TagValue | None, *, exact: bool = False) -> str:
+    """Format a live value: 2 decimals, thin-space thousands, ``—`` for none.
+
+    ``exact`` shows a numeric value with every digit it has (the shortest
+    text that reads back as the same float) instead of 2 decimals, so a
+    meter total can be compared digit by digit with the meter's display.
+    """
     if value is None:
         return NO_VALUE
     raw = value.raw
     if value.value_type is ValueType.BOOLEAN:
         return "True" if raw else "False"
     if value.value_type is ValueType.NUMERIC and isinstance(raw, float):
-        return f"{raw:,.2f}".replace(",", THIN_SPACE)
+        text = f"{raw:,}" if exact else f"{raw:,.2f}"
+        return text.replace(",", THIN_SPACE)
     if value.value_type is ValueType.INTEGER and isinstance(raw, int):
         return f"{raw:,}".replace(",", THIN_SPACE)
     if isinstance(raw, bytes):
@@ -378,7 +386,9 @@ def _group_view(
             and live.tag_group_id == group.id
             and collected
         ):
-            row = _value_row(tag, live, group, now)
+            row = _value_row(
+                tag, live, group, now, exact=connection.protocol == MBUS_PROTOCOL
+            )
             good += live.result.quality is Quality.GOOD
         else:
             row = _empty_row(tag, collected=collected)
@@ -400,7 +410,12 @@ def _group_view(
 
 
 def _value_row(
-    tag: TagConfig, live: LiveValue, group: TagGroupConfig, now: datetime
+    tag: TagConfig,
+    live: LiveValue,
+    group: TagGroupConfig,
+    now: datetime,
+    *,
+    exact: bool,
 ) -> TagRow:
     result = live.result
     age_s = (now - result.received_at).total_seconds()
@@ -412,7 +427,7 @@ def _value_row(
         badge = state_badge(result.quality.value)
     return TagRow(
         tag=tag,
-        value=format_value(result.value),
+        value=format_value(result.value, exact=exact),
         unit=_unit(tag),
         dim_value=not good or result.value is None,
         badge=badge,
@@ -420,6 +435,7 @@ def _value_row(
         updated=updated_text(age_s),
         bar_width=width,
         stale=stale,
+        reason=result.error_message if result.value is not None else None,
     )
 
 

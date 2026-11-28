@@ -159,28 +159,63 @@ def test_tag_protocol_options_are_loaded(tmp_path: Path) -> None:
     assert dict(config.tags[0].protocol_options) == {"data_type": "int16"}
 
 
-def test_import_refuses_bad_modbus_tag() -> None:
+@pytest.mark.parametrize(
+    ("protocol", "endpoint", "address", "value_type", "options", "code"),
+    [
+        (
+            "modbus",
+            "tcp://plc:502",
+            "hr:1",
+            "boolean",
+            {"data_type": "bool"},
+            "invalid_modbus_tag",
+        ),
+        (
+            "mbus",
+            "tcp://gw:10001",
+            "5",
+            "numeric",
+            {"quantity": "energy", "unit": "kWh", "function": "avg"},
+            "mbus_invalid_options",
+        ),
+        (
+            "mbus",
+            "serial:///dev/ttyUSB0",
+            "P5",
+            "numeric",
+            {"quantity": "energy", "unit": "kWh"},
+            "mbus_invalid_address",
+        ),
+    ],
+)
+def test_import_refuses_bad_protocol_tag(
+    protocol: str,
+    endpoint: str,
+    address: str,
+    value_type: str,
+    options: dict[str, object],
+    code: str,
+) -> None:
     from plc_data_collector.app.config import parse_collector_config
 
     payload = {
-        "connections": [
-            {"id": "m1", "protocol": "modbus", "endpoint": "tcp://plc:502"}
-        ],
+        "connections": [{"id": "m1", "protocol": protocol, "endpoint": endpoint}],
         "tag_groups": [{"id": "g1", "connection_id": "m1", "interval_ms": 1000}],
         "tags": [
             {
                 "id": "p2_temp",
                 "tag_group_id": "g1",
                 "name": "p2_temp",
-                "address": "hr:1",
-                "value_type": "boolean",
-                "protocol_options": {"data_type": "bool"},
+                "address": address,
+                "value_type": value_type,
+                "protocol_options": options,
             }
         ],
     }
 
-    with pytest.raises(ConfigurationError, match="p2_temp"):
+    with pytest.raises(ConfigurationError, match="p2_temp") as info:
         parse_collector_config(payload)
+    assert info.value.code == code
 
 
 def test_opcua_config_still_valid() -> None:

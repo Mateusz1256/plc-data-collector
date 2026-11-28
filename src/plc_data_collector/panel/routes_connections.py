@@ -27,6 +27,7 @@ from plc_data_collector.domain import (
 from plc_data_collector.panel import audit, auth
 from plc_data_collector.panel.app import AdminRequired, PanelStores, SameSiteRequired
 from plc_data_collector.panel.host import CollectorHost
+from plc_data_collector.panel.mbus_tag_form import group_battery_warning
 from plc_data_collector.panel.protocol_forms import (
     DEFAULT_TIMEOUT_MS,
     ID_HELP,
@@ -294,10 +295,12 @@ def create_connections_router() -> APIRouter:
                     message="Fix the form first: " + " ".join(error.errors.values()),
                 )
             config = await _load_config(stores)
+            host = _host(request)
             result = await probe_connection(
                 candidate,
-                _host(request).registry,
+                host.registry,
                 probe_tag=_probe_tag(config, connection_id),
+                host=host,
             )
         return _test_result(request, ok=result.ok, message=result.message)
 
@@ -416,6 +419,11 @@ def _edit_page(
                 tag_adapter_for(existing.protocol),
                 group_ui=group_ui,
                 tag_ui=tag_ui,
+                group_warning=(
+                    group_battery_warning(config, existing, group_ui.target_id)
+                    if group_ui is not None and group_ui.mode == "edit"
+                    else None
+                ),
             )
         workers = worker_statuses(_host(request))
         badge, detail = connection_status(existing, workers)

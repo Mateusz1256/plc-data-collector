@@ -1,0 +1,18 @@
+# Source: hand-assembled, checked by the pyMeterBus oracle (tests/test_mbus_oracle.py).
+# Every supported data field encoding (DIF bits 0-3), energy VIF 0x03 Wh unless noted.
+68 59 59 68 08 01 72  # start, L, L, start, C, A, CI
+03 00 00 10 83 40 01 04 23 00 00 00  # header: ID, manufacturer PDC (0x4083), version 1, medium, access no, status, signature
+01 03 FE  # int8 -2
+02 03 34 12  # int16 0x1234 = 4660
+03 03 FF FF FF  # int24 -1
+04 03 00 00 00 80  # int32 -2147483648
+06 03 01 02 03 04 05 06  # int48 0x060504030201 = 6618611909121
+07 03 FF FF FF FF FF FF FF 7F  # int64 max 9223372036854775807
+05 03 00 00 48 41  # real32 12.5
+05 03 33 33 8B 41  # real32 17.4 (shortest float32 text)
+09 03 99  # BCD2 99
+0A 03 34 F2  # BCD4, high nibble F = minus: -234
+0B 03 56 34 12  # BCD6 123456
+0C 13 78 56 34 12  # BCD8 12345678, VIF 0x13 m3 x10^-3 -> 12345678 L = 12345.678 m3
+0E 03 99 99 99 99 99 99  # BCD12 999999999999
+17 16  # checksum, stop

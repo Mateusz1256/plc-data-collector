@@ -24,7 +24,11 @@ from plc_data_collector.persistence import (
     ReadingRepository,
 )
 from plc_data_collector.persistence.writer import PollResultRepository
-from plc_data_collector.protocols import DriverRegistry, default_driver_registry
+from plc_data_collector.protocols import (
+    CommunicationDriver,
+    DriverRegistry,
+    default_driver_registry,
+)
 from plc_data_collector.runtime import (
     ConnectionWorker,
     PollScheduler,
@@ -190,6 +194,17 @@ class CollectorRuntime:
             await self._release(timeout_s=timeout_s)
         elif self._phase == "stopping":
             await self._stopped.wait()
+
+    def driver_for(self, connection_id: str) -> CommunicationDriver | None:
+        """Return the driver of the worker for ``connection_id``, if one runs.
+
+        Panel actions use it to reach a Connection through the link its
+        worker already holds instead of opening a second one.
+        """
+        for worker in self._workers:
+            if worker.connection.id == connection_id:
+                return worker.driver
+        return None
 
     def api_state(self) -> RuntimeApiState:
         """Return a fresh snapshot of the runtime for the API."""

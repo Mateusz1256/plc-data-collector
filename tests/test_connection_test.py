@@ -3,15 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import ClassVar
 
 import pytest
+from mbus_support import (
+    BusHost,
+    counting_registry,
+    mbus_connection,
+    memory_host,
+    memory_transport,
+    running_host,
+)
 from s7_support import AREA_DB, FakeTransport
 
 from plc_data_collector.app.connection_test import (
+    MBUS_TEST_LIMIT_S,
     ConnectionTestResult,
+    mbus_deadline_s,
     probe_connection,
 )
 from plc_data_collector.domain import (
@@ -29,7 +40,9 @@ from plc_data_collector.protocols import (
     build_driver_registry,
     default_driver_registry,
 )
+from plc_data_collector.protocols.mbus_bus import MBusBus
 from plc_data_collector.protocols.s7 import PUT_GET_MESSAGE, S7Driver
+from plc_data_collector.simulators import mbus as simulator
 
 AWAIT_LIMIT_S = 10
 
@@ -356,3 +369,165 @@ async def test_no_connection_details_keeps_plain_message() -> None:
     result = await _probe(_connection(), _describing_registry(None), None)
 
     assert result.message == f"Connected in {result.elapsed_ms} ms."
+
+
+# M-Bus: the running worker's bus, or a temporary one
+
+
+def _meter_tag(
+    address: str = "2", quantity: str = "volume", unit: str = "m3"
+) -> TagConfig:
+    return TagConfig(
+        id="heat_volume",
+        tag_group_id="meters",
+        name="Volume",
+        address=address,
+        value_type=ValueType.NUMERIC,
+        protocol_options={"quantity": quantity, "unit": unit},
+    )
+
+
+async def _mbus_probe(
+    host: BusHost, connection: ConnectionConfig, probe_tag: TagConfig | None
+) -> ConnectionTestResult:
+    return await asyncio.wait_for(
+        probe_connection(connection, host.registry, probe_tag=probe_tag, host=host),
+        timeout=AWAIT_LIMIT_S,
+    )
+
+
+async def test_mbus_running_connection_is_tested_on_its_bus() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    async with running_host(transport, mbus_connection()) as (host, _):
+        result = await _mbus_probe(host, mbus_connection(), _meter_tag())
+
+        assert result.ok is True, result.message
+        assert result.message == (
+            f"Connected in {result.elapsed_ms} ms (Memory). Read 2 without errors."
+        )
+        # No second link: the worker's transport was opened once, and is open.
+        assert transport.opens == 1
+        assert transport.is_open
+
+
+async def test_mbus_running_with_other_settings_fails_with_the_panel_message() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = mbus_connection("serial:///dev/ttyUSB0", baud_rate=2400)
+    async with running_host(transport, running) as (host, _):
+        form = mbus_connection("serial:///dev/ttyUSB0", baud_rate=4800)
+        result = await _mbus_probe(host, form, None)
+
+    assert result.ok is False
+    assert result.message == (
+        "This Connection is running with other settings. Apply your changes "
+        "first, or disable the Connection."
+    )
+    assert transport.opens == 1
+
+
+async def test_mbus_running_but_disconnected_fails() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    async with running_host(transport, mbus_connection()) as (host, driver):
+        await driver.disconnect()
+        result = await _mbus_probe(host, mbus_connection(), None)
+
+    assert result.ok is False
+    assert "(mbus_not_connected)" in result.message
+
+
+async def test_mbus_stopped_connection_is_tested_on_a_temporary_bus() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+
+    result = await _mbus_probe(host, mbus_connection(), None)
+
+    assert result.ok is True
+    assert result.message == f"Connected in {result.elapsed_ms} ms (Memory)."
+    assert transport.opens == 1
+    assert not transport.is_open
+
+
+async def test_mbus_probe_tag_of_a_silent_meter_fails() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+
+    result = await _mbus_probe(host, mbus_connection(), _meter_tag(address="9"))
+
+    assert result.ok is False
+    assert result.message.startswith(
+        f"Connected in {result.elapsed_ms} ms (Memory), but reading 9 failed "
+        "(mbus_no_reply). Meter 9: No reply to SND_NKE to 9."
+    )
+
+
+async def test_mbus_probe_tag_uses_the_drivers_record_matching() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+
+    result = await _mbus_probe(
+        host, mbus_connection(), _meter_tag(quantity="mass", unit="kg")
+    )
+
+    assert result.ok is False
+    assert "(mbus_record_not_found)" in result.message
+
+
+async def test_mbus_without_a_host_uses_a_new_driver() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    host = memory_host(transport)
+
+    result = await _probe(mbus_connection(), host.registry, _meter_tag())
+
+    assert result.ok is True, result.message
+    assert not transport.is_open
+
+
+async def test_mbus_endpoint_of_another_running_connection_is_refused() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = mbus_connection("serial:///dev/ttyUSB0")
+    async with running_host(transport, running) as (host, _):
+        built = counting_registry(host, transport)
+        # Connection B is stopped; its unsaved form names A's port.
+        form = dataclasses.replace(mbus_connection("serial:///dev/ttyUSB0"), id="cold")
+        result = await _mbus_probe(host, form, _meter_tag())
+
+        assert built == []
+        assert transport.opens == 1
+
+    assert result.ok is False
+    assert result.message == (
+        "This port is in use by Connection 'heat'. Use that Connection, or "
+        "disable it first."
+    )
+
+
+async def test_mbus_deadline_follows_the_borrowed_running_bus() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    running = dataclasses.replace(mbus_connection(max_telegrams=1), timeout_ms=50)
+    async with running_host(transport, running) as (host, _):
+        hang = asyncio.Event()
+
+        async def never_answer(frame: object) -> None:
+            await hang.wait()
+
+        transport.on_write = never_answer
+        # The form's own timeout and telegram limit would allow far longer.
+        form = dataclasses.replace(mbus_connection(max_telegrams=16), timeout_ms=10_000)
+        result = await _mbus_probe(host, form, _meter_tag())
+        transport.on_write = None
+
+    # 0.05 s open + 2 meter reads of (1 + 1) x 2 x 0.05 s + 1 s margin.
+    assert result.ok is False
+    assert result.message.startswith(
+        "No answer within 1.45 s (connection_test_timeout)."
+    )
+    assert result.elapsed_ms < 3000
+
+
+def test_mbus_deadline_is_capped() -> None:
+    transport = memory_transport(simulator.demo_meters())
+    slow = MBusBus(lambda: transport, timeout_s=3.0, max_telegrams=16)
+    quick = MBusBus(lambda: transport, timeout_s=0.2, max_telegrams=2)
+
+    assert mbus_deadline_s(slow) == MBUS_TEST_LIMIT_S == 60.0
+    assert mbus_deadline_s(quick) == pytest.approx(0.2 + 2 * 1.2 + 1.0)

@@ -32,6 +32,14 @@
         "rack": 0,
         "slot": 1
       }
+    },
+    {
+      "id": "heating_mbus",
+      "protocol": "mbus",
+      "endpoint": "tcp://mbus-sim:10001",
+      "enabled": true,
+      "timeout_ms": 3000,
+      "protocol_options": {}
     }
   ],
   "tag_groups": [
@@ -56,6 +64,22 @@
       "connection_id": "press3_s7",
       "interval_ms": 1000,
       "timeout_ms": 2000,
+      "overlap_policy": "skip",
+      "enabled": true
+    },
+    {
+      "id": "billing",
+      "connection_id": "heating_mbus",
+      "interval_ms": 60000,
+      "timeout_ms": 5000,
+      "overlap_policy": "skip",
+      "enabled": true
+    },
+    {
+      "id": "monitoring",
+      "connection_id": "heating_mbus",
+      "interval_ms": 10000,
+      "timeout_ms": 5000,
       "overlap_policy": "skip",
       "enabled": true
     }
@@ -453,6 +477,272 @@
       "metadata": {},
       "protocol_options": {
         "data_type": "int"
+      }
+    },
+    {
+      "id": "heat1_energy",
+      "tag_group_id": "billing",
+      "name": "Heat meter energy",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "MWh"
+      },
+      "protocol_options": {
+        "quantity": "energy",
+        "unit": "MWh",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "heat1_energy_billing",
+      "tag_group_id": "billing",
+      "name": "Heat meter energy at billing date",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "MWh"
+      },
+      "protocol_options": {
+        "quantity": "energy",
+        "unit": "MWh",
+        "storage": 1,
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "heat1_volume",
+      "tag_group_id": "billing",
+      "name": "Heat meter volume",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L"
+      },
+      "protocol_options": {
+        "quantity": "volume",
+        "unit": "L",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "water2_volume",
+      "tag_group_id": "billing",
+      "name": "Water meter volume",
+      "address": "2",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L"
+      },
+      "protocol_options": {
+        "quantity": "volume",
+        "unit": "L",
+        "meter_id": "12399999"
+      }
+    },
+    {
+      "id": "water2_volume_billing",
+      "tag_group_id": "billing",
+      "name": "Water meter volume at billing date",
+      "address": "2",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L"
+      },
+      "protocol_options": {
+        "quantity": "volume",
+        "unit": "L",
+        "storage": 1,
+        "meter_id": "12399999"
+      }
+    },
+    {
+      "id": "power3_energy_t1",
+      "tag_group_id": "billing",
+      "name": "Power meter energy forward tariff 1",
+      "address": "3",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "Wh"
+      },
+      "protocol_options": {
+        "quantity": "energy",
+        "unit": "Wh",
+        "tariff": 1,
+        "qualifiers": [
+          "forward"
+        ],
+        "meter_id": "22223333"
+      }
+    },
+    {
+      "id": "power3_energy_t2",
+      "tag_group_id": "billing",
+      "name": "Power meter energy forward tariff 2",
+      "address": "3",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "Wh"
+      },
+      "protocol_options": {
+        "quantity": "energy",
+        "unit": "Wh",
+        "tariff": 2,
+        "qualifiers": [
+          "forward"
+        ],
+        "meter_id": "22223333"
+      }
+    },
+    {
+      "id": "heat1_power",
+      "tag_group_id": "monitoring",
+      "name": "Heat meter power",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "W"
+      },
+      "protocol_options": {
+        "quantity": "power",
+        "unit": "W",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "heat1_flow",
+      "tag_group_id": "monitoring",
+      "name": "Heat meter volume flow",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L/h"
+      },
+      "protocol_options": {
+        "quantity": "volume_flow",
+        "unit": "L/h",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "heat1_flow_temperature",
+      "tag_group_id": "monitoring",
+      "name": "Heat meter flow temperature",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "C"
+      },
+      "protocol_options": {
+        "quantity": "flow_temperature",
+        "unit": "C",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "heat1_return_temperature",
+      "tag_group_id": "monitoring",
+      "name": "Heat meter return temperature",
+      "address": "1",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "C"
+      },
+      "protocol_options": {
+        "quantity": "return_temperature",
+        "unit": "C",
+        "meter_id": "12345678"
+      }
+    },
+    {
+      "id": "water2_flow",
+      "tag_group_id": "monitoring",
+      "name": "Water meter volume flow",
+      "address": "2",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L/h"
+      },
+      "protocol_options": {
+        "quantity": "volume_flow",
+        "unit": "L/h",
+        "meter_id": "12399999"
+      }
+    },
+    {
+      "id": "power3_power",
+      "tag_group_id": "monitoring",
+      "name": "Power meter power",
+      "address": "3",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "W"
+      },
+      "protocol_options": {
+        "quantity": "power",
+        "unit": "W",
+        "meter_id": "22223333"
+      }
+    },
+    {
+      "id": "power3_voltage",
+      "tag_group_id": "monitoring",
+      "name": "Power meter voltage",
+      "address": "3",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "V"
+      },
+      "protocol_options": {
+        "quantity": "voltage",
+        "unit": "V",
+        "meter_id": "22223333"
+      }
+    },
+    {
+      "id": "power3_current",
+      "tag_group_id": "monitoring",
+      "name": "Power meter current",
+      "address": "3",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "A"
+      },
+      "protocol_options": {
+        "quantity": "current",
+        "unit": "A",
+        "meter_id": "22223333"
+      }
+    },
+    {
+      "id": "warm5_flow",
+      "tag_group_id": "monitoring",
+      "name": "Warm water meter volume flow (power low)",
+      "address": "5",
+      "value_type": "numeric",
+      "enabled": true,
+      "metadata": {
+        "unit": "L/h"
+      },
+      "protocol_options": {
+        "quantity": "volume_flow",
+        "unit": "L/h",
+        "meter_id": "55667788"
       }
     }
   ]
